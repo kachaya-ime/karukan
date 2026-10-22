@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="変換エンジン設定"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="karukan_enabled"
+            android:summary="karukan AI (llama.cpp) かな漢字変換エンジンを使用します"
+            android:title="karukan AI 変換を有効にする" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="法的情報・ライセンス"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            android:key="pref_third_party_licenses"
+            android:summary="Mozc 等オープンソースソフトウェアの著作権表示"
+            android:title="サードパーティライセンス"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            android:key="pref_karukan_license"
+            android:summary="MIT / Apache 2.0 ライセンス"
+            android:title="Karukan ライセンス"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="アプリ情報"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            android:key="pref_app_version"
+            android:summary="1.0.0"
+            android:title="バージョン"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
