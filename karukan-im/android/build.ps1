@@ -105,40 +105,29 @@ try {
     Write-Host "Starting build at workspace root: $karukanRootDir" -ForegroundColor Cyan
     Write-Host "Using Android NDK: $ndkPath`n" -ForegroundColor Gray
 
+    # Force C++ static linking if C++ STL is used
+    $env:ANDROID_STL = "c++_static"
+
     # Build for Android (API 25: arm64-v8a / x86_64)
     $targetAbis = @("arm64-v8a", "x86_64")
     cargo ndk -t arm64-v8a -t x86_64 --platform 25 -o ./output build -p karukan-android --release
 
     # ========================================================
-    # 5. Copy .so files & libc++_shared.so to target jniLibs
+    # 5. Clean up libc++_shared.so & Sync .so files to target jniLibs
     # ========================================================
     $outputDir = "$karukanRootDir\output"
 
-    $abiTripleMap = @{
-        "arm64-v8a"   = "aarch64-linux-android"
-        "x86_64"      = "x86_64-linux-android"
-        "armeabi-v7a" = "arm-linux-androideabi"
-        "x86"         = "i686-linux-android"
-    }
-
     foreach ($abi in $targetAbis) {
         $abiOutputDir = "$outputDir\$abi"
-        if (-not (Test-Path $abiOutputDir)) {
-            New-Item -ItemType Directory -Path $abiOutputDir -Force | Out-Null
+        $sharedInOutput = "$abiOutputDir\libc++_shared.so"
+        if (Test-Path $sharedInOutput) {
+            Remove-Item -Path $sharedInOutput -Force -ErrorAction SilentlyContinue
         }
 
-        $triple = $abiTripleMap[$abi]
-        $candidates = @(
-            (Get-ChildItem -Path "$ndkPath/toolchains/llvm/prebuilt/*/sysroot/usr/lib/$triple/libc++_shared.so" -ErrorAction SilentlyContinue).FullName,
-            "$ndkPath/sources/cxx-stl/llvm-libc++/libs/$abi/libc++_shared.so"
-        )
-        $cppShared = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
-        if ($cppShared) {
-            Write-Host "Copying libc++_shared.so for $abi from $cppShared" -ForegroundColor Cyan
-            Copy-Item -Path $cppShared -Destination $abiOutputDir -Force
-        } else {
-            Write-Warning "libc++_shared.so not found for $abi in NDK at $ndkPath"
+        $destAbiDir = "$DestJniLibs\$abi"
+        $sharedInDest = "$destAbiDir\libc++_shared.so"
+        if (Test-Path $sharedInDest) {
+            Remove-Item -Path $sharedInDest -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -146,6 +135,10 @@ try {
         New-Item -ItemType Directory -Path $DestJniLibs -Force | Out-Null
     }
     Copy-Item -Path "$outputDir\*" -Destination $DestJniLibs -Recurse -Force
+
+    # Ensure no libc++_shared.so remains in jniLibs
+    Get-ChildItem -Path $DestJniLibs -Filter "libc++_shared.so" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
     Write-Host "`n[SUCCESS] Build complete! Copied .so files to: $DestJniLibs" -ForegroundColor Green
 }
 finally {
