@@ -61,7 +61,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
 ) -> JObjectArray<'a> {
     let input_str: String = match env.get_string(&input) {
         Ok(s) => s.into(),
-        Err(_) => return env.new_object_array(0, env.find_class("java/lang/String").unwrap(), env.new_string("").unwrap()).unwrap(),
+        Err(_) => {
+            let cls = env.find_class("java/lang/String").unwrap();
+            let init_str = env.new_string("").unwrap();
+            return env.new_object_array(0, cls, init_str).unwrap();
+        }
     };
 
     let context_str: String = match env.get_string(&context) {

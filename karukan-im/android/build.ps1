@@ -108,6 +108,9 @@ try {
     # Build for Android (API 25: arm64-v8a / x86_64)
     $targetAbis = @("arm64-v8a", "x86_64")
     cargo ndk -t arm64-v8a -t x86_64 --platform 25 --link-libcxx-shared -o ./output build -p karukan-android --release
+if ($LASTEXITCODE -ne 0) {
+    throw "cargo ndk build failed with exit code $LASTEXITCODE"
+}
 
     # ========================================================
     # 5. Ensure libc++_shared.so exists & Sync .so files to target jniLibs

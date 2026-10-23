@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:iconSpaceReserved="false">
 
     <!-- 1. 推論・文脈設定 -->
     <PreferenceCategory
@@ -38,7 +39,8 @@
             android:defaultValue="true"
             android:key="pref_use_context"
             android:summary="カーソル左側のテキストを推論のコンテキストとして渡します"
-            android:title="文脈（前文）利用を有効化" />
+            android:title="文脈（前文）利用を有効化"
+            app:iconSpaceReserved="false" />
 
         <ListPreference
             android:defaultValue="10"
