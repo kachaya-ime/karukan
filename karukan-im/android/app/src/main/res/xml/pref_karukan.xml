@@ -2,8 +2,9 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <!-- 1. 基本設定 -->
     <PreferenceCategory
-        android:title="変換エンジン設定"
+        android:title="基本設定"
         app:iconSpaceReserved="false">
 
         <SwitchPreferenceCompat
@@ -12,8 +13,230 @@
             android:summary="karukan AI (llama.cpp) かな漢字変換エンジンを使用します"
             android:title="karukan AI 変換を有効にする" />
 
+        <ListPreference
+            android:defaultValue="qwerty"
+            android:entries="@array/pref_keyboard_layout_entries"
+            android:entryValues="@array/pref_keyboard_layout_values"
+            android:key="pref_keyboard_layout"
+            android:title="キーボード配列"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="normal"
+            android:entries="@array/pref_flick_sensitivity_entries"
+            android:entryValues="@array/pref_flick_sensitivity_values"
+            android:key="pref_flick_sensitivity"
+            android:title="フリック感度"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="9"
+            android:entries="@array/pref_num_candidates_entries"
+            android:entryValues="@array/pref_num_candidates_values"
+            android:key="pref_num_candidates"
+            android:title="表示候補数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="kuten_touten"
+            android:entries="@array/pref_punctuation_entries"
+            android:entryValues="@array/pref_punctuation_values"
+            android:key="pref_punctuation"
+            android:title="句読点スタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="half"
+            android:entries="@array/pref_space_entries"
+            android:entryValues="@array/pref_space_values"
+            android:key="pref_space"
+            android:title="入力スペースの種類"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
     </PreferenceCategory>
 
+    <!-- 2. karukan-engine 内部動作設定 (別画面) -->
+    <PreferenceCategory
+        android:title="高度なエンジン設定"
+        app:iconSpaceReserved="false">
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.SettingsActivity$EngineSettingsFragment"
+            android:key="pref_engine_settings"
+            android:summary="推論スレッド数、ペルソナ、文脈利用、チャンク、ビームサーチ等の詳細設定"
+            android:title="karukan-engine 内部動作設定"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- 3. 変換学習・辞書設定 -->
+    <PreferenceCategory
+        android:title="変換学習・辞書設定"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_learning_enabled"
+            android:summary="選択した変換候補を記憶して次回優先表示します"
+            android:title="変換学習を有効にする" />
+
+        <Preference
+            android:key="pref_user_dict"
+            android:summary="カスタム単語（読みと表記）を登録します"
+            android:title="単語登録（ユーザー辞書）"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            android:key="pref_export_learning"
+            android:summary="登録された単語や学習データをクリップボードへ出力します"
+            android:title="学習・辞書データのエクスポート"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            android:key="pref_import_learning"
+            android:summary="TSV 形式の単語・学習データを復元・追加登録します"
+            android:title="学習・辞書データのインポート"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            android:key="pref_clear_learning"
+            android:summary="記憶した変換学習データを初期化します"
+            android:title="学習履歴の消去"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+    <!-- 4. 入力・記号・自動変換ルール -->
+    <PreferenceCategory
+        android:title="入力・記号・自動変換ルール"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_date_conversion"
+            android:summary="「きょう」「いま」等の入力時に現在日時候補を出力します"
+            android:title="日付・時刻変換を有効にする" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_auto_capitalization"
+            android:summary="英数モード時に文頭の英字を自動で大文字にします"
+            android:title="英字の自動大文字化" />
+
+        <ListPreference
+            android:defaultValue="corner"
+            android:entries="@array/pref_bracket_entries"
+            android:entryValues="@array/pref_bracket_values"
+            android:key="pref_bracket"
+            android:title="括弧スタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="middle_dot"
+            android:entries="@array/pref_slash_entries"
+            android:entryValues="@array/pref_slash_values"
+            android:key="pref_slash"
+            android:title="スラッシュスタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="half"
+            android:entries="@array/pref_width_digit_entries"
+            android:entryValues="@array/pref_width_digit_values"
+            android:key="pref_width_digit"
+            android:title="数字の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="full"
+            android:entries="@array/pref_width_ascii_entries"
+            android:entryValues="@array/pref_width_ascii_values"
+            android:key="pref_width_ascii"
+            android:title="ASCII記号の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="full"
+            android:entries="@array/pref_width_kana_symbol_entries"
+            android:entryValues="@array/pref_width_kana_symbol_values"
+            android:key="pref_width_kana_symbol"
+            android:title="仮名記号の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <!-- 5. キーボード操作・デザイン設定 (UI) -->
+    <PreferenceCategory
+        android:title="キーボード操作・デザイン設定"
+        app:iconSpaceReserved="false">
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_vibration_enabled"
+            android:summary="キーをタップした際に振動フィードバックを発生させます"
+            android:title="キー操作時の振動" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_sound_enabled"
+            android:summary="キーをタップした際に操作音を再生します"
+            android:title="キー操作時の効果音" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_auto_commit"
+            android:summary="入力中のフォーカス外れ時に未確定文字を自動確定します"
+            android:title="フォーカス移動時の自動確定" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_bs_long_press_clear"
+            android:summary="⌫（BS）キー長押しで未確定入力文字を一括削除します"
+            android:title="BSキー長押し一括削除" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_cursor_keys"
+            android:summary="キーボードのアクション行にカーソル移動（← →）ボタンを表示します"
+            android:title="カーソル移動キーの表示" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_emoji_button"
+            android:summary="キーボードのアクション行に絵文字・記号パレットボタンを表示します"
+            android:title="絵文字・記号ボタンの表示" />
+
+        <ListPreference
+            android:defaultValue="medium"
+            android:entries="@array/pref_keyboard_height_entries"
+            android:entryValues="@array/pref_keyboard_height_values"
+            android:key="pref_keyboard_height"
+            android:title="キーボードの高さ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="dark"
+            android:entries="@array/pref_keyboard_theme_entries"
+            android:entryValues="@array/pref_keyboard_theme_values"
+            android:key="pref_keyboard_theme"
+            android:title="キーボードテーマ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <!-- 法的情報・ライセンス -->
     <PreferenceCategory
         android:title="法的情報・ライセンス"
         app:iconSpaceReserved="false">
@@ -32,6 +255,7 @@
 
     </PreferenceCategory>
 
+    <!-- アプリ情報 -->
     <PreferenceCategory
         android:title="アプリ情報"
         app:iconSpaceReserved="false">

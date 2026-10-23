@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- 1. 推論・文脈設定 -->
+    <PreferenceCategory
+        android:title="推論・文脈設定"
+        app:iconSpaceReserved="false">
+
+        <ListPreference
+            android:defaultValue="adaptive"
+            android:entries="@array/pref_strategy_entries"
+            android:entryValues="@array/pref_strategy_values"
+            android:key="pref_strategy"
+            android:title="変換ストラテジーモード"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="4"
+            android:entries="@array/pref_n_threads_entries"
+            android:entryValues="@array/pref_n_threads_values"
+            android:key="pref_n_threads"
+            android:title="推論スレッド数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            android:defaultValue=""
+            android:dialogTitle="変換ペルソナの設定"
+            android:key="pref_persona"
+            android:summary="よく入力する単語や専門分野（例: プログラミング, 医療 等）を指定すると変換結果がそれに寄り易くなります"
+            android:title="変換ペルソナ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_use_context"
+            android:summary="カーソル左側のテキストを推論のコンテキストとして渡します"
+            android:title="文脈（前文）利用を有効化" />
+
+        <ListPreference
+            android:defaultValue="10"
+            android:entries="@array/pref_context_chars_entries"
+            android:entryValues="@array/pref_context_chars_values"
+            android:key="pref_context_chars"
+            android:title="最大文脈文字数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="100"
+            android:entries="@array/pref_max_latency_entries"
+            android:entryValues="@array/pref_max_latency_values"
+            android:key="pref_max_latency_ms"
+            android:title="許容最大レイテンシ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <!-- 2. チャンク・ビームサーチの高度な設定 -->
+    <PreferenceCategory
+        android:title="チャンク・ビームサーチの高度な設定"
+        app:iconSpaceReserved="false">
+
+        <ListPreference
+            android:defaultValue="30"
+            android:entries="@array/pref_chunk_chars_entries"
+            android:entryValues="@array/pref_chunk_chars_values"
+            android:key="pref_chunk_chars"
+            android:title="チャンク分割文字数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="1"
+            android:entries="@array/pref_chunk_symbols_entries"
+            android:entryValues="@array/pref_chunk_symbols_values"
+            android:key="pref_chunk_symbols"
+            android:title="チャンク内維持記号数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_digits_entries"
+            android:entryValues="@array/pref_chunk_digits_values"
+            android:key="pref_chunk_digits"
+            android:title="チャンク内維持数字桁数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_alphabets_entries"
+            android:entryValues="@array/pref_chunk_alphabets_values"
+            android:key="pref_chunk_alphabets"
+            android:title="チャンク内維持英字数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="3"
+            android:entries="@array/pref_beam_width_entries"
+            android:entryValues="@array/pref_beam_width_values"
+            android:key="pref_beam_width"
+            android:title="ビームサーチ探索幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="30"
+            android:entries="@array/pref_beam_chars_entries"
+            android:entryValues="@array/pref_beam_chars_values"
+            android:key="pref_beam_chars"
+            android:title="ビームサーチ探索文字数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

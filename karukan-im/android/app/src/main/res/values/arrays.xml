@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 表示候補数 -->
+    <string-array name="pref_num_candidates_entries">
+        <item>3 件</item>
+        <item>5 件</item>
+        <item>9 件 (デフォルト)</item>
+        <item>15 件</item>
+    </string-array>
+    <string-array name="pref_num_candidates_values">
+        <item>3</item>
+        <item>5</item>
+        <item>9</item>
+        <item>15</item>
+    </string-array>
+
+    <!-- 句読点スタイル -->
+    <string-array name="pref_punctuation_entries">
+        <item>、。（読点・句点）</item>
+        <item>，．（カンマ・ピリオド）</item>
+    </string-array>
+    <string-array name="pref_punctuation_values">
+        <item>kuten_touten</item>
+        <item>comma_period</item>
+    </string-array>
+
+    <!-- スペースの全角/半角 -->
+    <string-array name="pref_space_entries">
+        <item>半角スペース</item>
+        <item>全角スペース</item>
+    </string-array>
+    <string-array name="pref_space_values">
+        <item>half</item>
+        <item>full</item>
+    </string-array>
+
+    <!-- 変換ストラテジー -->
+    <string-array name="pref_strategy_entries">
+        <item>Adaptive (自動切替 / デフォルト)</item>
+        <item>Light (軽量モデル固定)</item>
+        <item>Main (メインモデル固定)</item>
+    </string-array>
+    <string-array name="pref_strategy_values">
+        <item>adaptive</item>
+        <item>light</item>
+        <item>main</item>
+    </string-array>
+
+    <!-- 推論スレッド数 -->
+    <string-array name="pref_n_threads_entries">
+        <item>4 スレッド (デフォルト)</item>
+        <item>1 スレッド (省電力)</item>
+        <item>2 スレッド</item>
+        <item>6 スレッド</item>
+        <item>8 スレッド</item>
+        <item>自動 (全コア使用)</item>
+    </string-array>
+    <string-array name="pref_n_threads_values">
+        <item>4</item>
+        <item>1</item>
+        <item>2</item>
+        <item>6</item>
+        <item>8</item>
+        <item>0</item>
+    </string-array>
+
+    <!-- 最大文脈文字数 -->
+    <string-array name="pref_context_chars_entries">
+        <item>5 文字</item>
+        <item>10 文字 (デフォルト)</item>
+        <item>15 文字</item>
+        <item>20 文字</item>
+    </string-array>
+    <string-array name="pref_context_chars_values">
+        <item>5</item>
+        <item>10</item>
+        <item>15</item>
+        <item>20</item>
+    </string-array>
+
+    <!-- 許容最大レイテンシ -->
+    <string-array name="pref_max_latency_entries">
+        <item>50 ms</item>
+        <item>100 ms (デフォルト)</item>
+        <item>200 ms</item>
+        <item>無効 (0 ms)</item>
+    </string-array>
+    <string-array name="pref_max_latency_values">
+        <item>50</item>
+        <item>100</item>
+        <item>200</item>
+        <item>0</item>
+    </string-array>
+
+    <!-- チャンク分割文字数 -->
+    <string-array name="pref_chunk_chars_entries">
+        <item>15 文字</item>
+        <item>30 文字 (デフォルト)</item>
+        <item>50 文字</item>
+        <item>100 文字</item>
+    </string-array>
+    <string-array name="pref_chunk_chars_values">
+        <item>15</item>
+        <item>30</item>
+        <item>50</item>
+        <item>100</item>
+    </string-array>
+
+    <!-- チャンク内維持記号数 -->
+    <string-array name="pref_chunk_symbols_entries">
+        <item>0 (記号で即時分割)</item>
+        <item>1 (デフォルト)</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+    <string-array name="pref_chunk_symbols_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- チャンク内維持数字桁数 -->
+    <string-array name="pref_chunk_digits_entries">
+        <item>0 (数字はAI変換除外/デフォルト)</item>
+        <item>1 桁</item>
+        <item>2 桁</item>
+        <item>3 桁</item>
+    </string-array>
+    <string-array name="pref_chunk_digits_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- チャンク内維持英字数 -->
+    <string-array name="pref_chunk_alphabets_entries">
+        <item>0 (英字はAI変換除外/デフォルト)</item>
+        <item>1 文字</item>
+        <item>2 文字</item>
+        <item>3 文字</item>
+    </string-array>
+    <string-array name="pref_chunk_alphabets_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- ビーム幅 -->
+    <string-array name="pref_beam_width_entries">
+        <item>1 (グリーディ/高速)</item>
+        <item>3 (デフォルト)</item>
+        <item>5</item>
+        <item>8 (高精度)</item>
+    </string-array>
+    <string-array name="pref_beam_width_values">
+        <item>1</item>
+        <item>3</item>
+        <item>5</item>
+        <item>8</item>
+    </string-array>
+
+    <!-- ビーム探索文字数 -->
+    <string-array name="pref_beam_chars_entries">
+        <item>15 文字</item>
+        <item>30 文字 (デフォルト)</item>
+        <item>50 文字</item>
+    </string-array>
+    <string-array name="pref_beam_chars_values">
+        <item>15</item>
+        <item>30</item>
+        <item>50</item>
+    </string-array>
+
+    <!-- 括弧スタイル -->
+    <string-array name="pref_bracket_entries">
+        <item>「」 (かぎ括弧)</item>
+        <item>[] (角括弧)</item>
+    </string-array>
+    <string-array name="pref_bracket_values">
+        <item>corner</item>
+        <item>square</item>
+    </string-array>
+
+    <!-- スラッシュスタイル -->
+    <string-array name="pref_slash_entries">
+        <item>・ (中黒)</item>
+        <item>/ (スラッシュ)</item>
+    </string-array>
+    <string-array name="pref_slash_values">
+        <item>middle_dot</item>
+        <item>slash</item>
+    </string-array>
+
+    <!-- 数字の全角/半角 -->
+    <string-array name="pref_width_digit_entries">
+        <item>半角 (123)</item>
+        <item>全角 (１２３)</item>
+    </string-array>
+    <string-array name="pref_width_digit_values">
+        <item>half</item>
+        <item>full</item>
+    </string-array>
+
+    <!-- ASCII記号の全角/半角 -->
+    <string-array name="pref_width_ascii_entries">
+        <item>全角 (！＃％)</item>
+        <item>半角 (!#%)</item>
+    </string-array>
+    <string-array name="pref_width_ascii_values">
+        <item>full</item>
+        <item>half</item>
+    </string-array>
+
+    <!-- 仮名記号の全角/半角 -->
+    <string-array name="pref_width_kana_symbol_entries">
+        <item>全角 (。、「」・)</item>
+        <item>半角 (｡､｢｣･)</item>
+    </string-array>
+    <string-array name="pref_width_kana_symbol_values">
+        <item>full</item>
+        <item>half</item>
+    </string-array>
+
+    <!-- キーボードレイアウト -->
+    <string-array name="pref_keyboard_layout_entries">
+        <item>QWERTY 入力 (デフォルト)</item>
+        <item>12キー (フリック入力)</item>
+    </string-array>
+    <string-array name="pref_keyboard_layout_values">
+        <item>qwerty</item>
+        <item>flick</item>
+    </string-array>
+
+    <!-- フリック感度 -->
+    <string-array name="pref_flick_sensitivity_entries">
+        <item>敏感 (浅いフリックで反応)</item>
+        <item>標準 (デフォルト)</item>
+        <item>鈍感 (誤タップ防止)</item>
+    </string-array>
+    <string-array name="pref_flick_sensitivity_values">
+        <item>sensitive</item>
+        <item>normal</item>
+        <item>insensitive</item>
+    </string-array>
+
+    <!-- キーボードの高さ -->
+    <string-array name="pref_keyboard_height_entries">
+        <item>低め</item>
+        <item>標準 (デフォルト)</item>
+        <item>高め</item>
+    </string-array>
+    <string-array name="pref_keyboard_height_values">
+        <item>small</item>
+        <item>medium</item>
+        <item>large</item>
+    </string-array>
+
+    <!-- キーボードテーマ -->
+    <string-array name="pref_keyboard_theme_entries">
+        <item>ダーク (デフォルト)</item>
+        <item>ライト</item>
+        <item>システム設定に追従</item>
+    </string-array>
+    <string-array name="pref_keyboard_theme_values">
+        <item>dark</item>
+        <item>light</item>
+        <item>system</item>
+    </string-array>
+</resources>

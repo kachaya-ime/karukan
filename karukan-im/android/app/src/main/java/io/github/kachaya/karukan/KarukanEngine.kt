@@ -73,6 +73,15 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
+    fun setNThreads(nThreads: Int) {
+        if (!isLoaded) return
+        try {
+            nativeSetNThreads(nThreads)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting n_threads: $nThreads", e)
+        }
+    }
+
     fun romajiToHiragana(query: String): String {
         if (query.isEmpty()) return ""
         return try {
@@ -93,11 +102,11 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun convert(query: String): List<String> {
+    fun convert(query: String, maxCandidates: Int = 9, context: String = ""): List<String> {
         if (query.isEmpty() || !isLoaded) return listOf(query)
 
         return try {
-            val candidates = nativeConvert(query)
+            val candidates = nativeConvert(query, maxCandidates, context)
             if (candidates.isNotEmpty()) candidates.toList() else listOf(query)
         } catch (e: Exception) {
             Log.e(TAG, "Error converting query: $query", e)
@@ -105,11 +114,38 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
+    fun recordLearning(reading: String, surface: String) {
+        if (!isLoaded || reading.isEmpty() || surface.isEmpty()) return
+        try {
+            nativeRecordLearning(reading, surface)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error recording learning: $reading -> $surface", e)
+        }
+    }
+
+    fun clearLearning() {
+        if (!isLoaded) return
+        try {
+            nativeClearLearning()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing learning cache", e)
+        }
+    }
+
     @Suppress("JniMissingFunction")
     private external fun nativeInit(modelPath: String): Boolean
 
     @Suppress("JniMissingFunction")
-    private external fun nativeConvert(query: String): Array<String>
+    private external fun nativeSetNThreads(nThreads: Int)
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeConvert(query: String, maxCandidates: Int, context: String): Array<String>
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeRecordLearning(reading: String, surface: String)
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeClearLearning()
 
     @Suppress("JniMissingFunction")
     private external fun nativeRomajiToHiragana(query: String): String

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<input-method xmlns:android="http://schemas.android.com/apk/res/android">
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="io.github.kachaya.karukan.SettingsActivity">
     <subtype
         android:icon="@android:drawable/sym_def_app_icon"
         android:imeSubtypeExtraValue="KeyboardLayoutSet=qwerty"
