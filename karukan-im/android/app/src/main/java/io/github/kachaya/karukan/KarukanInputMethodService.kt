@@ -1,5 +1,6 @@
 package io.github.kachaya.karukan
 
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.inputmethodservice.InputMethodService
@@ -57,6 +58,32 @@ class KarukanInputMethodService : InputMethodService() {
         private const val TAG = "KarukanInputService"
     }
 
+    private data class ThemeColors(
+        val keyboardBg: Int,
+        val candidateBg: Int,
+        val textColor: Int,
+        val candidateBtnBg: Int
+    )
+
+    private fun getThemeColors(): ThemeColors {
+        val isDark = isDarkTheme()
+        return if (isDark) {
+            ThemeColors(
+                keyboardBg = Color.parseColor("#202124"),
+                candidateBg = Color.parseColor("#303134"),
+                textColor = Color.WHITE,
+                candidateBtnBg = Color.parseColor("#3C4043")
+            )
+        } else {
+            ThemeColors(
+                keyboardBg = Color.parseColor("#ECEFF1"),
+                candidateBg = Color.parseColor("#F8F9FA"),
+                textColor = Color.parseColor("#202124"),
+                candidateBtnBg = Color.WHITE
+            )
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "KarukanInputMethodService created")
@@ -65,6 +92,11 @@ class KarukanInputMethodService : InputMethodService() {
         preferencesManager = PreferencesManager(this) { updatedSettings ->
             if (::engine.isInitialized) {
                 engine.setNThreads(updatedSettings.nThreads)
+            }
+            mainHandler.post {
+                if (isInputViewShown) {
+                    setInputView(onCreateInputView())
+                }
             }
         }
         preferencesManager.startListening()
@@ -135,14 +167,11 @@ class KarukanInputMethodService : InputMethodService() {
     private fun getDateCandidates(reading: String): List<String> = InputTransformUtils.getDateCandidates(reading, settings.isDateConversionEnabled)
 
     override fun onCreateInputView(): View {
-        val isDark = isDarkTheme()
-        val bgColor = if (isDark) resources.getColor(R.color.keyboard_bg, theme) else Color.parseColor("#f1f3f4")
-        val candidateBgColor = if (isDark) resources.getColor(R.color.candidate_bg, theme) else Color.parseColor("#e8eaed")
-        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
+        val colors = getThemeColors()
 
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bgColor)
+            setBackgroundColor(colors.keyboardBg)
         }
 
         val initialPaddingLeft = rootLayout.paddingLeft
@@ -166,13 +195,13 @@ class KarukanInputMethodService : InputMethodService() {
             text = if (isEnglishMode) "英数モード" else "かな: (なし)"
             textSize = 14f
             setPadding(16, 8, 16, 8)
-            setTextColor(textColor)
+            setTextColor(colors.textColor)
         }
         rootLayout.addView(composingTextView)
 
         // 2. 変換候補バー (横スクロール可能)
         candidateScrollContainer = HorizontalScrollView(this).apply {
-            setBackgroundColor(candidateBgColor)
+            setBackgroundColor(colors.candidateBg)
             setPadding(8, 4, 8, 4)
         }
         candidateLayout = LinearLayout(this).apply {
@@ -182,7 +211,7 @@ class KarukanInputMethodService : InputMethodService() {
             text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
             textSize = 16f
             setPadding(12, 8, 12, 8)
-            setTextColor(textColor)
+            setTextColor(colors.textColor)
         }
         candidateLayout.addView(defaultCandidateTextView)
         candidateScrollContainer.addView(candidateLayout)
@@ -190,6 +219,7 @@ class KarukanInputMethodService : InputMethodService() {
 
         keyboardLayoutBuilder = KeyboardLayoutBuilder(
             context = this,
+            isDarkThemeSupplier = { isDarkTheme() },
             isShowCursorKeysEnabledSupplier = { settings.isShowCursorKeysEnabled },
             isShowEmojiButtonEnabledSupplier = { settings.isShowEmojiButtonEnabled },
             flickSensitivitySupplier = { settings.flickSensitivity },
@@ -449,6 +479,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun renderCandidates(hiragana: String, candidates: List<String>) {
         candidateLayout.removeAllViews()
+        val colors = getThemeColors()
 
         val allCandidates = mutableListOf<String>()
         if (candidates.isNotEmpty()) {
@@ -463,6 +494,8 @@ class KarukanInputMethodService : InputMethodService() {
                 text = cand
                 textSize = 16f
                 setPadding(16, 8, 16, 8)
+                backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
+                setTextColor(colors.textColor)
                 setOnClickListener {
                     triggerKeyFeedback()
                     if (settings.isLearningEnabled) {
@@ -481,10 +514,12 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun clearCandidateBar() {
         candidateLayout.removeAllViews()
+        val colors = getThemeColors()
         val defaultCandidateTextView = TextView(this).apply {
             text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
             textSize = 16f
             setPadding(12, 8, 12, 8)
+            setTextColor(colors.textColor)
         }
         candidateLayout.addView(defaultCandidateTextView)
     }

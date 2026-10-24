@@ -1,6 +1,7 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
+import android.graphics.Paint
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -701,13 +702,16 @@ class KarukanEngine(private val context: Context) {
 
     fun getEmojiCategories(): Map<String, List<String>> {
         val categories = LinkedHashMap<String, List<String>>()
+        val paint = Paint()
         try {
             context.assets.open("emoji_categories.txt").bufferedReader(Charsets.UTF_8).useLines { lines ->
                 for (line in lines) {
                     val parts = line.split("=", limit = 2)
                     if (parts.size == 2) {
                         val name = parts[0].trim()
-                        val emojis = parts[1].split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        val emojis = parts[1].split(",")
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() && paint.hasGlyph(it) }
                         if (emojis.isNotEmpty()) {
                             categories[name] = emojis
                         }

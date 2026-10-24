@@ -232,14 +232,12 @@ val downloadDictTask = tasks.register("downloadDict") {
     }
 }
 
-// ビルド前に karukan-engine/data/emoji.yml から絵文字をカテゴリ別に抽出して assets/emoji_categories.txt へ配置するタスク
+// ビルド前に unicode.org から emoji-test.txt をダウンロードして絵文字をカテゴリ別に抽出・assets/emoji_categories.txtへ配置するタスク
 val generateEmojiListTask = tasks.register("generateEmojiList") {
-    val repoRootDir = project.rootDir.parentFile.parentFile
-    val emojiYml = file("$repoRootDir/karukan-engine/data/emoji.yml")
     val assetsDir = file("${projectDir}/src/main/assets")
     val outputFile = File(assetsDir, "emoji_categories.txt")
+    val cacheFile = file("${layout.buildDirectory.get().asFile}/emoji-test.txt")
 
-    inputs.file(emojiYml)
     outputs.file(outputFile)
 
     doLast {
@@ -247,91 +245,109 @@ val generateEmojiListTask = tasks.register("generateEmojiList") {
             assetsDir.mkdirs()
         }
 
-        if (emojiYml.exists()) {
-            class EmojiItem(val char: String, val readings: List<String>)
-            val items = mutableListOf<EmojiItem>()
-            var currentChar: String? = null
-            var currentReadings = mutableListOf<String>()
-            var inReadings = false
-            val seen = mutableSetOf<String>()
-
-            emojiYml.forEachLine { line ->
-                val charMatch = Regex("""^\s*-\s*char:\s*['"]?([^'"]+)['"]?""").find(line)
-                if (charMatch != null) {
-                    if (currentChar != null && seen.add(currentChar!!)) {
-                        items.add(EmojiItem(currentChar!!, currentReadings.toList()))
-                    }
-                    currentChar = charMatch.groupValues[1].trim()
-                    currentReadings.clear()
-                    inReadings = false
-                } else if (currentChar != null) {
-                    val trimmed = line.trim()
-                    if (trimmed == "readings:") {
-                        inReadings = true
-                    } else if (trimmed.startsWith("triggers:") || trimmed.startsWith("- char:")) {
-                        inReadings = false
-                    } else if (inReadings && trimmed.startsWith("-")) {
-                        val r = trimmed.removePrefix("-").trim()
-                        if (r.isNotEmpty()) currentReadings.add(r)
-                    }
-                }
-            }
-            if (currentChar != null && seen.add(currentChar!!)) {
-                items.add(EmojiItem(currentChar!!, currentReadings.toList()))
-            }
-
-            fun categorize(item: EmojiItem): String {
-                val r = item.readings
-                val c = item.char
-                if (r.any { it in listOf("かお", "えがお", "かんじょう", "なきがお", "おこり", "しょうじょう", "すまいる") }) return "顔・感情"
-                if (r.any { it in listOf("からだ", "て", "あし", "ひと", "ふく", "ポーズ", "かみ") }) return "人・身体"
-                if (r.any { it in listOf("どうぶつ", "とり", "さかな", "むし", "いぬ", "ねこ", "はな", "き", "てんき", "つき", "ほし") }) return "動物・自然"
-                if (r.any { it in listOf("たべもの", "のみもの", "くだもの", "やさい", "りょうり", "スイーツ", "おかし", "ぱん", "ごはん") }) return "食べ物"
-                if (r.any { it in listOf("のりもの", "くるま", "でんしゃ", "ひこうき", "ふね", "たてもの", "いえ", "ばしょ") }) return "乗り物・建物"
-                if (r.any { it in listOf("すぽーつ", "あそび", "おんがく", "がっき", "いべんと", "おもちゃ", "ゲーム") }) return "アクティビティ"
-                if (r.any { it in listOf("きごう", "すうじ", "まーく", "はーと", "やじるし", "こくき", "ふらぐ", "かこみすうじ") }) return "記号・マーク"
-
-                val cp = if (c.isNotEmpty()) c.codePointAt(0) else 0
-                return when {
-                    cp in 0x1F600..0x1F64F -> "顔・感情"
-                    cp in 0x1F300..0x1F32F -> "動物・自然"
-                    cp in 0x1F330..0x1F343 -> "動物・自然"
-                    cp in 0x1F344..0x1F37F -> "食べ物"
-                    cp in 0x1F380..0x1F3C4 -> "アクティビティ"
-                    cp in 0x1F3C5..0x1F3FF -> "人・身体"
-                    cp in 0x1F400..0x1F43F -> "動物・自然"
-                    cp in 0x1F440..0x1F4A9 -> "人・身体"
-                    cp in 0x1F680..0x1F6FF -> "乗り物・建物"
-                    cp in 0x1F900..0x1F9FF -> "人・身体"
-                    cp in 0x2600..0x27BF -> "記号・マーク"
-                    else -> "記号・その他"
-                }
-            }
-
-            val categoriesMap = LinkedHashMap<String, MutableList<String>>()
-            val categoryNames = listOf("顔・感情", "人・身体", "動物・自然", "食べ物", "乗り物・建物", "アクティビティ", "記号・マーク", "記号・その他")
-            for (cat in categoryNames) {
-                categoriesMap[cat] = mutableListOf()
-            }
-
-            for (item in items) {
-                val cat = categorize(item)
-                categoriesMap.getOrPut(cat) { mutableListOf() }!!.add(item.char)
-            }
-
-            val sb = StringBuilder()
-            for ((cat, list) in categoriesMap) {
-                if (list.isNotEmpty()) {
-                    sb.append(cat).append("=").append(list.joinToString(",")).append("\n")
-                }
-            }
-
-            outputFile.writeText(sb.toString(), Charsets.UTF_8)
-            File(assetsDir, "emoji_list.txt").takeIf { it.exists() }?.delete()
-            logger.lifecycle("Generated emoji categories in assets/emoji_categories.txt from ${emojiYml.path}")
-        } else {
-            logger.warn("emoji.yml not found at ${emojiYml.path}")
+        val emojiTestTxtUrl = "https://raw.githubusercontent.com/unicode-org/unicodetools/refs/heads/main/unicodetools/data/emoji/dev/emoji-test.txt"
+        if (!cacheFile.exists() || cacheFile.length() == 0L) {
+            cacheFile.parentFile.mkdirs()
+            logger.lifecycle("Downloading emoji-test.txt from $emojiTestTxtUrl...")
+            downloadFileWithRedirects(emojiTestTxtUrl, cacheFile)
         }
+
+        val lines = cacheFile.readLines(Charsets.UTF_8)
+
+        // Pass 1: Componentグループのコードポイントを収集（スキンゾーン等を除外するため）
+        val componentCodePoints = mutableSetOf<String>()
+        var currentGroup = "Smileys & Emotion"
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+
+            if (trimmed.startsWith("# group:")) {
+                currentGroup = trimmed.substring(8).trim()
+                continue
+            }
+
+            if (trimmed.startsWith("#")) continue
+
+            val semicolonIdx = trimmed.indexOf(';')
+            if (semicolonIdx != -1) {
+                if (currentGroup.equals("Component", ignoreCase = true) || currentGroup.lowercase().contains("component")) {
+                    val codePointsPart = trimmed.substring(0, semicolonIdx).trim()
+                    for (cp in codePointsPart.split(Regex("""\s+"""))) {
+                        if (cp.isNotEmpty()) {
+                            componentCodePoints.add(cp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pass 2: fully-qualified な絵文字をグループ別に分類
+        val groupMap = LinkedHashMap<String, MutableList<String>>()
+        currentGroup = "Smileys & Emotion"
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+
+            if (trimmed.startsWith("# group:")) {
+                currentGroup = trimmed.substring(8).trim()
+                continue
+            }
+
+            if (trimmed.startsWith("#")) continue
+
+            val semicolonIdx = trimmed.indexOf(';')
+            if (semicolonIdx != -1 && trimmed.contains("fully-qualified")) {
+                if (currentGroup.equals("Component", ignoreCase = true) || currentGroup.lowercase().contains("component")) {
+                    continue
+                }
+
+                val codePointsPart = trimmed.substring(0, semicolonIdx).trim()
+                var containsComponentCode = false
+                for (cp in codePointsPart.split(Regex("""\s+"""))) {
+                    if (cp in componentCodePoints) {
+                        containsComponentCode = true
+                        break
+                    }
+                }
+                if (containsComponentCode) {
+                    continue
+                }
+
+                val hashIdx = trimmed.indexOf('#')
+                if (hashIdx != -1) {
+                    val commentPart = trimmed.substring(hashIdx + 1).trim()
+                    val parts = commentPart.split(Regex("""\s+"""), 3)
+                    if (parts.isNotEmpty()) {
+                        val emoji = parts[0]
+                        groupMap.getOrPut(currentGroup) { mutableListOf() }.add(emoji)
+                    }
+                }
+            }
+        }
+
+        val categoryNameMap = mapOf(
+            "Smileys & Emotion" to "顔・感情",
+            "People & Body" to "人・身体",
+            "Animals & Nature" to "動物・自然",
+            "Food & Drink" to "食べ物",
+            "Travel & Places" to "乗り物・建物",
+            "Activities" to "アクティビティ",
+            "Objects" to "モノ",
+            "Symbols" to "記号・マーク",
+            "Flags" to "国旗"
+        )
+
+        val sb = StringBuilder()
+        for ((group, emojiList) in groupMap) {
+            val catName = categoryNameMap[group] ?: group
+            if (emojiList.isNotEmpty()) {
+                sb.append(catName).append("=").append(emojiList.joinToString(",")).append("\n")
+            }
+        }
+
+        outputFile.writeText(sb.toString(), Charsets.UTF_8)
+        File(assetsDir, "emoji_list.txt").takeIf { it.exists() }?.delete()
+        logger.lifecycle("Successfully generated emoji categories in assets/emoji_categories.txt from emoji-test.txt")
     }
 }
 

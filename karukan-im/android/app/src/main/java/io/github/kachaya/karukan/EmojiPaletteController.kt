@@ -1,7 +1,9 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -11,9 +13,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 
 /**
- * RecyclerView + GridLayoutManager を使用して高速・高レスポンスに絵文字ピッカーを描画・制御するコントローラー
+ * ViewPager2 + RecyclerView を使用して、指のタッチに完全追従する高レスポンス絵文字ピッカーを描画・制御するコントローラー
  */
 class EmojiPaletteController(
     private val context: Context,
@@ -28,20 +31,22 @@ class EmojiPaletteController(
 
     private lateinit var emojiCategoryScrollContainer: HorizontalScrollView
     private lateinit var emojiCategoryLayout: LinearLayout
-    private lateinit var recyclerView: RecyclerView
-    private lateinit var emojiAdapter: EmojiAdapter
+    private lateinit var viewPager: ViewPager2
+    private lateinit var pagerAdapter: EmojiPagerAdapter
 
     var isVisible: Boolean = false
         private set
 
-    private var selectedEmojiCategory: String? = null
-    private var emojiCategories: Map<String, List<String>> = emptyMap()
+    private var selectedCategoryIndex: Int = 0
+    private var emojiCategoriesList: List<Pair<String, List<String>>> = emptyList()
+    private val categoryButtons: MutableList<Button> = mutableListOf()
 
     fun createView(): LinearLayout {
         val isDark = isDarkThemeSupplier()
-        val bgColor = if (isDark) context.resources.getColor(R.color.keyboard_bg, context.theme) else Color.parseColor("#f1f3f4")
-        val candidateBgColor = if (isDark) context.resources.getColor(R.color.candidate_bg, context.theme) else Color.parseColor("#e8eaed")
+        val bgColor = if (isDark) Color.parseColor("#202124") else Color.parseColor("#ECEFF1")
+        val candidateBgColor = if (isDark) Color.parseColor("#303134") else Color.parseColor("#F8F9FA")
         val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
+        val btnCloseBgColor = if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
 
         container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -77,6 +82,7 @@ class EmojiPaletteController(
             text = "✕ 閉じる"
             textSize = 12f
             setTextColor(textColor)
+            backgroundTintList = ColorStateList.valueOf(btnCloseBgColor)
             setPadding(12, 4, 12, 4)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -89,23 +95,29 @@ class EmojiPaletteController(
         headerLayout.addView(btnClose)
         container.addView(headerLayout)
 
-        // --- 絵文字グリッド用 RecyclerView (8列) ---
-        emojiAdapter = EmojiAdapter { emoji ->
+        // --- 絵文字 ViewPager2 (各ページがカテゴリごとの RecyclerView) ---
+        pagerAdapter = EmojiPagerAdapter { emoji ->
             onEmojiSelected(emoji)
         }
 
-        recyclerView = RecyclerView(context).apply {
+        viewPager = ViewPager2(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-            layoutManager = GridLayoutManager(context, 8)
-            adapter = emojiAdapter
-            setHasFixedSize(true)
-            itemAnimator = null
+            adapter = pagerAdapter
+            registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(position: Int) {
+                    super.onPageSelected(position)
+                    if (selectedCategoryIndex != position) {
+                        selectedCategoryIndex = position
+                        updateTabHighlightAndScroll()
+                    }
+                }
+            })
         }
-        container.addView(recyclerView)
+        container.addView(viewPager)
 
         return container
     }
@@ -132,67 +144,128 @@ class EmojiPaletteController(
     }
 
     fun renderContent() {
-        if (!::emojiCategoryLayout.isInitialized || !::recyclerView.isInitialized) return
+        if (!::emojiCategoryLayout.isInitialized || !::viewPager.isInitialized) return
 
-        if (emojiCategories.isEmpty()) {
-            emojiCategories = engine.getEmojiCategories()
-        }
-
-        if (emojiCategories.isEmpty()) {
-            val fallbackEmojis = listOf("😊", "👍", "🎉", "❤️", "✨", "⭐", "🔥", "💡", "🎵", "👀", "🙏", "🙌", "😭", "🤣", "♪", "★", "○", "◎", "▲", "※")
-            emojiAdapter.submitEmojis(fallbackEmojis)
-            return
-        }
-
-        val categoriesList = emojiCategories.keys.toList()
-        if (selectedEmojiCategory == null || !emojiCategories.containsKey(selectedEmojiCategory)) {
-            selectedEmojiCategory = categoriesList.firstOrNull()
+        if (emojiCategoriesList.isEmpty()) {
+            val rawCategories = engine.getEmojiCategories()
+            if (rawCategories.isNotEmpty()) {
+                emojiCategoriesList = rawCategories.map { it.key to it.value }
+            } else {
+                val paint = Paint()
+                val fallbackEmojis = listOf("😊", "👍", "🎉", "❤️", "✨", "⭐", "🔥", "💡", "🎵", "👀", "🙏", "🙌", "😭", "🤣", "♪", "★", "○", "◎", "▲", "※")
+                    .filter { paint.hasGlyph(it) }
+                emojiCategoriesList = listOf("顔・感情" to fallbackEmojis)
+            }
         }
 
         emojiCategoryLayout.removeAllViews()
+        categoryButtons.clear()
 
         val isDark = isDarkThemeSupplier()
         val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
         val activeTextColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
 
-        // 1. カテゴリタブの追加
-        for (catName in categoriesList) {
-            val isSelected = catName == selectedEmojiCategory
+        // 1. カテゴリタブの構築
+        for ((index, category) in emojiCategoriesList.withIndex()) {
+            val catName = category.first
             val catBtn = Button(context).apply {
                 text = catName
                 textSize = 12f
                 setPadding(12, 4, 12, 4)
-                setTextColor(if (isSelected) activeTextColor else textColor)
+                setTextColor(if (index == selectedCategoryIndex) activeTextColor else textColor)
                 setBackgroundColor(Color.TRANSPARENT)
                 setOnClickListener {
-                    if (selectedEmojiCategory != catName) {
-                        selectedEmojiCategory = catName
-                        renderContent()
+                    if (selectedCategoryIndex != index) {
+                        selectedCategoryIndex = index
+                        viewPager.setCurrentItem(index, true)
+                        updateTabHighlightAndScroll()
                     }
                 }
             }
+            categoryButtons.add(catBtn)
             emojiCategoryLayout.addView(catBtn)
         }
 
-        // 2. 選択中カテゴリの絵文字を RecyclerView へ供給 (スクロール位置を最上部へリセット)
-        val currentEmojis = emojiCategories[selectedEmojiCategory] ?: emptyList()
-        emojiAdapter.submitEmojis(currentEmojis)
-        recyclerView.scrollToPosition(0)
+        // 2. ViewPager2 へのデータ設定
+        pagerAdapter.submitCategories(emojiCategoriesList)
+        if (selectedCategoryIndex in emojiCategoriesList.indices) {
+            viewPager.setCurrentItem(selectedCategoryIndex, false)
+            updateTabHighlightAndScroll()
+        }
+    }
+
+    private fun updateTabHighlightAndScroll() {
+        if (categoryButtons.isEmpty() || selectedCategoryIndex !in categoryButtons.indices) return
+
+        val isDark = isDarkThemeSupplier()
+        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
+        val activeTextColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
+
+        for ((idx, btn) in categoryButtons.withIndex()) {
+            btn.setTextColor(if (idx == selectedCategoryIndex) activeTextColor else textColor)
+        }
+
+        val selectedTabBtn = categoryButtons[selectedCategoryIndex]
+        emojiCategoryScrollContainer.post {
+            val scrollX = selectedTabBtn.left - (emojiCategoryScrollContainer.width - selectedTabBtn.width) / 2
+            emojiCategoryScrollContainer.smoothScrollTo(scrollX.coerceAtLeast(0), 0)
+        }
     }
 
     /**
-     * 高速絵文字表示用 RecyclerView Adapter
+     * 各カテゴリページ (RecyclerView) を ViewPager2 内で表示する PagerAdapter
      */
-    private class EmojiAdapter(
+    private class EmojiPagerAdapter(
+        private val onEmojiSelected: (String) -> Unit
+    ) : RecyclerView.Adapter<EmojiPageViewHolder>() {
+
+        private var categories: List<Pair<String, List<String>>> = emptyList()
+
+        fun submitCategories(newCategories: List<Pair<String, List<String>>>) {
+            categories = newCategories
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = categories.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmojiPageViewHolder {
+            val recyclerView = RecyclerView(parent.context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                layoutManager = GridLayoutManager(parent.context, 8)
+                setHasFixedSize(true)
+            }
+            return EmojiPageViewHolder(recyclerView, onEmojiSelected)
+        }
+
+        override fun onBindViewHolder(holder: EmojiPageViewHolder, position: Int) {
+            val categoryItem = categories[position]
+            holder.bind(categoryItem.second)
+        }
+    }
+
+    private class EmojiPageViewHolder(
+        private val recyclerView: RecyclerView,
+        private val onEmojiSelected: (String) -> Unit
+    ) : RecyclerView.ViewHolder(recyclerView) {
+
+        fun bind(emojis: List<String>) {
+            val adapter = EmojiGridAdapter(emojis, onEmojiSelected)
+            recyclerView.adapter = adapter
+        }
+    }
+
+    /**
+     * 各カテゴリ内の絵文字 8列グリッド Adapter
+     */
+    private class EmojiGridAdapter(
+        private val emojis: List<String>,
         private val onClick: (String) -> Unit
     ) : RecyclerView.Adapter<EmojiViewHolder>() {
 
-        private var emojis: List<String> = emptyList()
-
-        fun submitEmojis(newEmojis: List<String>) {
-            emojis = newEmojis
-            notifyDataSetChanged()
-        }
+        override fun getItemCount(): Int = emojis.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmojiViewHolder {
             val textView = TextView(parent.context).apply {
@@ -210,8 +283,6 @@ class EmojiPaletteController(
         override fun onBindViewHolder(holder: EmojiViewHolder, position: Int) {
             holder.bind(emojis[position])
         }
-
-        override fun getItemCount(): Int = emojis.size
     }
 
     private class EmojiViewHolder(

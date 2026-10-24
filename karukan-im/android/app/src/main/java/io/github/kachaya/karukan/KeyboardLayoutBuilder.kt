@@ -1,6 +1,8 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.Button
@@ -13,12 +15,30 @@ import kotlin.math.hypot
  */
 class KeyboardLayoutBuilder(
     private val context: Context,
+    private val isDarkThemeSupplier: () -> Boolean,
     private val isShowCursorKeysEnabledSupplier: () -> Boolean,
     private val isShowEmojiButtonEnabledSupplier: () -> Boolean,
     private val flickSensitivitySupplier: () -> String,
     private val keyButtonHeightSupplier: () -> Int,
     private val listener: KeyboardEventListener
 ) {
+    private val isDark: Boolean
+        get() = isDarkThemeSupplier()
+
+    private val keyBgColor: Int
+        get() = if (isDark) Color.parseColor("#3C4043") else Color.WHITE
+
+    private val actionKeyBgColor: Int
+        get() = if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
+
+    private val keyTextColor: Int
+        get() = if (isDark) Color.WHITE else Color.parseColor("#202124")
+
+    private fun styleButton(btn: Button, isActionKey: Boolean = false) {
+        val bgColor = if (isActionKey) actionKeyBgColor else keyBgColor
+        btn.backgroundTintList = ColorStateList.valueOf(bgColor)
+        btn.setTextColor(keyTextColor)
+    }
     interface KeyboardEventListener {
         fun onKeyFeedback()
         fun onKeyPress(key: String)
@@ -92,6 +112,7 @@ class KeyboardLayoutBuilder(
                         setMargins(4, 4, 4, 4)
                     }
 
+                    styleButton(this, isActionKey = (label == "゛゜" || label == "記号"))
                     setupFlickTouchListener(this, chars)
                 }
                 rowLayout.addView(btn)
@@ -171,6 +192,7 @@ class KeyboardLayoutBuilder(
                 ).apply {
                     setMargins(2, 2, 2, 2)
                 }
+                styleButton(this)
                 setOnClickListener {
                     listener.onKeyFeedback()
                     listener.onKeyPress(key)
@@ -199,6 +221,7 @@ class KeyboardLayoutBuilder(
                 ).apply {
                     setMargins(2, 2, 2, 2)
                 }
+                styleButton(this)
                 setOnClickListener {
                     listener.onKeyFeedback()
                     listener.onKeyPress(key)
@@ -217,6 +240,7 @@ class KeyboardLayoutBuilder(
             ).apply {
                 setMargins(2, 2, 2, 2)
             }
+            styleButton(this, isActionKey = true)
             setOnClickListener {
                 listener.onKeyFeedback()
                 listener.onBackspace()
@@ -239,6 +263,7 @@ class KeyboardLayoutBuilder(
                 text = "←"
                 textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, btnHeight, 0.8f).apply { setMargins(2, 2, 2, 2) }
+                styleButton(this, isActionKey = true)
                 setOnClickListener {
                     listener.onKeyFeedback()
                     listener.onSendKeyEvent(KeyEvent.KEYCODE_DPAD_LEFT)
@@ -248,6 +273,7 @@ class KeyboardLayoutBuilder(
                 text = "→"
                 textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, btnHeight, 0.8f).apply { setMargins(2, 2, 2, 2) }
+                styleButton(this, isActionKey = true)
                 setOnClickListener {
                     listener.onKeyFeedback()
                     listener.onSendKeyEvent(KeyEvent.KEYCODE_DPAD_RIGHT)
@@ -262,6 +288,7 @@ class KeyboardLayoutBuilder(
                 text = "😊"
                 textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, btnHeight, 0.8f).apply { setMargins(2, 2, 2, 2) }
+                styleButton(this, isActionKey = true)
                 setOnClickListener {
                     listener.onKeyFeedback()
                     listener.onToggleEmojiPalette()
@@ -280,6 +307,7 @@ class KeyboardLayoutBuilder(
             ).apply {
                 setMargins(2, 2, 2, 2)
             }
+            styleButton(this)
             setOnClickListener {
                 listener.onKeyFeedback()
                 listener.onSpaceOrConvert()
@@ -296,6 +324,7 @@ class KeyboardLayoutBuilder(
             ).apply {
                 setMargins(2, 2, 2, 2)
             }
+            styleButton(this, isActionKey = true)
             setOnClickListener {
                 listener.onKeyFeedback()
                 listener.onCommit()
@@ -312,6 +341,7 @@ class KeyboardLayoutBuilder(
             ).apply {
                 setMargins(2, 2, 2, 2)
             }
+            styleButton(this, isActionKey = true)
             setOnClickListener {
                 listener.onKeyFeedback()
                 listener.onClear()
