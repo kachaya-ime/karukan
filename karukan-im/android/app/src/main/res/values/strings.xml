@@ -6,4 +6,12 @@
     <string name="select_ime_button">Karukan IME を選択する</string>
     <string name="open_settings_button">設定を開く</string>
     <string name="settings_title">Karukan IME 設定</string>
+    <string name="learning_list_title">学習した内容の一覧</string>
+    <string name="search_hint">読みまたは表記で検索...</string>
+    <string name="learning_count_format">学習データ: %d件</string>
+    <string name="clear_learning_history">学習履歴をクリア</string>
+    <string name="empty_learning_message">学習されたデータはまだありません。\n変換候補を選択して使用すると、自動的にここに記憶されます。</string>
+    <string name="delete">削除</string>
+    <string name="preset_dict_title">ユーザー辞書の管理</string>
+    <string name="preset_dict_count_format">ユーザー辞書: %d件</string>
 </resources>

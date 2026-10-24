@@ -15,6 +15,13 @@
             android:title="karukan AI 変換を有効にする"
             app:iconSpaceReserved="false" />
 
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_live_conversion"
+            android:summary="入力中にリアルタイムで最適な変換候補をプレビュー表示します"
+            android:title="ライブ変換を有効にする"
+            app:iconSpaceReserved="false" />
+
         <ListPreference
             android:defaultValue="qwerty"
             android:entries="@array/pref_keyboard_layout_entries"
@@ -68,7 +75,7 @@
         app:iconSpaceReserved="false">
 
         <Preference
-            android:fragment="io.github.kachaya.karukan.SettingsActivity$EngineSettingsFragment"
+            android:fragment="io.github.kachaya.karukan.EngineSettingsFragment"
             android:key="pref_engine_settings"
             android:summary="推論スレッド数、ペルソナ、文脈利用、チャンク、ビームサーチ等の詳細設定"
             android:title="karukan-engine 内部動作設定"
@@ -89,27 +96,15 @@
             app:iconSpaceReserved="false" />
 
         <Preference
-            android:key="pref_user_dict"
-            android:summary="カスタム単語（読みと表記）を登録します"
-            android:title="単語登録（ユーザー辞書）"
+            android:key="pref_learning_list"
+            android:summary="変換学習によって記憶された単語の一覧を表示・管理します"
+            android:title="学習した内容の一覧"
             app:iconSpaceReserved="false" />
 
         <Preference
-            android:key="pref_export_learning"
-            android:summary="登録された単語や学習データをクリップボードへ出力します"
-            android:title="学習・辞書データのエクスポート"
-            app:iconSpaceReserved="false" />
-
-        <Preference
-            android:key="pref_import_learning"
-            android:summary="TSV 形式の単語・学習データを復元・追加登録します"
-            android:title="学習・辞書データのインポート"
-            app:iconSpaceReserved="false" />
-
-        <Preference
-            android:key="pref_clear_learning"
-            android:summary="記憶した変換学習データを初期化します"
-            android:title="学習履歴の消去"
+            android:key="pref_preset_dict"
+            android:summary="ユーザー辞書ファイル (.bin, .tsv 等) の確認・有効化・追加・単語編集"
+            android:title="ユーザー辞書の管理"
             app:iconSpaceReserved="false" />
 
     </PreferenceCategory>

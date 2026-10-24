@@ -143,6 +143,42 @@ val copyLegalInfoTask = tasks.register<Copy>("copyLegalInfo") {
     into(file("${projectDir}/src/main/assets/legal"))
 }
 
+// ビルド前にリポジトリ等からユーザー辞書ファイルを assets/user_dicts/ へ自動コピーするタスク
+val copyUserDictsTask = tasks.register("copyUserDicts") {
+    val assetsUserDictsDir = file("${projectDir}/src/main/assets/user_dicts")
+
+    doLast {
+        if (!assetsUserDictsDir.exists()) {
+            assetsUserDictsDir.mkdirs()
+        }
+
+        val repoRootDir = project.rootDir.parentFile.parentFile
+
+        // karukan-im/core/config/default_user_dict.txt をコピー
+        val coreConfigDict = file("$repoRootDir/karukan-im/core/config/default_user_dict.txt")
+        if (coreConfigDict.exists()) {
+            coreConfigDict.copyTo(File(assetsUserDictsDir, "default_user_dict.txt"), overwrite = true)
+            logger.lifecycle("Copied default user dict from ${coreConfigDict.path} to ${assetsUserDictsDir.path}")
+        }
+
+        val searchLocations = listOf(
+            file("$repoRootDir/user_dict.bin"),
+            file("$repoRootDir/user_dict.txt"),
+            file("$repoRootDir/user_dicts")
+        )
+
+        for (loc in searchLocations) {
+            if (loc.isFile) {
+                loc.copyTo(File(assetsUserDictsDir, loc.name), overwrite = true)
+                logger.lifecycle("Copied user dict from ${loc.path} to ${assetsUserDictsDir.path}")
+            } else if (loc.isDirectory) {
+                loc.copyRecursively(assetsUserDictsDir, overwrite = true)
+                logger.lifecycle("Copied user dicts from directory ${loc.path}")
+            }
+        }
+    }
+}
+
 // Gradle ビルド前に Rust (.so) を自動ビルド＆同期するタスク
 val buildRustTask = tasks.register<Exec>("buildRust") {
     val ps1Script = file("${project.rootDir}/build.ps1")
@@ -166,10 +202,146 @@ val buildRustTask = tasks.register<Exec>("buildRust") {
     commandLine("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", ps1Script.absolutePath)
 }
 
+// ビルド前に公式システム辞書 (dict.tgz) を自動ダウンロードして assets/dict.tgz (システム辞書) へ配置するタスク
+val downloadDictTask = tasks.register("downloadDict") {
+    val assetsDir = file("${projectDir}/src/main/assets")
+    val assetsUserDictsDir = file("${projectDir}/src/main/assets/user_dicts")
+    val dictTgz = File(assetsDir, "dict.tgz")
+
+    outputs.file(dictTgz)
+    outputs.upToDateWhen {
+        dictTgz.exists() && dictTgz.length() > 0L
+    }
+
+    doLast {
+        if (!assetsDir.exists()) {
+            assetsDir.mkdirs()
+        }
+
+        // ユーザー辞書フォルダに以前の dict.* が残っていればクリーンアップ
+        File(assetsUserDictsDir, "dict.tgz").takeIf { it.exists() }?.delete()
+        File(assetsUserDictsDir, "dict.bin").takeIf { it.exists() }?.delete()
+        File(assetsUserDictsDir, "dict.bin.gz").takeIf { it.exists() }?.delete()
+
+        if (!dictTgz.exists() || dictTgz.length() == 0L) {
+            val dictUrl = "https://github.com/togatoga/karukan/releases/latest/download/dict.tgz"
+            logger.lifecycle("Downloading official system dictionary archive ($dictUrl)...")
+            downloadFileWithRedirects(dictUrl, dictTgz)
+            logger.lifecycle("Successfully installed official system dictionary archive dict.tgz (${dictTgz.length()} bytes)")
+        }
+    }
+}
+
+// ビルド前に karukan-engine/data/emoji.yml から絵文字をカテゴリ別に抽出して assets/emoji_categories.txt へ配置するタスク
+val generateEmojiListTask = tasks.register("generateEmojiList") {
+    val repoRootDir = project.rootDir.parentFile.parentFile
+    val emojiYml = file("$repoRootDir/karukan-engine/data/emoji.yml")
+    val assetsDir = file("${projectDir}/src/main/assets")
+    val outputFile = File(assetsDir, "emoji_categories.txt")
+
+    inputs.file(emojiYml)
+    outputs.file(outputFile)
+
+    doLast {
+        if (!assetsDir.exists()) {
+            assetsDir.mkdirs()
+        }
+
+        if (emojiYml.exists()) {
+            class EmojiItem(val char: String, val readings: List<String>)
+            val items = mutableListOf<EmojiItem>()
+            var currentChar: String? = null
+            var currentReadings = mutableListOf<String>()
+            var inReadings = false
+            val seen = mutableSetOf<String>()
+
+            emojiYml.forEachLine { line ->
+                val charMatch = Regex("""^\s*-\s*char:\s*['"]?([^'"]+)['"]?""").find(line)
+                if (charMatch != null) {
+                    if (currentChar != null && seen.add(currentChar!!)) {
+                        items.add(EmojiItem(currentChar!!, currentReadings.toList()))
+                    }
+                    currentChar = charMatch.groupValues[1].trim()
+                    currentReadings.clear()
+                    inReadings = false
+                } else if (currentChar != null) {
+                    val trimmed = line.trim()
+                    if (trimmed == "readings:") {
+                        inReadings = true
+                    } else if (trimmed.startsWith("triggers:") || trimmed.startsWith("- char:")) {
+                        inReadings = false
+                    } else if (inReadings && trimmed.startsWith("-")) {
+                        val r = trimmed.removePrefix("-").trim()
+                        if (r.isNotEmpty()) currentReadings.add(r)
+                    }
+                }
+            }
+            if (currentChar != null && seen.add(currentChar!!)) {
+                items.add(EmojiItem(currentChar!!, currentReadings.toList()))
+            }
+
+            fun categorize(item: EmojiItem): String {
+                val r = item.readings
+                val c = item.char
+                if (r.any { it in listOf("かお", "えがお", "かんじょう", "なきがお", "おこり", "しょうじょう", "すまいる") }) return "顔・感情"
+                if (r.any { it in listOf("からだ", "て", "あし", "ひと", "ふく", "ポーズ", "かみ") }) return "人・身体"
+                if (r.any { it in listOf("どうぶつ", "とり", "さかな", "むし", "いぬ", "ねこ", "はな", "き", "てんき", "つき", "ほし") }) return "動物・自然"
+                if (r.any { it in listOf("たべもの", "のみもの", "くだもの", "やさい", "りょうり", "スイーツ", "おかし", "ぱん", "ごはん") }) return "食べ物"
+                if (r.any { it in listOf("のりもの", "くるま", "でんしゃ", "ひこうき", "ふね", "たてもの", "いえ", "ばしょ") }) return "乗り物・建物"
+                if (r.any { it in listOf("すぽーつ", "あそび", "おんがく", "がっき", "いべんと", "おもちゃ", "ゲーム") }) return "アクティビティ"
+                if (r.any { it in listOf("きごう", "すうじ", "まーく", "はーと", "やじるし", "こくき", "ふらぐ", "かこみすうじ") }) return "記号・マーク"
+
+                val cp = if (c.isNotEmpty()) c.codePointAt(0) else 0
+                return when {
+                    cp in 0x1F600..0x1F64F -> "顔・感情"
+                    cp in 0x1F300..0x1F32F -> "動物・自然"
+                    cp in 0x1F330..0x1F343 -> "動物・自然"
+                    cp in 0x1F344..0x1F37F -> "食べ物"
+                    cp in 0x1F380..0x1F3C4 -> "アクティビティ"
+                    cp in 0x1F3C5..0x1F3FF -> "人・身体"
+                    cp in 0x1F400..0x1F43F -> "動物・自然"
+                    cp in 0x1F440..0x1F4A9 -> "人・身体"
+                    cp in 0x1F680..0x1F6FF -> "乗り物・建物"
+                    cp in 0x1F900..0x1F9FF -> "人・身体"
+                    cp in 0x2600..0x27BF -> "記号・マーク"
+                    else -> "記号・その他"
+                }
+            }
+
+            val categoriesMap = LinkedHashMap<String, MutableList<String>>()
+            val categoryNames = listOf("顔・感情", "人・身体", "動物・自然", "食べ物", "乗り物・建物", "アクティビティ", "記号・マーク", "記号・その他")
+            for (cat in categoryNames) {
+                categoriesMap[cat] = mutableListOf()
+            }
+
+            for (item in items) {
+                val cat = categorize(item)
+                categoriesMap.getOrPut(cat) { mutableListOf() }!!.add(item.char)
+            }
+
+            val sb = StringBuilder()
+            for ((cat, list) in categoriesMap) {
+                if (list.isNotEmpty()) {
+                    sb.append(cat).append("=").append(list.joinToString(",")).append("\n")
+                }
+            }
+
+            outputFile.writeText(sb.toString(), Charsets.UTF_8)
+            File(assetsDir, "emoji_list.txt").takeIf { it.exists() }?.delete()
+            logger.lifecycle("Generated emoji categories in assets/emoji_categories.txt from ${emojiYml.path}")
+        } else {
+            logger.warn("emoji.yml not found at ${emojiYml.path}")
+        }
+    }
+}
+
 // preBuild (Android ビルド準備段階) に自動タスクを連携
 tasks.named("preBuild") {
     dependsOn(copyLegalInfoTask)
     dependsOn(downloadAssetsTask)
+    dependsOn(downloadDictTask)
+    dependsOn(copyUserDictsTask)
+    dependsOn(generateEmojiListTask)
     dependsOn(buildRustTask)
 }
 
@@ -179,4 +351,5 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.recyclerview)
 }

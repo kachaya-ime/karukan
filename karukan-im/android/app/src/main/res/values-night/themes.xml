@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Karukan" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <!-- Primary brand color for Dark Mode (Light Blue / Cyan) -->
+        <item name="colorPrimary">@color/blue_primary_dark</item>
+        <item name="colorPrimaryVariant">@color/blue_primary_variant_dark</item>
+        <item name="colorOnPrimary">@color/black</item>
+
+        <!-- Secondary accent color for Dark Mode -->
+        <item name="colorSecondary">@color/cyan_secondary_dark</item>
+        <item name="colorSecondaryVariant">@color/cyan_secondary</item>
+        <item name="colorOnSecondary">@color/black</item>
+
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+    </style>
+</resources>
