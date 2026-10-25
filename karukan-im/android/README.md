@@ -80,5 +80,9 @@ android/
 
 ## ライセンス
 
-- **Karukan**: MIT License または Apache License 2.0
-- **サードパーティデータ**: Mozc 由来の辞書データ・記号ルールに関する著作権表記については `THIRD_PARTY_LICENSES` を参照してください。
+本 Android アプリモジュールのライセンスは、オリジナルプロジェクト（Karukan）のライセンス規定に準拠します。
+
+- **Karukan (本体・Android モジュール)**: MIT License または Apache License 2.0 (デュアルライセンス)
+- **サードパーティデータ・素材**:
+  - Mozc 由来の辞書データ・記号ルールに関する著作権表記については `THIRD_PARTY_LICENSES` を参照してください。
+  - **アプリアイコン (Android Robot)**: Android ロボットは、Google が作成および提供している作品から複製または変更したものであり、クリエイティブ・コモンズ 3.0 表示ライセンス (CC BY 3.0) に記載された条件に従って使用しています。

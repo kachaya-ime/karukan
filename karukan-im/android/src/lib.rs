@@ -363,8 +363,8 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     // 高速な重複防止のための HashSet
     let mut seen_candidates = HashSet::new();
 
-    // 0. Search via Rewriters (Date, Number, Symbol, Emoji, HalfKatakana, Alphabet)
-    let mut rewriter_candidates = Vec::new();
+    // 0. プライマリ・リライター (日付・数値・記号・絵文字)
+    let mut primary_rewriter_candidates = Vec::new();
 
     // 日付・時刻リライター
     if IS_DATE_CONVERSION_ENABLED.load(Ordering::Relaxed) {
@@ -372,7 +372,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         let rewriter = guard.get_or_insert_with(|| DateRewriter::new(DateConfig::default()));
         for (text, _desc) in rewriter.rewrite(&input_str) {
             if seen_candidates.insert(text.clone()) {
-                rewriter_candidates.push(text);
+                primary_rewriter_candidates.push(text);
             }
         }
     }
@@ -380,37 +380,25 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     // 数値リライター (123 -> 百二十三, 壱百弐拾参, Ⅻ, ⑫, 0x7B 等)
     for (text, _desc) in NumberRewriter.rewrite(&input_str) {
         if seen_candidates.insert(text.clone()) {
-            rewriter_candidates.push(text);
+            primary_rewriter_candidates.push(text);
         }
     }
 
     // 記号リライター (かっこ -> 「」, やじるし -> → 等)
     for (text, _desc) in SymbolRewriter.rewrite(&input_str) {
         if seen_candidates.insert(text.clone()) {
-            rewriter_candidates.push(text);
+            primary_rewriter_candidates.push(text);
         }
     }
 
     // 絵文字リライター
     for (emoji, _desc) in EmojiRewriter.rewrite(&input_str) {
         if seen_candidates.insert(emoji.clone()) {
-            rewriter_candidates.push(emoji);
+            primary_rewriter_candidates.push(emoji);
         }
     }
 
-    // 半角カナ・英数リライター
-    for (text, _desc) in HalfWidthKatakanaRewriter.rewrite(&input_str) {
-        if seen_candidates.insert(text.clone()) {
-            rewriter_candidates.push(text);
-        }
-    }
-    for (text, _desc) in AlphabetRewriter.rewrite(&input_str) {
-        if seen_candidates.insert(text.clone()) {
-            rewriter_candidates.push(text);
-        }
-    }
-
-    // 1. Search in user dictionaries
+    // 1. ユーザー辞書
     let mut user_dict_candidates = Vec::new();
     {
         let dict_guard = USER_DICTS.lock().unwrap();
@@ -425,7 +413,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         }
     }
 
-    // 2. Search in system dictionary
+    // 2. システム辞書
     let mut system_dict_candidates = Vec::new();
     {
         let dict_guard = SYSTEM_DICT.lock().unwrap();
@@ -440,8 +428,8 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         }
     }
 
-    // 3. Search via AI model (ロック保持範囲を推論部のみに極小化)
-    let model_candidates = {
+    // 3. AIモデル推論
+    let raw_model_candidates = {
         let guard = CONVERTER.lock().unwrap();
         if let Some(ref converter) = *guard {
             converter
@@ -452,34 +440,85 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         }
     };
 
-    // Katakana conversion via karukan_engine
-    let katakana_candidate = karukan_engine::hiragana_to_katakana(&input_str);
+    // 4. セカンダリ/フォールバック候補 (全角カタカナ・平仮名・半角カナ・英数)
+    let full_katakana = karukan_engine::hiragana_to_katakana(&input_str);
 
-    // 4. Combine candidates according to priority order:
-    //    1) Rewriter Candidates -> 2) User Dictionaries -> 3) AI Model Candidates -> 4) Katakana -> 5) System Dictionary
+    let mut half_katakana_list = Vec::new();
+    for (text, _desc) in HalfWidthKatakanaRewriter.rewrite(&input_str) {
+        half_katakana_list.push(text);
+    }
+
+    let mut alphabet_list = Vec::new();
+    for (text, _desc) in AlphabetRewriter.rewrite(&input_str) {
+        alphabet_list.push(text);
+    }
+
+    // 漢字変換・語彙変換候補と、単なるひらがな原形を分離
+    let mut main_conversion_candidates = Vec::new();
+    let mut plain_kana_candidates = Vec::new();
+
+    for mc in raw_model_candidates {
+        if mc == input_str {
+            if !plain_kana_candidates.contains(&mc) {
+                plain_kana_candidates.push(mc);
+            }
+        } else if seen_candidates.insert(mc.clone()) {
+            main_conversion_candidates.push(mc);
+        }
+    }
+
+    for sdc in system_dict_candidates {
+        if sdc == input_str {
+            if !plain_kana_candidates.contains(&sdc) {
+                plain_kana_candidates.push(sdc);
+            }
+        } else if seen_candidates.insert(sdc.clone()) {
+            main_conversion_candidates.push(sdc);
+        }
+    }
+
+    // 5. 優先順位に従って候補を結合:
+    //    1) プライマリ・リライター (日付・数値・記号・絵文字)
+    //    2) ユーザー辞書
+    //    3) AIモデル / システム辞書 による漢字・語彙変換候補
+    //    4) 全角カタカナ
+    //    5) 原文ひらがな
+    //    6) 半角カタカナ
+    //    7) アルファベット (ローマ字)
     let mut candidates = Vec::with_capacity(16);
 
-    for rc in rewriter_candidates {
+    for rc in primary_rewriter_candidates {
         candidates.push(rc);
     }
     for udc in user_dict_candidates {
         candidates.push(udc);
     }
-    for mc in model_candidates {
-        if seen_candidates.insert(mc.clone()) {
-            candidates.push(mc);
+    for mc in main_conversion_candidates {
+        candidates.push(mc);
+    }
+    if !full_katakana.is_empty() && seen_candidates.insert(full_katakana.clone()) {
+        candidates.push(full_katakana);
+    }
+    for pk in plain_kana_candidates {
+        if seen_candidates.insert(pk.clone()) {
+            candidates.push(pk);
         }
     }
-    if !katakana_candidate.is_empty() && seen_candidates.insert(katakana_candidate.clone()) {
-        candidates.push(katakana_candidate);
+    if seen_candidates.insert(input_str.clone()) {
+        candidates.push(input_str.clone());
     }
-    for sdc in system_dict_candidates {
-        if seen_candidates.insert(sdc.clone()) {
-            candidates.push(sdc);
+    for hk in half_katakana_list {
+        if seen_candidates.insert(hk.clone()) {
+            candidates.push(hk);
+        }
+    }
+    for alpha in alphabet_list {
+        if seen_candidates.insert(alpha.clone()) {
+            candidates.push(alpha);
         }
     }
 
-    // 5. Apply learning cache lookup / reordering
+    // 6. 学習キャッシュ（学習履歴）による順位繰り上げ処理
     let learn_guard = LEARNING_CACHE.lock().unwrap();
     if let Some(ref cache) = *learn_guard {
         let learned = cache.lookup(&input_str);

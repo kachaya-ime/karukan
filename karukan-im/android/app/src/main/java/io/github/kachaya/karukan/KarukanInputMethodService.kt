@@ -8,13 +8,16 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,8 +34,19 @@ class KarukanInputMethodService : InputMethodService() {
     private val romajiBuffer = StringBuilder()
 
     private lateinit var composingTextView: TextView
+
+    // 候補表示領域関連
+    private lateinit var candidateBarContainer: LinearLayout
     private lateinit var candidateScrollContainer: HorizontalScrollView
     private lateinit var candidateLayout: LinearLayout
+    private lateinit var expandButton: Button
+    private var isCandidateExpanded: Boolean = false
+
+    // 複数行候補表示パネル領域
+    private lateinit var candidateExpandedContainer: LinearLayout
+    private lateinit var expandedHeaderTitle: TextView
+    private lateinit var candidateFlowLayout: CandidateFlowLayout
+    private lateinit var expandedScrollView: ScrollView
 
     private lateinit var preferencesManager: PreferencesManager
     private val settings: KarukanSettings
@@ -223,7 +237,13 @@ class KarukanInputMethodService : InputMethodService() {
         }
         rootLayout.addView(composingTextView)
 
-        // 2. 変換候補バー (横スクロール可能)
+        // 2. 変換候補バー (横スクロール可能) + 展開ボタン (▼)
+        candidateBarContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(colors.candidateBg)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
         candidateScrollContainer = HorizontalScrollView(this).apply {
             setBackgroundColor(colors.candidateBg)
             setPadding(8, 4, 8, 4)
@@ -239,7 +259,38 @@ class KarukanInputMethodService : InputMethodService() {
         }
         candidateLayout.addView(defaultCandidateTextView)
         candidateScrollContainer.addView(candidateLayout)
-        rootLayout.addView(candidateScrollContainer)
+
+        candidateBarContainer.addView(
+            candidateScrollContainer,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+
+        expandButton = Button(this).apply {
+            text = "▼"
+            textSize = 14f
+            isAllCaps = false
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(12, 4, 12, 4)
+            backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
+            setTextColor(colors.textColor)
+            visibility = View.GONE
+            setOnClickListener {
+                triggerKeyFeedback()
+                toggleCandidateExpand()
+            }
+        }
+        val expandBtnParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            setMargins(4, 4, 8, 4)
+        }
+        candidateBarContainer.addView(expandButton, expandBtnParams)
+
+        rootLayout.addView(candidateBarContainer)
 
         keyboardLayoutBuilder = KeyboardLayoutBuilder(
             context = this,
@@ -259,7 +310,86 @@ class KarukanInputMethodService : InputMethodService() {
 
         rootLayout.addView(mainKeyboardContainer)
 
-        // 4. 絵文字パレット領域の構築 (初期状態は非表示)
+        // 4. 複数行変換候補表示エリア (初期状態は非表示)
+        candidateExpandedContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(colors.keyboardBg)
+            visibility = View.GONE
+        }
+
+        val expandedHeaderLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(colors.candidateBg)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(16, 6, 8, 6)
+        }
+
+        expandedHeaderTitle = TextView(this).apply {
+            text = "変換候補"
+            textSize = 14f
+            setTextColor(colors.textColor)
+        }
+
+        val collapseButton = Button(this).apply {
+            text = "たたむ ▲"
+            textSize = 13f
+            isAllCaps = false
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(12, 6, 12, 6)
+            backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
+            setTextColor(colors.textColor)
+            setOnClickListener {
+                triggerKeyFeedback()
+                collapseCandidates()
+            }
+        }
+
+        expandedHeaderLayout.addView(
+            expandedHeaderTitle,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        expandedHeaderLayout.addView(
+            collapseButton,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+
+        candidateExpandedContainer.addView(
+            expandedHeaderLayout,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+
+        expandedScrollView = ScrollView(this).apply {
+            isFillViewport = true
+            setPadding(8, 8, 8, 8)
+        }
+
+        candidateFlowLayout = CandidateFlowLayout(this).apply {
+            setPadding(4, 4, 4, 4)
+        }
+
+        expandedScrollView.addView(
+            candidateFlowLayout,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
+        )
+
+        candidateExpandedContainer.addView(
+            expandedScrollView,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+
+        val initialKbHeight = getKeyboardHeightPx()
+        rootLayout.addView(
+            candidateExpandedContainer,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                if (initialKbHeight > 0) initialKbHeight else LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        // 5. 絵文字パレット領域の構築 (初期状態は非表示)
         emojiPaletteController = EmojiPaletteController(
             context = this,
             engine = engine,
@@ -314,6 +444,7 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         override fun onToggleEmojiPalette() {
+            collapseCandidates()
             emojiPaletteController.toggle(mainKeyboardContainer)
         }
 
@@ -495,8 +626,63 @@ class KarukanInputMethodService : InputMethodService() {
         renderCandidates(hiragana, combinedCandidates)
     }
 
+    private fun toggleCandidateExpand() {
+        if (isCandidateExpanded) {
+            collapseCandidates()
+        } else {
+            expandCandidates()
+        }
+    }
+
+    private fun expandCandidates() {
+        if (isCandidateExpanded) return
+        isCandidateExpanded = true
+
+        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
+            emojiPaletteController.hide(mainKeyboardContainer)
+        }
+
+        val kbHeight = getKeyboardHeightPx()
+        if (kbHeight > 0 && ::candidateExpandedContainer.isInitialized) {
+            val params = candidateExpandedContainer.layoutParams
+            params.height = kbHeight
+            candidateExpandedContainer.layoutParams = params
+        }
+
+        if (::mainKeyboardContainer.isInitialized) {
+            mainKeyboardContainer.visibility = View.GONE
+        }
+        if (::candidateExpandedContainer.isInitialized) {
+            candidateExpandedContainer.visibility = View.VISIBLE
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.text = "▲"
+        }
+        if (::expandedScrollView.isInitialized) {
+            expandedScrollView.scrollTo(0, 0)
+        }
+    }
+
+    private fun collapseCandidates() {
+        if (!isCandidateExpanded) return
+        isCandidateExpanded = false
+
+        if (::candidateExpandedContainer.isInitialized) {
+            candidateExpandedContainer.visibility = View.GONE
+        }
+        if (::mainKeyboardContainer.isInitialized) {
+            mainKeyboardContainer.visibility = View.VISIBLE
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.text = "▼"
+        }
+    }
+
     private fun renderCandidates(hiragana: String, candidates: List<String>) {
         candidateLayout.removeAllViews()
+        if (::candidateFlowLayout.isInitialized) {
+            candidateFlowLayout.removeAllViews()
+        }
         val colors = getThemeColors()
 
         val allCandidates = mutableListOf<String>()
@@ -507,25 +693,67 @@ class KarukanInputMethodService : InputMethodService() {
             allCandidates.add(hiragana)
         }
 
+        if (allCandidates.isNotEmpty()) {
+            if (::expandButton.isInitialized) {
+                expandButton.visibility = View.VISIBLE
+            }
+            if (::expandedHeaderTitle.isInitialized) {
+                expandedHeaderTitle.text = "変換候補 (${allCandidates.size}件)"
+            }
+        } else {
+            if (::expandButton.isInitialized) {
+                expandButton.visibility = View.GONE
+            }
+        }
+
         for (cand in allCandidates) {
-            val candBtn = Button(this).apply {
+            val candBtnSingle = Button(this).apply {
                 text = cand
                 textSize = 16f
+                isAllCaps = false
+                minHeight = 0
+                minimumHeight = 0
+                minWidth = 0
+                minimumWidth = 0
                 setPadding(16, 8, 16, 8)
                 backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
                 setTextColor(colors.textColor)
                 setOnClickListener {
                     triggerKeyFeedback()
-                    val pureCand = cand.extractPureCandidate()
-                    if (settings.isLearningEnabled) {
-                        engine.recordLearning(hiragana, pureCand)
-                    }
-                    currentInputConnection?.commitText(pureCand, 1)
-                    clearComposingState()
+                    onCandidateSelected(hiragana, cand)
                 }
             }
-            candidateLayout.addView(candBtn)
+            candidateLayout.addView(candBtnSingle)
+
+            if (::candidateFlowLayout.isInitialized) {
+                val candBtnMulti = Button(this).apply {
+                    text = cand
+                    textSize = 16f
+                    isAllCaps = false
+                    minHeight = 0
+                    minimumHeight = 0
+                    minWidth = 0
+                    minimumWidth = 0
+                    setPadding(16, 8, 16, 8)
+                    backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
+                    setTextColor(colors.textColor)
+                    setOnClickListener {
+                        triggerKeyFeedback()
+                        onCandidateSelected(hiragana, cand)
+                    }
+                }
+                candidateFlowLayout.addView(candBtnMulti)
+            }
         }
+    }
+
+    private fun onCandidateSelected(hiragana: String, cand: String) {
+        val pureCand = cand.extractPureCandidate()
+        if (settings.isLearningEnabled) {
+            engine.recordLearning(hiragana, pureCand)
+        }
+        currentInputConnection?.commitText(pureCand, 1)
+        clearComposingState()
     }
 
     private fun String.extractPureCandidate(): String {
@@ -535,6 +763,15 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun clearCandidateBar() {
         candidateLayout.removeAllViews()
+        if (::candidateFlowLayout.isInitialized) {
+            candidateFlowLayout.removeAllViews()
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.visibility = View.GONE
+        }
+        if (isCandidateExpanded) {
+            collapseCandidates()
+        }
         val colors = getThemeColors()
         val defaultCandidateTextView = TextView(this).apply {
             text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
@@ -599,6 +836,11 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (isCandidateExpanded && keyCode == KeyEvent.KEYCODE_BACK) {
+            collapseCandidates()
+            return true
+        }
+
         if (event != null && event.isPrintingKey) {
             val unicodeChar = event.unicodeChar
             if (unicodeChar != 0) {
