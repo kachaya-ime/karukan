@@ -102,6 +102,18 @@
             app:iconSpaceReserved="false" />
 
         <Preference
+            android:key="pref_export_learning"
+            android:summary="学習履歴をJSONファイルとしてバックアップ保存（エクスポート）します"
+            android:title="学習データのエクスポート"
+            app:iconSpaceReserved="false" />
+
+        <Preference
+            android:key="pref_import_learning"
+            android:summary="バックアップJSONファイルから学習履歴を取り込み（インポート）します"
+            android:title="学習データのインポート"
+            app:iconSpaceReserved="false" />
+
+        <Preference
             android:key="pref_preset_dict"
             android:summary="ユーザー辞書ファイル (.bin, .tsv 等) の確認・有効化・追加・単語編集"
             android:title="ユーザー辞書の管理"

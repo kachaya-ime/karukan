@@ -1,16 +1,23 @@
 package io.github.kachaya.karukan
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.MenuItem
 import android.view.View
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Karukan IME の設定画面アクティビティ
@@ -70,12 +77,34 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
 class SettingsFragment : PreferenceFragmentCompat() {
 
+    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri != null) {
+            exportLearningDataToUri(uri)
+        }
+    }
+
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            importLearningDataFromUri(uri)
+        }
+    }
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.pref_karukan, rootKey)
 
         findPreference<Preference>("pref_learning_list")?.setOnPreferenceClickListener {
             val intent = Intent(requireContext(), LearningListActivity::class.java)
             startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_export_learning")?.setOnPreferenceClickListener {
+            exportLauncher.launch("karukan_learning_backup.json")
+            true
+        }
+
+        findPreference<Preference>("pref_import_learning")?.setOnPreferenceClickListener {
+            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
             true
         }
 
@@ -93,6 +122,51 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("pref_karukan_license")?.setOnPreferenceClickListener {
             showLegalDialog("Karukan ライセンス", "legal/LICENSE-MIT")
             true
+        }
+    }
+
+    private fun exportLearningDataToUri(uri: Uri) {
+        val context = requireContext()
+        val engine = KarukanEngine(context)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val json = engine.exportLearningToJson()
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(json.toByteArray(Charsets.UTF_8))
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.export_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun importLearningDataFromUri(uri: Uri) {
+        val context = requireContext()
+        val engine = KarukanEngine(context)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } ?: ""
+
+                val success = engine.importLearningFromJson(jsonString)
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        Toast.makeText(context, R.string.import_success, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, R.string.import_failed, Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.import_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 

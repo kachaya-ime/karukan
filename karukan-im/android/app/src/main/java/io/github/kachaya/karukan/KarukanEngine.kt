@@ -380,16 +380,16 @@ class KarukanEngine(private val context: Context) {
             Log.i(TAG, "loadUserDicts from ${dir.absolutePath}: $success")
 
             // メモリ上の学習データキャッシュを復元
-            val learningEntries = getLearningEntries()
-            for (item in learningEntries) {
-                if (isLoaded) {
-                    try {
-                        nativeRecordLearning(item.reading, item.surface)
-                    } catch (e: Throwable) {
-                        Log.e(TAG, "Error restoring learning item: ${item.reading} -> ${item.surface}", e)
-                    }
-                }
+            val learningFile = getLearningHistoryFile()
+            if (learningFile.exists()) {
+                val loaded = nativeLoadLearning(learningFile.absolutePath)
+                Log.i(TAG, "nativeLoadLearning from ${learningFile.absolutePath}: $loaded")
             }
+
+            synchronized(learningLock) {
+                learningCache = null
+            }
+
             onProgress?.invoke("ロード完了", 100)
         } catch (e: Throwable) {
             Log.e(TAG, "Error loading user dicts", e)
@@ -668,17 +668,22 @@ class KarukanEngine(private val context: Context) {
         val r = reading.trim()
         val s = surface.trim()
 
-        val snapshot: List<LearningItem>
-        synchronized(learningLock) {
-            if (learningCache == null) {
-                learningCache = loadLearningEntriesFromFile().toMutableList()
+        if (isLibraryLoaded && isLoaded) {
+            try {
+                nativeRemoveLearning(r, s)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error removing native learning entry: $r -> $s", e)
             }
+        }
+
+        synchronized(learningLock) {
             learningCache?.removeAll { it.reading == r && it.surface == s }
-            snapshot = learningCache!!.toList()
         }
 
         fileIoExecutor.execute {
-            saveLearningEntriesToFile(snapshot)
+            if (isLibraryLoaded && isLoaded) {
+                nativeSaveLearning(getLearningHistoryFile().absolutePath)
+            }
         }
     }
 
@@ -687,7 +692,7 @@ class KarukanEngine(private val context: Context) {
         val s = surface.trim()
         if (r.isEmpty() || s.isEmpty()) return
 
-        // 1. ネイティブ側のメモリキャッシュ更新 (高速)
+        // 1. ネイティブ側のメモリキャッシュ更新 (自動カウントアップ & タイムスタンプ更新)
         if (isLibraryLoaded && isLoaded) {
             try {
                 nativeRecordLearning(r, s)
@@ -696,8 +701,7 @@ class KarukanEngine(private val context: Context) {
             }
         }
 
-        // 2. Kotlin側のメモリキャッシュ更新 (高速 & 排他制御)
-        val snapshot: List<LearningItem>
+        // 2. Kotlin側のメモリキャッシュ更新
         synchronized(learningLock) {
             if (learningCache == null) {
                 learningCache = loadLearningEntriesFromFile().toMutableList()
@@ -710,27 +714,17 @@ class KarukanEngine(private val context: Context) {
             } else {
                 cache.add(0, LearningItem(r, s, 1))
             }
-            snapshot = cache.toList()
         }
 
-        // 3. ディスクファイル書き込みはバックグラウンドスレッドで非同期化
+        // 3. エンジンの save 機能で非同期保存 (frequency & last_access が保持される)
         fileIoExecutor.execute {
-            saveLearningEntriesToFile(snapshot)
+            if (isLibraryLoaded && isLoaded) {
+                nativeSaveLearning(getLearningHistoryFile().absolutePath)
+            }
         }
     }
 
-    private fun saveLearningEntriesToFile(items: List<LearningItem>) {
-        try {
-            val file = getLearningHistoryFile()
-            val sb = java.lang.StringBuilder()
-            for (item in items) {
-                sb.append("${item.reading}\t${item.surface}\t${item.count}\n")
-            }
-            file.writeText(sb.toString(), Charsets.UTF_8)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error saving learning history to file", e)
-        }
-    }
+
 
     fun clearLearning() {
         if (isLibraryLoaded && isLoaded) {
@@ -755,6 +749,78 @@ class KarukanEngine(private val context: Context) {
                 Log.e(TAG, "Error deleting learning history file", e)
             }
         }
+    }
+
+    /**
+     * 機種変更・バックアップ用の学習データ JSON 出力機能
+     */
+    fun exportLearningToJson(): String {
+        val items = getLearningEntries()
+        val sb = java.lang.StringBuilder()
+        sb.append("{\n")
+        sb.append("  \"version\": 1,\n")
+        sb.append("  \"app\": \"KarukanIME\",\n")
+        sb.append("  \"exportedAt\": ${System.currentTimeMillis()},\n")
+        sb.append("  \"entries\": [\n")
+        for ((index, item) in items.withIndex()) {
+            val escReading = escapeJsonString(item.reading)
+            val escSurface = escapeJsonString(item.surface)
+            sb.append("    {\"reading\": \"$escReading\", \"surface\": \"$escSurface\", \"count\": ${item.count}}")
+            if (index < items.size - 1) {
+                sb.append(",")
+            }
+            sb.append("\n")
+        }
+        sb.append("  ]\n")
+        sb.append("}\n")
+        return sb.toString()
+    }
+
+    /**
+     * 機種変更・バックアップからの学習データ JSON インポート機能
+     */
+    fun importLearningFromJson(jsonString: String): Boolean {
+        try {
+            val jsonObject = org.json.JSONObject(jsonString)
+            val entriesArray = jsonObject.optJSONArray("entries") ?: return false
+
+            for (i in 0 until entriesArray.length()) {
+                val itemObj = entriesArray.getJSONObject(i)
+                val reading = itemObj.optString("reading", "").trim()
+                val surface = itemObj.optString("surface", "").trim()
+                val count = itemObj.optInt("count", 1)
+
+                if (reading.isNotEmpty() && surface.isNotEmpty()) {
+                    repeat(maxOf(1, count)) {
+                        if (isLibraryLoaded && isLoaded) {
+                            nativeRecordLearning(reading, surface)
+                        }
+                    }
+                }
+            }
+
+            synchronized(learningLock) {
+                learningCache = null
+            }
+
+            fileIoExecutor.execute {
+                if (isLibraryLoaded && isLoaded) {
+                    nativeSaveLearning(getLearningHistoryFile().absolutePath)
+                }
+            }
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error importing learning from JSON", e)
+            return false
+        }
+    }
+
+    private fun escapeJsonString(str: String): String {
+        return str.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
     }
 
     fun getEmojiCategories(): Map<String, List<String>> {
@@ -869,6 +935,15 @@ class KarukanEngine(private val context: Context) {
 
     @Suppress("JniMissingFunction")
     private external fun nativeRecordLearning(reading: String, surface: String)
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeRemoveLearning(reading: String, surface: String): Boolean
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeSaveLearning(filePath: String): Boolean
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeLoadLearning(filePath: String): Boolean
 
     @Suppress("JniMissingFunction")
     private external fun nativeClearLearning()

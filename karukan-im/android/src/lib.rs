@@ -515,6 +515,77 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRecord
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRemoveLearning<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    reading: JString<'a>,
+    surface: JString<'a>,
+) -> jboolean {
+    let reading_str: String = match env.get_string(&reading) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let surface_str: String = match env.get_string(&surface) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+
+    let mut guard = LEARNING_CACHE.lock().unwrap();
+    if let Some(ref mut cache) = *guard {
+        if cache.remove_suggestion(&reading_str, &surface_str) {
+            return 1;
+        }
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSaveLearning<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    file_path: JString<'a>,
+) -> jboolean {
+    let path_str: String = match env.get_string(&file_path) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let path = PathBuf::from(path_str);
+
+    let mut guard = LEARNING_CACHE.lock().unwrap();
+    if let Some(ref mut cache) = *guard {
+        if cache.save(&path).is_ok() {
+            return 1;
+        }
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadLearning<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    file_path: JString<'a>,
+) -> jboolean {
+    let path_str: String = match env.get_string(&file_path) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let path = PathBuf::from(path_str);
+
+    if !path.exists() {
+        return 0;
+    }
+
+    let config = get_current_learning_config();
+    if let Ok(cache) = LearningCache::load(&path, config) {
+        let mut guard = LEARNING_CACHE.lock().unwrap();
+        *guard = Some(cache);
+        return 1;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeClearLearning<'a>(
     _env: JNIEnv<'a>,
     _class: JClass<'a>,
