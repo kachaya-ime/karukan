@@ -3,11 +3,14 @@ package io.github.kachaya.karukan
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.StateSet
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -19,6 +22,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.appcompat.view.ContextThemeWrapper
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
@@ -232,7 +236,7 @@ class KarukanInputMethodService : InputMethodService() {
         composingTextView = TextView(this).apply {
             text = if (isEnglishMode) "英数モード" else "かな: (なし)"
             textSize = 14f
-            setPadding(16, 8, 16, 8)
+            setPadding(dpToPx(16f), dpToPx(8f), dpToPx(16f), dpToPx(8f))
             setTextColor(colors.textColor)
         }
         rootLayout.addView(composingTextView)
@@ -246,7 +250,7 @@ class KarukanInputMethodService : InputMethodService() {
 
         candidateScrollContainer = HorizontalScrollView(this).apply {
             setBackgroundColor(colors.candidateBg)
-            setPadding(8, 4, 8, 4)
+            setPadding(dpToPx(4f), dpToPx(2f), dpToPx(4f), dpToPx(2f))
         }
         candidateLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -254,7 +258,7 @@ class KarukanInputMethodService : InputMethodService() {
         val defaultCandidateTextView = TextView(this).apply {
             text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
             textSize = 16f
-            setPadding(12, 8, 12, 8)
+            setPadding(dpToPx(12f), dpToPx(8f), dpToPx(12f), dpToPx(8f))
             setTextColor(colors.textColor)
         }
         candidateLayout.addView(defaultCandidateTextView)
@@ -265,15 +269,15 @@ class KarukanInputMethodService : InputMethodService() {
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
 
-        expandButton = Button(this).apply {
+        expandButton = Button(ContextThemeWrapper(this, R.style.Theme_Karukan)).apply {
             text = "▼"
             textSize = 14f
             isAllCaps = false
-            minHeight = 0
-            minimumHeight = 0
+            minHeight = dpToPx(32f)
+            minimumHeight = dpToPx(32f)
             minWidth = 0
             minimumWidth = 0
-            setPadding(12, 4, 12, 4)
+            setPadding(dpToPx(12f), dpToPx(4f), dpToPx(12f), dpToPx(4f))
             backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
             setTextColor(colors.textColor)
             visibility = View.GONE
@@ -284,9 +288,9 @@ class KarukanInputMethodService : InputMethodService() {
         }
         val expandBtnParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.MATCH_PARENT
+            LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            setMargins(4, 4, 8, 4)
+            setMargins(dpToPx(4f), dpToPx(4f), dpToPx(8f), dpToPx(4f))
         }
         candidateBarContainer.addView(expandButton, expandBtnParams)
 
@@ -321,7 +325,7 @@ class KarukanInputMethodService : InputMethodService() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(colors.candidateBg)
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(16, 6, 8, 6)
+            setPadding(dpToPx(16f), dpToPx(6f), dpToPx(8f), dpToPx(6f))
         }
 
         expandedHeaderTitle = TextView(this).apply {
@@ -330,15 +334,15 @@ class KarukanInputMethodService : InputMethodService() {
             setTextColor(colors.textColor)
         }
 
-        val collapseButton = Button(this).apply {
+        val collapseButton = Button(ContextThemeWrapper(this, R.style.Theme_Karukan)).apply {
             text = "たたむ ▲"
             textSize = 13f
             isAllCaps = false
-            minHeight = 0
-            minimumHeight = 0
+            minHeight = dpToPx(32f)
+            minimumHeight = dpToPx(32f)
             minWidth = 0
             minimumWidth = 0
-            setPadding(12, 6, 12, 6)
+            setPadding(dpToPx(12f), dpToPx(4f), dpToPx(12f), dpToPx(4f))
             backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
             setTextColor(colors.textColor)
             setOnClickListener {
@@ -363,11 +367,11 @@ class KarukanInputMethodService : InputMethodService() {
 
         expandedScrollView = ScrollView(this).apply {
             isFillViewport = true
-            setPadding(8, 8, 8, 8)
+            setPadding(dpToPx(4f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
         }
 
         candidateFlowLayout = CandidateFlowLayout(this).apply {
-            setPadding(4, 4, 4, 4)
+            setPadding(dpToPx(4f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
         }
 
         expandedScrollView.addView(
@@ -678,12 +682,62 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
+    private fun dpToPx(dp: Float): Int {
+        return (dp * resources.displayMetrics.density).toInt()
+    }
+
+    private fun createCandidateButton(textValue: String, onClick: () -> Unit): Button {
+        val density = resources.displayMetrics.density
+        val padH = (14 * density).toInt()
+        val padV = (8 * density).toInt()
+        val cornerRadius = 8 * density
+        val colors = getThemeColors()
+
+        val normalColor = colors.candidateBtnBg
+        val pressedColor = if (isDarkTheme()) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
+
+        val stateListDrawable = StateListDrawable().apply {
+            addState(
+                intArrayOf(android.R.attr.state_pressed),
+                GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(pressedColor)
+                    this.cornerRadius = cornerRadius
+                }
+            )
+            addState(
+                StateSet.WILD_CARD,
+                GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(normalColor)
+                    this.cornerRadius = cornerRadius
+                }
+            )
+        }
+
+        return Button(ContextThemeWrapper(this, R.style.Theme_Karukan)).apply {
+            text = textValue
+            textSize = 16f
+            isAllCaps = false
+            minHeight = (36 * density).toInt()
+            minimumHeight = (36 * density).toInt()
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(padH, padV, padH, padV)
+            background = stateListDrawable
+            setTextColor(colors.textColor)
+            setOnClickListener {
+                triggerKeyFeedback()
+                onClick()
+            }
+        }
+    }
+
     private fun renderCandidates(hiragana: String, candidates: List<String>) {
         candidateLayout.removeAllViews()
         if (::candidateFlowLayout.isInitialized) {
             candidateFlowLayout.removeAllViews()
         }
-        val colors = getThemeColors()
 
         val allCandidates = mutableListOf<String>()
         if (candidates.isNotEmpty()) {
@@ -706,41 +760,22 @@ class KarukanInputMethodService : InputMethodService() {
             }
         }
 
+        val btnMarginPx = dpToPx(3f)
         for (cand in allCandidates) {
-            val candBtnSingle = Button(this).apply {
-                text = cand
-                textSize = 16f
-                isAllCaps = false
-                minHeight = 0
-                minimumHeight = 0
-                minWidth = 0
-                minimumWidth = 0
-                setPadding(16, 8, 16, 8)
-                backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
-                setTextColor(colors.textColor)
-                setOnClickListener {
-                    triggerKeyFeedback()
-                    onCandidateSelected(hiragana, cand)
-                }
+            val candBtnSingle = createCandidateButton(cand) {
+                onCandidateSelected(hiragana, cand)
             }
-            candidateLayout.addView(candBtnSingle)
+            val singleParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(btnMarginPx, btnMarginPx, btnMarginPx, btnMarginPx)
+            }
+            candidateLayout.addView(candBtnSingle, singleParams)
 
             if (::candidateFlowLayout.isInitialized) {
-                val candBtnMulti = Button(this).apply {
-                    text = cand
-                    textSize = 16f
-                    isAllCaps = false
-                    minHeight = 0
-                    minimumHeight = 0
-                    minWidth = 0
-                    minimumWidth = 0
-                    setPadding(16, 8, 16, 8)
-                    backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
-                    setTextColor(colors.textColor)
-                    setOnClickListener {
-                        triggerKeyFeedback()
-                        onCandidateSelected(hiragana, cand)
-                    }
+                val candBtnMulti = createCandidateButton(cand) {
+                    onCandidateSelected(hiragana, cand)
                 }
                 candidateFlowLayout.addView(candBtnMulti)
             }

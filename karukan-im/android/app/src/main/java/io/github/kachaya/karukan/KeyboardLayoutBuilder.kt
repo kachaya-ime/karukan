@@ -389,7 +389,7 @@ class KeyboardLayoutBuilder(
             ),
             // 2段目 (Row 1): q .. p
             listOf(
-                KeySpec("q", shiftText = "Q", symbolText = "!"),
+                KeySpec("q", shiftText = "Q", symbolText = "/"),
                 KeySpec("w", shiftText = "W", symbolText = "@"),
                 KeySpec("e", shiftText = "E", symbolText = "#"),
                 KeySpec("r", shiftText = "R", symbolText = "$"),
@@ -405,7 +405,7 @@ class KeyboardLayoutBuilder(
                 KeySpec("a", shiftText = "A", symbolText = "+"),
                 KeySpec("s", shiftText = "S", symbolText = "="),
                 KeySpec("d", shiftText = "D", symbolText = "-"),
-                KeySpec("f", shiftText = "F", symbolText = "/"),
+                KeySpec("f", shiftText = "F", symbolText = "|"),
                 KeySpec("g", shiftText = "G", symbolText = "\\"),
                 KeySpec("h", shiftText = "H", symbolText = ":"),
                 KeySpec("j", shiftText = "J", symbolText = ";"),
@@ -445,7 +445,7 @@ class KeyboardLayoutBuilder(
                     weight = 1.5f
                 ),
                 KeySpec(if (isEn) "あ" else "A", normalType = KeyType.LANG),
-                KeySpec(",", shiftText = "[", symbolText = "/"),
+                KeySpec(",", shiftText = "[", symbolText = "!"),
                 KeySpec("⌴", normalType = KeyType.SPACE, weight = 2f),
                 KeySpec(".", shiftText = "]", symbolText = "?"),
                 KeySpec("←", normalType = KeyType.DPAD_LEFT, repeatable = true),
