@@ -21,15 +21,48 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystoreFile = project.findProperty("KEYSTORE_FILE")?.toString() ?: System.getenv("KEYSTORE_FILE")
+            if (!keystoreFile.isNullOrEmpty() && File(keystoreFile).exists()) {
+                storeFile = File(keystoreFile)
+                storePassword = project.findProperty("KEYSTORE_PASSWORD")?.toString() ?: System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = project.findProperty("KEY_ALIAS")?.toString() ?: System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = project.findProperty("KEY_PASSWORD")?.toString() ?: System.getenv("KEY_PASSWORD") ?: ""
+            } else {
+                // keystore未指定時はdebug署名をフォールバックとして使用（releaseビルド時もテスト可能にするため）
+                initWith(getByName("debug"))
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        if (variant.buildType.name == "release") {
+            outputs.all {
+                val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+                output?.outputFileName = "kanakan-${variant.versionName}.apk"
+            }
         }
     }
 

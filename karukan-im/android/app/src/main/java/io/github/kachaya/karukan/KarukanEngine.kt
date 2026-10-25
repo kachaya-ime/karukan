@@ -40,6 +40,9 @@ class KarukanEngine(private val context: Context) {
 
     private var isLoaded = false
     private val executor = Executors.newSingleThreadExecutor()
+    private val fileIoExecutor = Executors.newSingleThreadExecutor()
+    private var learningCache: MutableList<LearningItem>? = null
+    private val learningLock = Any()
 
     companion object {
         private const val TAG = "KarukanEngine"
@@ -627,6 +630,15 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun getLearningEntries(): List<LearningItem> {
+        synchronized(learningLock) {
+            if (learningCache == null) {
+                learningCache = loadLearningEntriesFromFile().toMutableList()
+            }
+            return learningCache!!.toList()
+        }
+    }
+
+    private fun loadLearningEntriesFromFile(): List<LearningItem> {
         val file = getLearningHistoryFile()
         if (!file.exists()) return emptyList()
 
@@ -647,7 +659,7 @@ class KarukanEngine(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error reading learning entries", e)
+            Log.e(TAG, "Error reading learning entries from file", e)
         }
         return list
     }
@@ -655,16 +667,18 @@ class KarukanEngine(private val context: Context) {
     fun removeLearningEntry(reading: String, surface: String) {
         val r = reading.trim()
         val s = surface.trim()
-        try {
-            val items = getLearningEntries().filterNot { it.reading == r && it.surface == s }
-            val file = getLearningHistoryFile()
-            val sb = java.lang.StringBuilder()
-            for (item in items) {
-                sb.append("${item.reading}\t${item.surface}\t${item.count}\n")
+
+        val snapshot: List<LearningItem>
+        synchronized(learningLock) {
+            if (learningCache == null) {
+                learningCache = loadLearningEntriesFromFile().toMutableList()
             }
-            file.writeText(sb.toString(), Charsets.UTF_8)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error removing learning entry: $r -> $s", e)
+            learningCache?.removeAll { it.reading == r && it.surface == s }
+            snapshot = learningCache!!.toList()
+        }
+
+        fileIoExecutor.execute {
+            saveLearningEntriesToFile(snapshot)
         }
     }
 
@@ -673,6 +687,7 @@ class KarukanEngine(private val context: Context) {
         val s = surface.trim()
         if (r.isEmpty() || s.isEmpty()) return
 
+        // 1. ネイティブ側のメモリキャッシュ更新 (高速)
         if (isLibraryLoaded && isLoaded) {
             try {
                 nativeRecordLearning(r, s)
@@ -681,16 +696,31 @@ class KarukanEngine(private val context: Context) {
             }
         }
 
-        try {
-            val items = getLearningEntries().toMutableList()
-            val index = items.indexOfFirst { it.reading == r && it.surface == s }
-            if (index >= 0) {
-                val existing = items.removeAt(index)
-                items.add(0, LearningItem(r, s, existing.count + 1))
-            } else {
-                items.add(0, LearningItem(r, s, 1))
+        // 2. Kotlin側のメモリキャッシュ更新 (高速 & 排他制御)
+        val snapshot: List<LearningItem>
+        synchronized(learningLock) {
+            if (learningCache == null) {
+                learningCache = loadLearningEntriesFromFile().toMutableList()
             }
+            val cache = learningCache!!
+            val index = cache.indexOfFirst { it.reading == r && it.surface == s }
+            if (index >= 0) {
+                val existing = cache.removeAt(index)
+                cache.add(0, LearningItem(r, s, existing.count + 1))
+            } else {
+                cache.add(0, LearningItem(r, s, 1))
+            }
+            snapshot = cache.toList()
+        }
 
+        // 3. ディスクファイル書き込みはバックグラウンドスレッドで非同期化
+        fileIoExecutor.execute {
+            saveLearningEntriesToFile(snapshot)
+        }
+    }
+
+    private fun saveLearningEntriesToFile(items: List<LearningItem>) {
+        try {
             val file = getLearningHistoryFile()
             val sb = java.lang.StringBuilder()
             for (item in items) {
@@ -698,7 +728,7 @@ class KarukanEngine(private val context: Context) {
             }
             file.writeText(sb.toString(), Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving learning history: $r -> $s", e)
+            Log.e(TAG, "Error saving learning history to file", e)
         }
     }
 
@@ -710,13 +740,20 @@ class KarukanEngine(private val context: Context) {
                 Log.e(TAG, "Error clearing learning cache", e)
             }
         }
-        try {
-            val file = getLearningHistoryFile()
-            if (file.exists()) {
-                file.delete()
+
+        synchronized(learningLock) {
+            learningCache = mutableListOf()
+        }
+
+        fileIoExecutor.execute {
+            try {
+                val file = getLearningHistoryFile()
+                if (file.exists()) {
+                    file.delete()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting learning history file", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error deleting learning history file", e)
         }
     }
 
@@ -776,7 +813,8 @@ class KarukanEngine(private val context: Context) {
                 kanaSymbolWidth = settings.kanaSymbolWidth,
                 asciiSymbolWidth = settings.asciiWidth,
                 digitWidth = settings.digitWidth,
-                maxLearningEntries = settings.maxLearningEntries
+                maxLearningEntries = settings.maxLearningEntries,
+                isDateConversionEnabled = settings.isDateConversionEnabled
             )
         } catch (e: Throwable) {
             Log.e(TAG, "Error updating engine config", e)
@@ -819,7 +857,8 @@ class KarukanEngine(private val context: Context) {
         kanaSymbolWidth: String,
         asciiSymbolWidth: String,
         digitWidth: String,
-        maxLearningEntries: Int
+        maxLearningEntries: Int,
+        isDateConversionEnabled: Boolean
     )
 
     @Suppress("JniMissingFunction")

@@ -8,7 +8,7 @@ use karukan_engine::{
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 static CONVERTER: Mutex<Option<KanaKanjiConverter>> = Mutex::new(None);
@@ -20,6 +20,7 @@ static USER_DICTS: Mutex<Vec<Dictionary>> = Mutex::new(Vec::new());
 
 static LATEST_CANCELLED_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 static CURRENT_MAX_LEARNING_ENTRIES: AtomicUsize = AtomicUsize::new(LearningConfig::DEFAULT_MAX_ENTRIES);
+static IS_DATE_CONVERSION_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn get_current_learning_config() -> LearningConfig {
     let max_entries = CURRENT_MAX_LEARNING_ENTRIES.load(Ordering::Relaxed);
@@ -230,7 +231,10 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
     ascii_symbol_width: JString<'a>,
     digit_width: JString<'a>,
     max_learning_entries: jni::sys::jint,
+    is_date_conversion_enabled: jboolean,
 ) {
+    IS_DATE_CONVERSION_ENABLED.store(is_date_conversion_enabled != 0, Ordering::Relaxed);
+
     // 1. 推論スレッド数の更新
     if n_threads > 0 {
         let mut guard = CONVERTER.lock().unwrap();
@@ -360,7 +364,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
 
     // 0. Search via DateRewriter & EmojiRewriter
     let mut date_candidates = Vec::new();
-    {
+    if IS_DATE_CONVERSION_ENABLED.load(Ordering::Relaxed) {
         let mut guard = DATE_REWRITER.lock().unwrap();
         let rewriter = guard.get_or_insert_with(|| DateRewriter::new(DateConfig::default()));
         for (text, _desc) in rewriter.rewrite(&input_str) {

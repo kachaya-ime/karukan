@@ -173,8 +173,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
 
-    private fun getSpaceString(): String = InputTransformUtils.getSpaceString(settings.spaceStyle)
-    private fun getDateCandidates(reading: String): List<String> = InputTransformUtils.getDateCandidates(reading, settings.isDateConversionEnabled)
+    private fun getSpaceString(): String = if (settings.spaceStyle == "full") "　" else " "
 
     override fun onCreateInputView(): View {
         val colors = getThemeColors()
@@ -471,14 +470,11 @@ class KarukanInputMethodService : InputMethodService() {
             leftContext
         }
 
-        val engineCandidates = if (settings.isKarukanEnabled) {
+        return if (settings.isKarukanEnabled) {
             engine.convert(hiragana, settings.numCandidates, fullContext)
         } else {
             listOf(hiragana)
         }
-
-        val dateCandidates = getDateCandidates(hiragana)
-        return (dateCandidates + engineCandidates).distinct()
     }
 
     private fun performConversion() {
