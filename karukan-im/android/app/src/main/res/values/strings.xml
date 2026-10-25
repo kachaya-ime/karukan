@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Karukan for Android</string>
-    <string name="ime_name">Karukan 日本語入力</string>
+    <string name="ime_name">Karukan for Android</string>
+    <string name="subtype_japanese">日本語</string>
     <string name="enable_ime_button">Karukan IME を有効にする</string>
     <string name="select_ime_button">Karukan IME を選択する</string>
     <string name="open_settings_button">設定を開く</string>

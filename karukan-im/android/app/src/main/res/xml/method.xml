@@ -6,6 +6,6 @@
         android:imeSubtypeExtraValue="KeyboardLayoutSet=qwerty"
         android:imeSubtypeLocale="ja_JP"
         android:imeSubtypeMode="keyboard"
-        android:label="@string/ime_name"
+        android:label="@string/subtype_japanese"
         />
 </input-method>
