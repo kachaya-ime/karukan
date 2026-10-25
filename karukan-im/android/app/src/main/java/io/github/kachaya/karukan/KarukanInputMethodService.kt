@@ -298,14 +298,14 @@ class KarukanInputMethodService : InputMethodService() {
             if (romajiBuffer.isNotEmpty()) {
                 commitCurrentHiragana()
             } else {
-                val actionId = currentEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
-                if (actionId != EditorInfo.IME_ACTION_NONE && actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
-                    currentInputConnection?.performEditorAction(actionId)
+                val inputType = currentEditorInfo?.inputType ?: 0
+                val isMultiline = (inputType and EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+                if (isMultiline) {
+                    currentInputConnection?.commitText("\n", 1)
                 } else {
-                    val inputType = currentEditorInfo?.inputType ?: 0
-                    val isMultiline = (inputType and EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0
-                    if (isMultiline) {
-                        currentInputConnection?.commitText("\n", 1)
+                    val actionId = currentEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
+                    if (actionId != EditorInfo.IME_ACTION_NONE && actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                        currentInputConnection?.performEditorAction(actionId)
                     } else {
                         currentInputConnection?.performEditorAction(EditorInfo.IME_ACTION_DONE)
                     }
@@ -391,7 +391,13 @@ class KarukanInputMethodService : InputMethodService() {
             romajiBuffer.deleteCharAt(romajiBuffer.length - 1)
             updateComposingText()
         } else {
-            currentInputConnection?.deleteSurroundingText(1, 0)
+            val selectedText = currentInputConnection?.getSelectedText(0)
+            if (!selectedText.isNullOrEmpty()) {
+                currentInputConnection?.commitText("", 1)
+            } else {
+                currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+                currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+            }
         }
     }
 

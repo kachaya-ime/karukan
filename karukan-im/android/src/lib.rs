@@ -1,10 +1,11 @@
 use jni::JNIEnv;
-use jni::objects::{JClass, JObject, JObjectArray, JString};
+use jni::objects::{JClass, JObject, JString};
 use jni::sys::jboolean;
 use karukan_engine::{
-    BracketStyle, DateConfig, DateRewriter, Dictionary, EmojiRewriter, KanaKanjiConverter,
-    LearningCache, LearningConfig, ModelSource, PunctuationStyle, Rewriter, RomajiConverter,
-    SlashStyle, SymbolStyle, Width, WidthRules,
+    AlphabetRewriter, BracketStyle, DateConfig, DateRewriter, Dictionary, EmojiRewriter,
+    HalfWidthKatakanaRewriter, KanaKanjiConverter, LearningCache, LearningConfig, ModelSource,
+    NumberRewriter, PunctuationStyle, Rewriter, RomajiConverter, SlashStyle, SymbolRewriter,
+    SymbolStyle, Width, WidthRules,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -362,22 +363,50 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     // 高速な重複防止のための HashSet
     let mut seen_candidates = HashSet::new();
 
-    // 0. Search via DateRewriter & EmojiRewriter
-    let mut date_candidates = Vec::new();
+    // 0. Search via Rewriters (Date, Number, Symbol, Emoji, HalfKatakana, Alphabet)
+    let mut rewriter_candidates = Vec::new();
+
+    // 日付・時刻リライター
     if IS_DATE_CONVERSION_ENABLED.load(Ordering::Relaxed) {
         let mut guard = DATE_REWRITER.lock().unwrap();
         let rewriter = guard.get_or_insert_with(|| DateRewriter::new(DateConfig::default()));
         for (text, _desc) in rewriter.rewrite(&input_str) {
             if seen_candidates.insert(text.clone()) {
-                date_candidates.push(text);
+                rewriter_candidates.push(text);
             }
         }
     }
 
-    let mut emoji_candidates = Vec::new();
+    // 数値リライター (123 -> 百二十三, 壱百弐拾参, Ⅻ, ⑫, 0x7B 等)
+    for (text, _desc) in NumberRewriter.rewrite(&input_str) {
+        if seen_candidates.insert(text.clone()) {
+            rewriter_candidates.push(text);
+        }
+    }
+
+    // 記号リライター (かっこ -> 「」, やじるし -> → 等)
+    for (text, _desc) in SymbolRewriter.rewrite(&input_str) {
+        if seen_candidates.insert(text.clone()) {
+            rewriter_candidates.push(text);
+        }
+    }
+
+    // 絵文字リライター
     for (emoji, _desc) in EmojiRewriter.rewrite(&input_str) {
-        if !seen_candidates.contains(&emoji) {
-            emoji_candidates.push(emoji);
+        if seen_candidates.insert(emoji.clone()) {
+            rewriter_candidates.push(emoji);
+        }
+    }
+
+    // 半角カナ・英数リライター
+    for (text, _desc) in HalfWidthKatakanaRewriter.rewrite(&input_str) {
+        if seen_candidates.insert(text.clone()) {
+            rewriter_candidates.push(text);
+        }
+    }
+    for (text, _desc) in AlphabetRewriter.rewrite(&input_str) {
+        if seen_candidates.insert(text.clone()) {
+            rewriter_candidates.push(text);
         }
     }
 
@@ -427,11 +456,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     let katakana_candidate = karukan_engine::hiragana_to_katakana(&input_str);
 
     // 4. Combine candidates according to priority order:
-    //    1) Date Candidates -> 2) User Dictionaries -> 3) AI Model Candidates -> 4) Katakana -> 5) Emoji Candidates -> 6) System Dictionary
+    //    1) Rewriter Candidates -> 2) User Dictionaries -> 3) AI Model Candidates -> 4) Katakana -> 5) System Dictionary
     let mut candidates = Vec::with_capacity(16);
 
-    for dc in date_candidates {
-        candidates.push(dc);
+    for rc in rewriter_candidates {
+        candidates.push(rc);
     }
     for udc in user_dict_candidates {
         candidates.push(udc);
@@ -443,11 +472,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     }
     if !katakana_candidate.is_empty() && seen_candidates.insert(katakana_candidate.clone()) {
         candidates.push(katakana_candidate);
-    }
-    for ec in emoji_candidates {
-        if seen_candidates.insert(ec.clone()) {
-            candidates.push(ec);
-        }
     }
     for sdc in system_dict_candidates {
         if seen_candidates.insert(sdc.clone()) {

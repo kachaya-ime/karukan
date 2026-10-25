@@ -215,9 +215,10 @@ class KeyButton(
         get() = currentType != KeyType.CHARACTER
 
     init {
+        isAllCaps = false
         ViewCompat.setBackgroundTintList(this, null)
         text = spec.normalText
-        textSize = spec.textSize
+        updateTextSize(spec.normalText, spec.textSize)
         gravity = Gravity.CENTER
         setPadding(0, 0, 0, 0)
         layoutParams = LinearLayout.LayoutParams(0, keyHeight, spec.weight).apply {
@@ -231,7 +232,9 @@ class KeyButton(
 
     fun updateMode(mode: QwertyMode, isDark: Boolean) {
         currentType = spec.getType(mode)
-        text = spec.getText(mode)
+        val newText = spec.getText(mode)
+        text = newText
+        updateTextSize(newText, spec.textSize)
 
         val palette = KeyboardColors.get(isDark)
 
@@ -252,6 +255,11 @@ class KeyButton(
         } else {
             resetStyle(isDark)
         }
+    }
+
+    private fun updateTextSize(t: String, defaultSize: Float) {
+        val isSingleAscii = t.length == 1 && t[0].code in 0..127
+        textSize = if (isSingleAscii) maxOf(defaultSize + 3f, 19f) else defaultSize
     }
 
     fun updateStyle(
@@ -569,8 +577,10 @@ class KeyboardLayoutBuilder(
                 val pressedBg = if (flickSpec.isAction) palette.actionKeyPressedBg else palette.keyPressedBg
 
                 val btn = Button(context).apply {
+                    isAllCaps = false
                     text = flickSpec.label
-                    textSize = 18f
+                    val isSingleAscii = flickSpec.label.length == 1 && flickSpec.label[0].code in 0..127
+                    textSize = if (isSingleAscii) maxOf(18f + 3f, 19f) else 18f
                     gravity = Gravity.CENTER
                     setPadding(0, 0, 0, 0)
                     layoutParams = LinearLayout.LayoutParams(
