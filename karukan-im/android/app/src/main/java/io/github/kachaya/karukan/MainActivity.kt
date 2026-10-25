@@ -15,6 +15,10 @@ import androidx.core.view.WindowInsetsCompat
  */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var btnEnableIme: Button
+    private lateinit var btnSelectIme: Button
+    private lateinit var btnOpenSettings: Button
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -27,19 +31,56 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        findViewById<Button>(R.id.btnEnableIme).setOnClickListener {
+        btnEnableIme = findViewById(R.id.btnEnableIme)
+        btnSelectIme = findViewById(R.id.btnSelectIme)
+        btnOpenSettings = findViewById(R.id.btnOpenSettings)
+
+        btnEnableIme.setOnClickListener {
             val intent = Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
             startActivity(intent)
         }
 
-        findViewById<Button>(R.id.btnSelectIme).setOnClickListener {
+        btnSelectIme.setOnClickListener {
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showInputMethodPicker()
         }
 
-        findViewById<Button>(R.id.btnOpenSettings).setOnClickListener {
+        btnOpenSettings.setOnClickListener {
             val intent = Intent(this, SettingsActivity::class.java)
             startActivity(intent)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateSetupStatus()
+    }
+
+    private fun updateSetupStatus() {
+        val isEnabled = isImeEnabled()
+        val isSelected = isImeSelected()
+
+        if (isEnabled) {
+            btnEnableIme.text = "1. Karukan IME を有効化 (有効化済み ✅)"
+        } else {
+            btnEnableIme.text = getString(R.string.enable_ime_button)
+        }
+
+        if (isSelected) {
+            btnSelectIme.text = "2. キーボードを選択 (選択中 ✅)"
+        } else {
+            btnSelectIme.text = getString(R.string.select_ime_button)
+        }
+    }
+
+    private fun isImeEnabled(): Boolean {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
+        val enabledImes = imm.enabledInputMethodList
+        return enabledImes.any { it.packageName == packageName }
+    }
+
+    private fun isImeSelected(): Boolean {
+        val defaultIme = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: return false
+        return defaultIme.contains(packageName)
     }
 }

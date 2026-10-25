@@ -16,6 +16,8 @@ class PreferencesManager(
     var currentSettings: KarukanSettings = loadSettings()
         private set
 
+    private val defaultOptimalThreads: Int = KarukanEngine(context).calculateOptimalNThreads()
+
     fun startListening() {
         prefs.registerOnSharedPreferenceChangeListener(this)
         currentSettings = loadSettings()
@@ -34,7 +36,7 @@ class PreferencesManager(
             spaceStyle = prefs.getString("pref_space", "half") ?: "half",
 
             strategy = prefs.getString("pref_strategy", "adaptive") ?: "adaptive",
-            nThreads = prefs.getString("pref_n_threads", "4")?.toIntOrNull() ?: 4,
+            nThreads = prefs.getString("pref_n_threads", null)?.toIntOrNull() ?: defaultOptimalThreads,
             persona = prefs.getString("pref_persona", "") ?: "",
             useContext = prefs.getBoolean("pref_use_context", true),
             contextChars = prefs.getString("pref_context_chars", "10")?.toIntOrNull() ?: 10,
@@ -47,6 +49,7 @@ class PreferencesManager(
             beamChars = prefs.getString("pref_beam_chars", "30")?.toIntOrNull() ?: 30,
 
             isLearningEnabled = prefs.getBoolean("pref_learning_enabled", true),
+            maxLearningEntries = prefs.getString("pref_max_learning_entries", "10000")?.toIntOrNull() ?: 10000,
 
             isDateConversionEnabled = prefs.getBoolean("pref_date_conversion", true),
             isAutoCapitalizationEnabled = prefs.getBoolean("pref_auto_capitalization", true),
@@ -61,9 +64,6 @@ class PreferencesManager(
             isVibrationEnabled = prefs.getBoolean("pref_vibration_enabled", true),
             isSoundEnabled = prefs.getBoolean("pref_sound_enabled", false),
             isAutoCommitEnabled = prefs.getBoolean("pref_auto_commit", true),
-            isBsLongPressClearEnabled = prefs.getBoolean("pref_bs_long_press_clear", true),
-            isShowCursorKeysEnabled = prefs.getBoolean("pref_show_cursor_keys", true),
-            isShowEmojiButtonEnabled = prefs.getBoolean("pref_show_emoji_button", true),
             keyboardHeight = prefs.getString("pref_keyboard_height", "medium") ?: "medium",
             keyboardTheme = prefs.getString("pref_keyboard_theme", "dark") ?: "dark"
         )

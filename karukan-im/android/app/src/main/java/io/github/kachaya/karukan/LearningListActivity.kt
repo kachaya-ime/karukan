@@ -98,6 +98,9 @@ class LearningListActivity : AppCompatActivity() {
 
     private fun loadData() {
         allEntries = engine.getLearningEntries()
+        val hasData = allEntries.isNotEmpty()
+        btnClearAll.isEnabled = hasData
+        etSearchQuery.isEnabled = hasData
         filterList(etSearchQuery.text.toString())
     }
 

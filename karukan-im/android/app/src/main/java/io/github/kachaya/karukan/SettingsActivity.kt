@@ -104,11 +104,25 @@ class SettingsFragment : PreferenceFragmentCompat() {
             "ライセンス情報の読み込みに失敗しました: ${e.message}"
         }
 
+        val scrollView = android.widget.ScrollView(context).apply {
+            setPadding(48, 24, 48, 24)
+        }
+        val textView = android.widget.TextView(context).apply {
+            text = content
+            textSize = 12f
+            setMonospaceFont()
+        }
+        scrollView.addView(textView)
+
         AlertDialog.Builder(context)
             .setTitle(title)
-            .setMessage(content)
+            .setView(scrollView)
             .setPositiveButton("閉じる", null)
             .show()
+    }
+
+    private fun android.widget.TextView.setMonospaceFont() {
+        typeface = android.graphics.Typeface.MONOSPACE
     }
 }
 

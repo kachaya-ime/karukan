@@ -149,32 +149,44 @@ class UserDictContentActivity : AppCompatActivity() {
 
         val editReading = EditText(this).apply {
             hint = "よみ (例: かるかん)"
+            isSingleLine = true
         }
         val editSurface = EditText(this).apply {
             hint = "単語・表記 (例: Karukan)"
+            isSingleLine = true
         }
 
         layout.addView(editReading)
         layout.addView(editSurface)
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("新規単語の追加")
             .setView(layout)
-            .setPositiveButton("追加") { _, _ ->
+            .setPositiveButton("追加", null)
+            .setNegativeButton("キャンセル", null)
+            .create()
+
+        dialog.setOnShowListener {
+            editReading.requestFocus()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val reading = editReading.text.toString().trim()
                 val surface = editSurface.text.toString().trim()
-                if (reading.isNotEmpty() && surface.isNotEmpty()) {
+                if (reading.isEmpty() || surface.isEmpty()) {
+                    Toast.makeText(this, "「よみ」と「単語・表記」の両方を入力してください", Toast.LENGTH_SHORT).show()
+                } else {
                     val success = engine.addEntryToDictFile(targetFile, reading, surface)
                     if (success) {
                         Toast.makeText(this, "追加しました: $reading -> $surface", Toast.LENGTH_SHORT).show()
                         loadData()
+                        dialog.dismiss()
                     } else {
                         Toast.makeText(this, "追加に失敗しました", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            .setNegativeButton("キャンセル", null)
-            .show()
+        }
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
     }
 
     private fun showEditEntryDialog(item: DictEntryItem) {
@@ -186,22 +198,32 @@ class UserDictContentActivity : AppCompatActivity() {
         val editReading = EditText(this).apply {
             hint = "よみ"
             setText(item.reading)
+            isSingleLine = true
         }
         val editSurface = EditText(this).apply {
             hint = "単語・表記"
             setText(item.surface)
+            isSingleLine = true
         }
 
         layout.addView(editReading)
         layout.addView(editSurface)
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("単語の編集")
             .setView(layout)
-            .setPositiveButton("更新") { _, _ ->
+            .setPositiveButton("更新", null)
+            .setNegativeButton("キャンセル", null)
+            .create()
+
+        dialog.setOnShowListener {
+            editReading.requestFocus()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val newReading = editReading.text.toString().trim()
                 val newSurface = editSurface.text.toString().trim()
-                if (newReading.isNotEmpty() && newSurface.isNotEmpty()) {
+                if (newReading.isEmpty() || newSurface.isEmpty()) {
+                    Toast.makeText(this, "「よみ」と「単語・表記」の両方を入力してください", Toast.LENGTH_SHORT).show()
+                } else {
                     val success = engine.updateEntryInDictFile(
                         targetFile,
                         item.reading,
@@ -212,13 +234,15 @@ class UserDictContentActivity : AppCompatActivity() {
                     if (success) {
                         Toast.makeText(this, "更新しました: $newReading -> $newSurface", Toast.LENGTH_SHORT).show()
                         loadData()
+                        dialog.dismiss()
                     } else {
                         Toast.makeText(this, "更新に失敗しました", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            .setNegativeButton("キャンセル", null)
-            .show()
+        }
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
     }
 
     private fun showDeleteEntryDialog(item: DictEntryItem) {

@@ -123,4 +123,20 @@
 
     </PreferenceCategory>
 
+    <!-- 3. 変換学習設定 -->
+    <PreferenceCategory
+        android:title="変換学習設定"
+        app:iconSpaceReserved="false">
+
+        <EditTextPreference
+            android:defaultValue="10000"
+            android:dialogTitle="学習エントリの最大保持数"
+            android:key="pref_max_learning_entries"
+            android:summary="学習履歴として保持する最大エントリ数を指定します"
+            android:title="最大学習エントリ数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

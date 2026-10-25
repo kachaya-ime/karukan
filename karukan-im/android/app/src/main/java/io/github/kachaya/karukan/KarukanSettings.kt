@@ -27,10 +27,12 @@ data class KarukanSettings(
 
     // 変換学習設定
     val isLearningEnabled: Boolean = true,
+    val maxLearningEntries: Int = 10000,
 
     // 拡張設定（記号・幅・自動変換ルール）
     val isDateConversionEnabled: Boolean = true,
     val isAutoCapitalizationEnabled: Boolean = true,
+    val isAutoCommitEnabled: Boolean = true,
     val bracketStyle: String = "corner",
     val slashStyle: String = "middle_dot",
     val digitWidth: String = "half",
@@ -42,10 +44,6 @@ data class KarukanSettings(
     val flickSensitivity: String = "normal",
     val isVibrationEnabled: Boolean = true,
     val isSoundEnabled: Boolean = false,
-    val isAutoCommitEnabled: Boolean = true,
-    val isBsLongPressClearEnabled: Boolean = true,
-    val isShowCursorKeysEnabled: Boolean = true,
-    val isShowEmojiButtonEnabled: Boolean = true,
     val keyboardHeight: String = "medium",
     val keyboardTheme: String = "dark"
 )

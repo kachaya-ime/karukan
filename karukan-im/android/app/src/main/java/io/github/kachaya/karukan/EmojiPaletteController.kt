@@ -124,6 +124,20 @@ class EmojiPaletteController(
 
     fun show(targetKeyboardContainer: View) {
         isVisible = true
+        val targetHeight = if (targetKeyboardContainer.height > 0) {
+            targetKeyboardContainer.height
+        } else if (targetKeyboardContainer.measuredHeight > 0) {
+            targetKeyboardContainer.measuredHeight
+        } else {
+            keyboardHeightPxSupplier()
+        }
+        if (targetHeight > 0) {
+            val lp = container.layoutParams
+            if (lp != null && lp.height != targetHeight) {
+                lp.height = targetHeight
+                container.layoutParams = lp
+            }
+        }
         targetKeyboardContainer.visibility = View.GONE
         container.visibility = View.VISIBLE
         renderContent()
@@ -229,12 +243,17 @@ class EmojiPaletteController(
         override fun getItemCount(): Int = categories.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmojiPageViewHolder {
-            val recyclerView = RecyclerView(parent.context).apply {
+            val context = parent.context
+            val displayMetrics = context.resources.displayMetrics
+            val itemWidthPx = (44 * displayMetrics.density).toInt()
+            val spanCount = maxOf(6, displayMetrics.widthPixels / maxOf(1, itemWidthPx))
+
+            val recyclerView = RecyclerView(context).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                layoutManager = GridLayoutManager(parent.context, 8)
+                layoutManager = GridLayoutManager(context, spanCount)
                 setHasFixedSize(true)
             }
             return EmojiPageViewHolder(recyclerView, onEmojiSelected)

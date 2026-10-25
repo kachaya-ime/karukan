@@ -201,27 +201,6 @@
             android:title="フォーカス移動時の自動確定"
             app:iconSpaceReserved="false" />
 
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_bs_long_press_clear"
-            android:summary="⌫（BS）キー長押しで未確定入力文字を一括削除します"
-            android:title="BSキー長押し一括削除"
-            app:iconSpaceReserved="false" />
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_show_cursor_keys"
-            android:summary="キーボードのアクション行にカーソル移動（← →）ボタンを表示します"
-            android:title="カーソル移動キーの表示"
-            app:iconSpaceReserved="false" />
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_show_emoji_button"
-            android:summary="キーボードのアクション行に絵文字・記号パレットボタンを表示します"
-            android:title="絵文字・記号ボタンの表示"
-            app:iconSpaceReserved="false" />
-
         <ListPreference
             android:defaultValue="medium"
             android:entries="@array/pref_keyboard_height_entries"

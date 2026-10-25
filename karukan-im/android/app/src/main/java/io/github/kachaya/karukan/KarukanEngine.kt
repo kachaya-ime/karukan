@@ -199,14 +199,22 @@ class KarukanEngine(private val context: Context) {
                     val fileName = File(entryName).name
                     if (fileName == "dict.bin") {
                         val outputFile = File(targetDir, fileName)
-                        FileOutputStream(outputFile).use { output ->
-                            copyExactBytes(gzipIn, output, entrySize) { written, total ->
-                                if (total > 0) {
-                                    val percent = ((written * 100) / total).toInt().coerceIn(0, 95)
-                                    val text = "展開中: ${formatFileSize(written)} / ${formatFileSize(total)} (${percent}%)"
-                                    onProgress?.invoke(text, percent)
+                        val tempFile = File(targetDir, "$fileName.tmp")
+                        try {
+                            FileOutputStream(tempFile).use { output ->
+                                copyExactBytes(gzipIn, output, entrySize) { written, total ->
+                                    if (total > 0) {
+                                        val percent = ((written * 100) / total).toInt().coerceIn(0, 95)
+                                        val text = "展開中: ${formatFileSize(written)} / ${formatFileSize(total)} (${percent}%)"
+                                        onProgress?.invoke(text, percent)
+                                    }
                                 }
                             }
+                            if (outputFile.exists()) outputFile.delete()
+                            tempFile.renameTo(outputFile)
+                        } catch (e: Exception) {
+                            if (tempFile.exists()) tempFile.delete()
+                            throw e
                         }
                         val padBytes = ((512 - (entrySize % 512)) % 512).toInt()
                         if (padBytes > 0) {
@@ -267,10 +275,10 @@ class KarukanEngine(private val context: Context) {
         private fun formatFileSize(size: Long): String {
             return DictUtils.formatFileSize(size)
         }
-    }
 
-    init {
-        executor.execute {
+        private var isLibraryLoaded = false
+
+        init {
             try {
                 Log.i(TAG, "Loading native library libkarukan_android.so...")
                 try {
@@ -279,6 +287,21 @@ class KarukanEngine(private val context: Context) {
                     Log.w(TAG, "c++_shared library load skipped or not needed: ${e.message}")
                 }
                 System.loadLibrary("karukan_android")
+                isLibraryLoaded = true
+                Log.i(TAG, "Native library karukan_android loaded successfully.")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to load native library karukan_android", e)
+            }
+        }
+    }
+
+    init {
+        executor.execute {
+            try {
+                if (!isLibraryLoaded) {
+                    Log.e(TAG, "Cannot initialize native model: libkarukan_android.so is not loaded")
+                    return@execute
+                }
 
                 prepareAssetFile(context, TOKENIZER_NAME)
                 val modelPath = prepareAssetFile(context, MODEL_NAME)
@@ -306,6 +329,7 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun loadSystemDict(onProgress: ((progressText: String, percent: Int) -> Unit)? = null) {
+        if (!isLibraryLoaded) return
         try {
             prepareSystemDictAsset(context, false) { progressText, percent ->
                 onProgress?.invoke(progressText, percent / 2)
@@ -321,7 +345,7 @@ class KarukanEngine(private val context: Context) {
             } else {
                 Log.w(TAG, "System dict file does not exist: ${systemDictFile.absolutePath}")
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error loading system dict", e)
         }
     }
@@ -339,6 +363,7 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun loadUserDicts(onProgress: ((progressText: String, percent: Int) -> Unit)? = null) {
+        if (!isLibraryLoaded) return
         try {
             prepareUserDictAssets(context, false) { progressText, percent ->
                 onProgress?.invoke(progressText, percent / 2)
@@ -357,13 +382,13 @@ class KarukanEngine(private val context: Context) {
                 if (isLoaded) {
                     try {
                         nativeRecordLearning(item.reading, item.surface)
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         Log.e(TAG, "Error restoring learning item: ${item.reading} -> ${item.surface}", e)
                     }
                 }
             }
             onProgress?.invoke("ロード完了", 100)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error loading user dicts", e)
         }
     }
@@ -566,41 +591,45 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun setNThreads(nThreads: Int) {
-        if (!isLoaded) return
+        if (!isLibraryLoaded || !isLoaded) return
         try {
             nativeSetNThreads(nThreads)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error setting n_threads: $nThreads", e)
         }
     }
 
     fun romajiToHiragana(query: String): String {
-        if (query.isEmpty()) return ""
+        if (query.isEmpty() || !isLibraryLoaded) return query
         return try {
             nativeRomajiToHiragana(query)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error converting romaji: $query", e)
             query
         }
     }
 
     fun romajiToHiraganaFlush(query: String): String {
-        if (query.isEmpty()) return ""
+        if (query.isEmpty() || !isLibraryLoaded) return query
         return try {
             nativeRomajiToHiraganaFlush(query)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "Error flushing romaji: $query", e)
             query
         }
     }
 
     fun convert(query: String, maxCandidates: Int = 9, context: String = ""): List<String> {
-        if (query.isEmpty() || !isLoaded) return listOf(query)
+        if (query.isBlank() || !isLibraryLoaded || !isLoaded) return listOf(query)
 
         return try {
-            val candidates = nativeConvert(query, maxCandidates, context)
-            if (candidates.isNotEmpty()) candidates.toList() else listOf(query)
-        } catch (e: Exception) {
+            val joinedCandidates = nativeConvert(query, maxCandidates, context)
+            if (joinedCandidates.isNotEmpty()) {
+                joinedCandidates.split("\t")
+            } else {
+                listOf(query)
+            }
+        } catch (e: Throwable) {
             Log.e(TAG, "Error converting query: $query", e)
             listOf(query)
         }
@@ -653,10 +682,10 @@ class KarukanEngine(private val context: Context) {
         val s = surface.trim()
         if (r.isEmpty() || s.isEmpty()) return
 
-        if (isLoaded) {
+        if (isLibraryLoaded && isLoaded) {
             try {
                 nativeRecordLearning(r, s)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Error recording learning: $r -> $s", e)
             }
         }
@@ -683,10 +712,10 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun clearLearning() {
-        if (isLoaded) {
+        if (isLibraryLoaded && isLoaded) {
             try {
                 nativeClearLearning()
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Error clearing learning cache", e)
             }
         }
@@ -724,6 +753,59 @@ class KarukanEngine(private val context: Context) {
         return categories
     }
 
+    fun calculateOptimalNThreads(): Int {
+        val processors = Runtime.getRuntime().availableProcessors()
+        return when {
+            processors >= 8 -> 4 // big.LITTLE構成の高性能コア群を想定
+            processors >= 4 -> 3
+            else -> maxOf(1, processors - 1)
+        }
+    }
+
+    fun updateEngineConfig(settings: KarukanSettings) {
+        if (!isLibraryLoaded) return
+        try {
+            nativeUpdateEngineConfig(
+                strategy = settings.strategy,
+                maxLatencyMs = settings.maxLatencyMs,
+                chunkChars = settings.chunkChars,
+                chunkSymbols = settings.chunkSymbols,
+                chunkDigits = settings.chunkDigits,
+                chunkAlphabets = settings.chunkAlphabets,
+                beamWidth = settings.beamWidth,
+                beamChars = settings.beamChars
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error updating engine config", e)
+        }
+    }
+
+    fun cancelQuery(queryId: Long) {
+        if (!isLibraryLoaded || queryId <= 0) return
+        try {
+            nativeCancelQuery(queryId)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error cancelling query: $queryId", e)
+        }
+    }
+
+    fun updateRomajiConfig(settings: KarukanSettings) {
+        if (!isLibraryLoaded) return
+        try {
+            nativeUpdateRomajiConfig(
+                punctuation = settings.punctuationStyle,
+                bracket = settings.bracketStyle,
+                slash = settings.slashStyle,
+                space = settings.spaceStyle,
+                kanaSymbolWidth = settings.kanaSymbolWidth,
+                asciiSymbolWidth = settings.asciiWidth,
+                digitWidth = settings.digitWidth
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error updating romaji config", e)
+        }
+    }
+
     @Suppress("JniMissingFunction")
     private external fun nativeInit(modelPath: String): Boolean
 
@@ -737,7 +819,22 @@ class KarukanEngine(private val context: Context) {
     private external fun nativeSetNThreads(nThreads: Int)
 
     @Suppress("JniMissingFunction")
-    private external fun nativeConvert(query: String, maxCandidates: Int, context: String): Array<String>
+    private external fun nativeUpdateEngineConfig(
+        strategy: String,
+        maxLatencyMs: Int,
+        chunkChars: Int,
+        chunkSymbols: Int,
+        chunkDigits: Int,
+        chunkAlphabets: Int,
+        beamWidth: Int,
+        beamChars: Int
+    )
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeCancelQuery(queryId: Long)
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeConvert(query: String, maxCandidates: Int, context: String): String
 
     @Suppress("JniMissingFunction")
     private external fun nativeRecordLearning(reading: String, surface: String)
@@ -750,4 +847,15 @@ class KarukanEngine(private val context: Context) {
 
     @Suppress("JniMissingFunction")
     private external fun nativeRomajiToHiraganaFlush(query: String): String
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeUpdateRomajiConfig(
+        punctuation: String,
+        bracket: String,
+        slash: String,
+        space: String,
+        kanaSymbolWidth: String,
+        asciiSymbolWidth: String,
+        digitWidth: String
+    )
 }
