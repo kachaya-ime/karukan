@@ -590,15 +590,6 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun setNThreads(nThreads: Int) {
-        if (!isLibraryLoaded || !isLoaded) return
-        try {
-            nativeSetNThreads(nThreads)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error setting n_threads: $nThreads", e)
-        }
-    }
-
     fun romajiToHiragana(query: String): String {
         if (query.isEmpty() || !isLibraryLoaded) return query
         return try {
@@ -762,10 +753,14 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
+    /**
+     * KarukanSettings のすべての設定値をエンジンおよびネイティブ各コンポーネントへ一括反映します
+     */
     fun updateEngineConfig(settings: KarukanSettings) {
         if (!isLibraryLoaded) return
         try {
             nativeUpdateEngineConfig(
+                nThreads = settings.nThreads,
                 strategy = settings.strategy,
                 maxLatencyMs = settings.maxLatencyMs,
                 chunkChars = settings.chunkChars,
@@ -773,7 +768,15 @@ class KarukanEngine(private val context: Context) {
                 chunkDigits = settings.chunkDigits,
                 chunkAlphabets = settings.chunkAlphabets,
                 beamWidth = settings.beamWidth,
-                beamChars = settings.beamChars
+                beamChars = settings.beamChars,
+                punctuation = settings.punctuationStyle,
+                bracket = settings.bracketStyle,
+                slash = settings.slashStyle,
+                space = settings.spaceStyle,
+                kanaSymbolWidth = settings.kanaSymbolWidth,
+                asciiSymbolWidth = settings.asciiWidth,
+                digitWidth = settings.digitWidth,
+                maxLearningEntries = settings.maxLearningEntries
             )
         } catch (e: Throwable) {
             Log.e(TAG, "Error updating engine config", e)
@@ -789,23 +792,6 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun updateRomajiConfig(settings: KarukanSettings) {
-        if (!isLibraryLoaded) return
-        try {
-            nativeUpdateRomajiConfig(
-                punctuation = settings.punctuationStyle,
-                bracket = settings.bracketStyle,
-                slash = settings.slashStyle,
-                space = settings.spaceStyle,
-                kanaSymbolWidth = settings.kanaSymbolWidth,
-                asciiSymbolWidth = settings.asciiWidth,
-                digitWidth = settings.digitWidth
-            )
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error updating romaji config", e)
-        }
-    }
-
     @Suppress("JniMissingFunction")
     private external fun nativeInit(modelPath: String): Boolean
 
@@ -816,10 +802,8 @@ class KarukanEngine(private val context: Context) {
     private external fun nativeLoadUserDicts(dictDirPath: String, listener: DictLoadProgressListener? = null): Boolean
 
     @Suppress("JniMissingFunction")
-    private external fun nativeSetNThreads(nThreads: Int)
-
-    @Suppress("JniMissingFunction")
     private external fun nativeUpdateEngineConfig(
+        nThreads: Int,
         strategy: String,
         maxLatencyMs: Int,
         chunkChars: Int,
@@ -827,7 +811,15 @@ class KarukanEngine(private val context: Context) {
         chunkDigits: Int,
         chunkAlphabets: Int,
         beamWidth: Int,
-        beamChars: Int
+        beamChars: Int,
+        punctuation: String,
+        bracket: String,
+        slash: String,
+        space: String,
+        kanaSymbolWidth: String,
+        asciiSymbolWidth: String,
+        digitWidth: String,
+        maxLearningEntries: Int
     )
 
     @Suppress("JniMissingFunction")
@@ -847,15 +839,4 @@ class KarukanEngine(private val context: Context) {
 
     @Suppress("JniMissingFunction")
     private external fun nativeRomajiToHiraganaFlush(query: String): String
-
-    @Suppress("JniMissingFunction")
-    private external fun nativeUpdateRomajiConfig(
-        punctuation: String,
-        bracket: String,
-        slash: String,
-        space: String,
-        kanaSymbolWidth: String,
-        asciiSymbolWidth: String,
-        digitWidth: String
-    )
 }

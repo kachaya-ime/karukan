@@ -97,8 +97,6 @@ class KarukanInputMethodService : InputMethodService() {
 
         preferencesManager = PreferencesManager(this) { updatedSettings ->
             if (::engine.isInitialized) {
-                engine.setNThreads(updatedSettings.nThreads)
-                engine.updateRomajiConfig(updatedSettings)
                 engine.updateEngineConfig(updatedSettings)
             }
             mainHandler.post {
@@ -110,8 +108,6 @@ class KarukanInputMethodService : InputMethodService() {
         preferencesManager.startListening()
 
         if (::engine.isInitialized) {
-            engine.setNThreads(settings.nThreads)
-            engine.updateRomajiConfig(settings)
             engine.updateEngineConfig(settings)
         }
     }

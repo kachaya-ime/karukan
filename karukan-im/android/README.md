@@ -5,6 +5,10 @@ Android 向け Karukan IME フロントエンドモジュールです。
 
 まだ Android の IME としての実現可能性を検討している段階です。
 
+## ドキュメント
+
+- [実装仕様書 (IMPLEMENTATION.md)](IMPLEMENTATION.md) - JNI (Rust) 連携仕様および主要コンポーネントの実装情報
+
 ## 機能仕様
 
 - **入力インターフェース**:
@@ -24,6 +28,11 @@ Android 向け Karukan IME フロントエンドモジュールです。
   - Gradle タスク `downloadAssets`: ビルド前に HuggingFace から `jinen-v2-xsmall-Q5_K_M.gguf` および `tokenizer.json` を取得
   - Gradle タスク `copyLegalInfo`: リポジトリルートからライセンスファイルを `src/main/assets/legal/` に同期
   - Gradle タスク `buildRust`: NDK を利用した Rust コード (`src/lib.rs`) の自動クロスコンパイル
+
+## TODO（今後の開発課題）
+
+- [ ] 候補一覧の表示方法の拡張・改善
+- [ ] 画面キーボードレイアウトのカスタマイズ機能
 
 ## ディレクトリ構成
 

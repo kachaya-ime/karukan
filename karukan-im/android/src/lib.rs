@@ -8,7 +8,7 @@ use karukan_engine::{
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 static CONVERTER: Mutex<Option<KanaKanjiConverter>> = Mutex::new(None);
@@ -19,6 +19,15 @@ static SYSTEM_DICT: Mutex<Option<Dictionary>> = Mutex::new(None);
 static USER_DICTS: Mutex<Vec<Dictionary>> = Mutex::new(Vec::new());
 
 static LATEST_CANCELLED_QUERY_ID: AtomicU64 = AtomicU64::new(0);
+static CURRENT_MAX_LEARNING_ENTRIES: AtomicUsize = AtomicUsize::new(LearningConfig::DEFAULT_MAX_ENTRIES);
+
+fn get_current_learning_config() -> LearningConfig {
+    let max_entries = CURRENT_MAX_LEARNING_ENTRIES.load(Ordering::Relaxed);
+    LearningConfig {
+        max_entries,
+        ..LearningConfig::default()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AndroidEngineConfig {
@@ -85,7 +94,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeInit<'
 
             let mut learn_guard = LEARNING_CACHE.lock().unwrap();
             if learn_guard.is_none() {
-                *learn_guard = Some(LearningCache::new(LearningConfig::default()));
+                *learn_guard = Some(LearningCache::new(get_current_learning_config()));
             }
 
             1
@@ -190,18 +199,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadUs
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSetNThreads<'a>(
-    _env: JNIEnv<'a>,
-    _class: JClass<'a>,
-    n_threads: jni::sys::jint,
-) {
-    let mut guard = CONVERTER.lock().unwrap();
-    if let Some(ref mut converter) = *guard {
-        converter.set_n_threads(n_threads as u32);
-    }
-}
-
-#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeCancelQuery<'a>(
     _env: JNIEnv<'a>,
     _class: JClass<'a>,
@@ -216,6 +213,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeCancel
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdateEngineConfig<'a>(
     mut env: JNIEnv<'a>,
     _class: JClass<'a>,
+    n_threads: jni::sys::jint,
     strategy: JString<'a>,
     max_latency_ms: jni::sys::jint,
     chunk_chars: jni::sys::jint,
@@ -224,22 +222,108 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
     chunk_alphabets: jni::sys::jint,
     beam_width: jni::sys::jint,
     beam_chars: jni::sys::jint,
+    punctuation: JString<'a>,
+    bracket: JString<'a>,
+    slash: JString<'a>,
+    _space: JString<'a>,
+    kana_symbol_width: JString<'a>,
+    ascii_symbol_width: JString<'a>,
+    digit_width: JString<'a>,
+    max_learning_entries: jni::sys::jint,
 ) {
+    // 1. 推論スレッド数の更新
+    if n_threads > 0 {
+        let mut guard = CONVERTER.lock().unwrap();
+        if let Some(ref mut converter) = *guard {
+            converter.set_n_threads(n_threads as u32);
+        }
+    }
+
+    // 2. AI推論パラメータの更新
     let strat_str: String = env
         .get_string(&strategy)
         .map(|s| s.into())
         .unwrap_or_else(|_| "adaptive".to_string());
 
-    let mut guard = ENGINE_CONFIG.lock().unwrap();
-    let config = guard.get_or_insert_with(AndroidEngineConfig::default);
-    config.strategy = strat_str;
-    config.max_latency_ms = max_latency_ms;
-    config.chunk_chars = chunk_chars;
-    config.chunk_symbols = chunk_symbols;
-    config.chunk_digits = chunk_digits;
-    config.chunk_alphabets = chunk_alphabets;
-    config.beam_width = beam_width;
-    config.beam_chars = beam_chars;
+    {
+        let mut guard = ENGINE_CONFIG.lock().unwrap();
+        let config = guard.get_or_insert_with(AndroidEngineConfig::default);
+        config.strategy = strat_str;
+        config.max_latency_ms = max_latency_ms;
+        config.chunk_chars = chunk_chars;
+        config.chunk_symbols = chunk_symbols;
+        config.chunk_digits = chunk_digits;
+        config.chunk_alphabets = chunk_alphabets;
+        config.beam_width = beam_width;
+        config.beam_chars = beam_chars;
+    }
+
+    // 3. ローマ字・記号設定の更新
+    let p_str: String = env.get_string(&punctuation).map(|s| s.into()).unwrap_or_default();
+    let b_str: String = env.get_string(&bracket).map(|s| s.into()).unwrap_or_default();
+    let sl_str: String = env.get_string(&slash).map(|s| s.into()).unwrap_or_default();
+    let kw_str: String = env.get_string(&kana_symbol_width).map(|s| s.into()).unwrap_or_default();
+    let aw_str: String = env.get_string(&ascii_symbol_width).map(|s| s.into()).unwrap_or_default();
+    let dw_str: String = env.get_string(&digit_width).map(|s| s.into()).unwrap_or_default();
+
+    let p_style = match p_str.as_str() {
+        "comma_period" => PunctuationStyle::CommaPeriod,
+        _ => PunctuationStyle::KutenTouten,
+    };
+    let b_style = match b_str.as_str() {
+        "square" => BracketStyle::Square,
+        _ => BracketStyle::Corner,
+    };
+    let sl_style = match sl_str.as_str() {
+        "slash" => SlashStyle::Slash,
+        _ => SlashStyle::MiddleDot,
+    };
+
+    let symbol_style = SymbolStyle {
+        punctuation: p_style,
+        bracket: b_style,
+        slash: sl_style,
+    };
+
+    let parse_width = |s: &str| match s {
+        "half" => Width::Half,
+        _ => Width::Full,
+    };
+
+    let width_rules = WidthRules {
+        kana_symbol: parse_width(&kw_str),
+        ascii_symbol: parse_width(&aw_str),
+        digit: parse_width(&dw_str),
+    };
+
+    {
+        let mut guard = ROMAJI_CONVERTER.lock().unwrap();
+        *guard = Some(RomajiConverter::with_rules(symbol_style, width_rules));
+    }
+
+    // 4. 最大学習数の更新
+    let max_entries_usize = if max_learning_entries > 0 {
+        max_learning_entries as usize
+    } else {
+        LearningConfig::DEFAULT_MAX_ENTRIES
+    };
+    CURRENT_MAX_LEARNING_ENTRIES.store(max_entries_usize, Ordering::Relaxed);
+
+    {
+        let mut guard = LEARNING_CACHE.lock().unwrap();
+        let config = get_current_learning_config();
+
+        if let Some(ref old_cache) = *guard {
+            let mut new_cache = LearningCache::new(config);
+            let all_entries = old_cache.prefix_lookup("");
+            for (reading, surface, _) in all_entries.into_iter().rev() {
+                new_cache.record(&reading, &surface);
+            }
+            *guard = Some(new_cache);
+        } else {
+            *guard = Some(LearningCache::new(config));
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -419,7 +503,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRecord
 
     let mut guard = LEARNING_CACHE.lock().unwrap();
     if guard.is_none() {
-        *guard = Some(LearningCache::new(LearningConfig::default()));
+        *guard = Some(LearningCache::new(get_current_learning_config()));
     }
     if let Some(ref mut cache) = *guard {
         cache.record(&reading_str, &surface_str);
@@ -432,8 +516,10 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeClearL
     _class: JClass<'a>,
 ) {
     let mut guard = LEARNING_CACHE.lock().unwrap();
-    *guard = Some(LearningCache::new(LearningConfig::default()));
+    *guard = Some(LearningCache::new(get_current_learning_config()));
 }
+
+
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomajiToHiragana<'a>(
@@ -474,55 +560,4 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomaji
         .unwrap_or_else(|_| env.new_string("").unwrap())
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdateRomajiConfig<'a>(
-    mut env: JNIEnv<'a>,
-    _this: JObject<'a>,
-    punctuation: JString<'a>,
-    bracket: JString<'a>,
-    slash: JString<'a>,
-    _space: JString<'a>,
-    kana_symbol_width: JString<'a>,
-    ascii_symbol_width: JString<'a>,
-    digit_width: JString<'a>,
-) {
-    let p_str: String = env.get_string(&punctuation).map(|s| s.into()).unwrap_or_default();
-    let b_str: String = env.get_string(&bracket).map(|s| s.into()).unwrap_or_default();
-    let sl_str: String = env.get_string(&slash).map(|s| s.into()).unwrap_or_default();
-    let kw_str: String = env.get_string(&kana_symbol_width).map(|s| s.into()).unwrap_or_default();
-    let aw_str: String = env.get_string(&ascii_symbol_width).map(|s| s.into()).unwrap_or_default();
-    let dw_str: String = env.get_string(&digit_width).map(|s| s.into()).unwrap_or_default();
 
-    let p_style = match p_str.as_str() {
-        "comma_period" => PunctuationStyle::CommaPeriod,
-        _ => PunctuationStyle::KutenTouten,
-    };
-    let b_style = match b_str.as_str() {
-        "square" => BracketStyle::Square,
-        _ => BracketStyle::Corner,
-    };
-    let sl_style = match sl_str.as_str() {
-        "slash" => SlashStyle::Slash,
-        _ => SlashStyle::MiddleDot,
-    };
-
-    let symbol_style = SymbolStyle {
-        punctuation: p_style,
-        bracket: b_style,
-        slash: sl_style,
-    };
-
-    let parse_width = |s: &str| match s {
-        "half" => Width::Half,
-        _ => Width::Full,
-    };
-
-    let width_rules = WidthRules {
-        kana_symbol: parse_width(&kw_str),
-        ascii_symbol: parse_width(&aw_str),
-        digit: parse_width(&dw_str),
-    };
-
-    let mut guard = ROMAJI_CONVERTER.lock().unwrap();
-    *guard = Some(RomajiConverter::with_rules(symbol_style, width_rules));
-}
