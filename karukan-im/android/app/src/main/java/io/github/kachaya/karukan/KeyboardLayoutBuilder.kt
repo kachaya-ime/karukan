@@ -24,6 +24,7 @@ class KeyboardLayoutBuilder(
     private var activeButtons: List<KeyButton>? = null
 
     private var pendingNikoRowKey: Int? = null
+    private var currentHasInput: Boolean = false
     var onContainerSwapRequested: ((LinearLayout) -> Unit)? = null
     private var escButton: KeyButton? = null
     private val nikoKeyButtons = mutableMapOf<Int, KeyButton>()
@@ -159,12 +160,21 @@ class KeyboardLayoutBuilder(
         }
     }
 
+    fun updateNikoInputState(hasInput: Boolean) {
+        if (currentHasInput == hasInput) return
+        currentHasInput = hasInput
+        if (pendingNikoRowKey == null) {
+            val nikoContainer = createNikoKeyboardContainer()
+            onContainerSwapRequested?.invoke(nikoContainer)
+        }
+    }
+
     fun createNikoNumericKeyboardContainer(): LinearLayout {
         pendingNikoRowKey = null
         nikoKeyButtons.clear()
 
         return buildKeyboardLayout(
-            layoutSpec = NikoKeyboardLayout.getNumericLayoutSpec()
+            layoutSpec = NikoKeyboardLayout.getNumericLayoutSpec(currentHasInput)
         ) { keySpec, btn ->
             keySpec.normalType.nikoKeyIndex?.let { index ->
                 nikoKeyButtons[index] = btn
@@ -177,8 +187,9 @@ class KeyboardLayoutBuilder(
         nikoKeyButtons.clear()
         escButton = null
 
+        val isHiragana = currentInputMode == InputMode.HIRAGANA
         return buildKeyboardLayout(
-            layoutSpec = NikoKeyboardLayout.getLayoutSpec()
+            layoutSpec = NikoKeyboardLayout.getLayoutSpec(currentHasInput, isHiragana)
         ) { keySpec, btn ->
             if (keySpec.normalType == KeyType.ESC) {
                 escButton = btn
@@ -255,10 +266,8 @@ class KeyboardLayoutBuilder(
                 val mode = inputModeSupplier()
                 if (mode == InputMode.NUMERIC || mode == InputMode.ALPHANUMERIC) {
                     listener.onNikoTouchInput("*")
-                } else if (pendingNikoRowKey != null) {
-                    listener.onNikoTouchToggle()
                 } else {
-                    listener.onToggleSymbolPalette()
+                    listener.onNikoTouchToggle()
                 }
             },
             KeyType.KEY_POUND to { _ ->
@@ -266,7 +275,7 @@ class KeyboardLayoutBuilder(
                 if (mode == InputMode.NUMERIC || mode == InputMode.ALPHANUMERIC) {
                     listener.onNikoTouchInput("#")
                 } else {
-                    listener.onToggleEmojiPalette()
+                    listener.onToggleSymbolPalette()
                 }
             }
         )
@@ -345,8 +354,9 @@ class KeyboardLayoutBuilder(
         if (currentRow == null) {
             if (keyIdx in 0..9) {
                 pendingNikoRowKey = keyIdx
+                val isHiragana = currentInputMode == InputMode.HIRAGANA
                 val secondStageContainer = buildKeyboardLayout(
-                    NikoKeyboardLayout.getSecondStageLayoutSpec(keyIdx)
+                    NikoKeyboardLayout.getSecondStageLayoutSpec(keyIdx, isHiragana)
                 ) { keySpec, btn ->
                     val char = keySpec.normalText
                     if (char.isNotEmpty() && keySpec.normalType == KeyType.CHARACTER) {

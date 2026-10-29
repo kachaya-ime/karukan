@@ -589,6 +589,10 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun updateComposingText() {
         requestCursorUpdates()
+        val hasInput = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.updateNikoInputState(hasInput)
+        }
         if (isEnglishMode) {
             composingTextView.text = "英数モード"
             currentLiveCandidate = null

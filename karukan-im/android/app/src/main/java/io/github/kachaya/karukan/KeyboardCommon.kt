@@ -404,7 +404,10 @@ class KeyButton(
 
     val isActionKey: Boolean
         get() {
-            if ((currentType == KeyType.KEY_STAR || currentType == KeyType.KEY_POUND) && currentInputMode == InputMode.NUMERIC) {
+            if (currentType == KeyType.KEY_STAR && (currentInputMode == InputMode.NUMERIC || currentInputMode == InputMode.ALPHANUMERIC)) {
+                return false
+            }
+            if (currentType == KeyType.KEY_POUND && (currentInputMode == InputMode.NUMERIC || currentInputMode == InputMode.ALPHANUMERIC)) {
                 return false
             }
             return currentType != KeyType.CHARACTER && currentType != KeyType.NIKO_GUIDE_CHAR && !currentType.isNikoKey
@@ -483,9 +486,34 @@ class KeyButton(
 
         if (subT.isNotEmpty() && subT2.isNotEmpty() && currentType.isNikoKey && currentInputMode == InputMode.HIRAGANA) {
             drawNikoKeyText(canvas)
+        } else if (text.isEmpty() && subT.isNotEmpty() && subT2.isNotEmpty()) {
+            drawSubTextsAsTwoLines(canvas)
         } else {
             drawStandardKeyText(canvas)
         }
+    }
+
+    private fun drawSubTextsAsTwoLines(canvas: Canvas) {
+        val subT = spec.subText
+        val subT2 = spec.subText2
+        if (subT.isEmpty() || subT2.isEmpty()) return
+
+        val density = context.resources.displayMetrics.density
+        mainPaint.textSize = 11f * density // 通常フォントサイズの半分
+        mainPaint.color = currentTextColor
+
+        val combinedText = "$subT\n$subT2"
+        val layout = StaticLayout.Builder.obtain(combinedText, 0, combinedText.length, mainPaint, width)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setLineSpacing(0f, 1.0f)
+            .setIncludePad(false)
+            .build()
+
+        val y = (height - layout.height) / 2f
+        canvas.save()
+        canvas.translate(0f, y)
+        layout.draw(canvas)
+        canvas.restore()
     }
 
     private fun drawStandardKeyText(canvas: Canvas) {
@@ -570,6 +598,8 @@ class KeyButton(
             val isEng = inputMode != InputMode.HIRAGANA
             lastIsEnglishMode = isEng
             text = buildLangKeyText(isEng, isDark)
+        } else if (currentType == KeyType.KEY_STAR || spec.normalType == KeyType.KEY_STAR) {
+            invalidate()
         }
     }
 

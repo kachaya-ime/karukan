@@ -558,6 +558,12 @@ class KarukanInputView @JvmOverloads constructor(
         clearCandidateBar(inputMode != InputMode.HIRAGANA)
     }
 
+    fun updateNikoInputState(hasInput: Boolean) {
+        if (keyboardLayoutSetting == "niko") {
+            keyboardLayoutBuilder?.updateNikoInputState(hasInput)
+        }
+    }
+
     fun updateLanguageMode(isEnglishMode: Boolean) {
         updateInputMode(if (isEnglishMode) InputMode.ALPHANUMERIC else InputMode.HIRAGANA)
     }

@@ -79,9 +79,10 @@ android/
 
 ## ライセンス
 
-本 Android アプリモジュールのライセンスは、オリジナルプロジェクト（Karukan）のライセンス規定に準拠します。
+本 Android アプリモジュール（フロントエンド・UI）は、オリジナルプロジェクト（Karukan）のライセンス規定およびデュアルライセンスに準拠します。
 
-- **Karukan (本体・Android モジュール)**: MIT License または Apache License 2.0 (デュアルライセンス)
+- **Karukan (本体・エンジン)**: Copyright (c) togatoga, MIT License / Apache License 2.0 (デュアルライセンス)
+- **Karukan IME (Android フロントエンド・UI・インテグレーション)**: Copyright (c) kachaya, MIT License / Apache License 2.0 (デュアルライセンス)
 - **サードパーティデータ・素材**:
   - Mozc 由来の辞書データ・記号ルールに関する著作権表記については `THIRD_PARTY_LICENSES` を参照してください。
   - **ニコタッチ方式 (Niko Touch)**: パナソニック株式会社の携帯電話等で採用されていた「ニコタッチ」入力方式に基づくレイアウト・マッピング仕様を採用しています（詳細は `THIRD_PARTY_LICENSES` を参照）。
