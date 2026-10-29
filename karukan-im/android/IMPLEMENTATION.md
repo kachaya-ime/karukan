@@ -29,7 +29,6 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
   - `UserDictContentActivity.kt`: ユーザー辞書・追加辞書編集アクティビティ
   - `LearningListActivity.kt`: 学習履歴表示・編集アクティビティ
   - `SettingsActivity.kt`: 設定画面 (`PreferenceFragmentCompat`)
-  - `MainActivity.kt`: IME 有効化・セットアップガイド画面
 
 ---
 

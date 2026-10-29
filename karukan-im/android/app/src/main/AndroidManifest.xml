@@ -9,12 +9,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Karukan">
 
-        <!-- Setup / Settings Activity -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Karukan" />
-
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
@@ -23,6 +17,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

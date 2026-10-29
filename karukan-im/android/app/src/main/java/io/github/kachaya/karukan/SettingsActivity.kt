@@ -3,10 +3,8 @@ package io.github.kachaya.karukan
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import android.view.MenuItem
 import android.view.View
-import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,14 +28,6 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // 初回インストール時やストレージクリア後などでIMEが未設定の場合はセットアップ画面(MainActivity)へ誘導
-        if (savedInstanceState == null && !isImeConfigured()) {
-            val intent = Intent(this, MainActivity::class.java)
-            startActivity(intent)
-            finish()
-            return
-        }
-
         setContentView(R.layout.activity_settings)
 
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
@@ -56,15 +46,6 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
-    }
-
-    private fun isImeConfigured(): Boolean {
-        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
-        val enabledImes = imm.enabledInputMethodList
-        val isEnabled = enabledImes.any { it.packageName == packageName }
-        val defaultIme = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: return false
-        val isSelected = defaultIme.contains(packageName)
-        return isEnabled && isSelected
     }
 
     override fun onPreferenceStartFragment(caller: PreferenceFragmentCompat, pref: Preference): Boolean {
