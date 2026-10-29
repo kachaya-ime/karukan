@@ -8,12 +8,14 @@
         android:title="基本設定"
         app:iconSpaceReserved="false">
 
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="karukan_enabled"
-            android:summary="karukan AI (llama.cpp) かな漢字変換エンジンを使用します"
-            android:title="karukan AI 変換を有効にする"
-            app:iconSpaceReserved="false" />
+        <ListPreference
+            android:defaultValue="jinen-v2-xsmall-Q5_K_M.gguf"
+            android:entries="@array/pref_model_name_entries"
+            android:entryValues="@array/pref_model_name_values"
+            android:key="pref_model_name"
+            android:title="AI 変換モデル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
 
         <SwitchPreferenceCompat
             android:defaultValue="true"
@@ -28,15 +30,6 @@
             android:entryValues="@array/pref_keyboard_layout_values"
             android:key="pref_keyboard_layout"
             android:title="キーボード配列"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true" />
-
-        <ListPreference
-            android:defaultValue="normal"
-            android:entries="@array/pref_flick_sensitivity_entries"
-            android:entryValues="@array/pref_flick_sensitivity_values"
-            android:key="pref_flick_sensitivity"
-            android:title="フリック感度"
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true" />
 
@@ -103,19 +96,19 @@
 
         <Preference
             android:key="pref_export_learning"
-            android:summary="学習履歴をJSONファイルとしてバックアップ保存（エクスポート）します"
-            android:title="学習データのエクスポート"
+            android:summary="学習履歴をTSVファイル（.txt）としてバックアップします"
+            android:title="学習データのバックアップ"
             app:iconSpaceReserved="false" />
 
         <Preference
             android:key="pref_import_learning"
-            android:summary="バックアップJSONファイルから学習履歴を取り込み（インポート）します"
-            android:title="学習データのインポート"
+            android:summary="バックアップファイル（.txt）から学習履歴を復元します"
+            android:title="学習データの復元"
             app:iconSpaceReserved="false" />
 
         <Preference
             android:key="pref_preset_dict"
-            android:summary="ユーザー辞書ファイル (.bin, .tsv 等) の確認・有効化・追加・単語編集"
+            android:summary="ユーザー辞書ファイル (.txt, .bin 等) の確認・有効化・追加・単語編集"
             android:title="ユーザー辞書の管理"
             app:iconSpaceReserved="false" />
 
@@ -208,6 +201,13 @@
 
         <SwitchPreferenceCompat
             android:defaultValue="true"
+            android:key="pref_force_show_soft_keyboard"
+            android:summary="ハードウェアキーボード接続時も画面上のキーボードを表示します"
+            android:title="物理キーボード接続時も画面キーボードを表示"
+            app:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
             android:key="pref_auto_commit"
             android:summary="入力中のフォーカス外れ時に未確定文字を自動確定します"
             android:title="フォーカス移動時の自動確定"
@@ -240,7 +240,7 @@
 
         <Preference
             android:key="pref_third_party_licenses"
-            android:summary="Mozc 等オープンソースソフトウェアの著作権表示"
+            android:summary="Mozc、ニコタッチ方式等の著作権・法的表示"
             android:title="サードパーティライセンス"
             app:iconSpaceReserved="false" />
 

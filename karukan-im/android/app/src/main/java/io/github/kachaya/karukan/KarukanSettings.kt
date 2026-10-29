@@ -5,7 +5,7 @@ package io.github.kachaya.karukan
  */
 data class KarukanSettings(
     // 基本変換設定
-    val isKarukanEnabled: Boolean = true,
+    val modelName: String = "jinen-v2-xsmall-Q5_K_M.gguf",
     val isLiveConversionEnabled: Boolean = true,
     val numCandidates: Int = 9,
     val punctuationStyle: String = "kuten_touten",
@@ -17,12 +17,12 @@ data class KarukanSettings(
     val persona: String = "",
     val useContext: Boolean = true,
     val contextChars: Int = 10,
-    val maxLatencyMs: Int = 100,
+    val maxLatencyMs: Int = 300,
     val chunkChars: Int = 30,
     val chunkSymbols: Int = 1,
     val chunkDigits: Int = 0,
     val chunkAlphabets: Int = 0,
-    val beamWidth: Int = 3,
+    val beamWidth: Int = 9,
     val beamChars: Int = 30,
 
     // 変換学習設定
@@ -41,9 +41,9 @@ data class KarukanSettings(
 
     // キーボード UI 設定
     val keyboardLayout: String = "qwerty",
-    val flickSensitivity: String = "normal",
     val isVibrationEnabled: Boolean = true,
     val isSoundEnabled: Boolean = false,
+    val isForceShowSoftKeyboardEnabled: Boolean = true,
     val keyboardHeight: String = "medium",
     val keyboardTheme: String = "dark"
 )

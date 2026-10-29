@@ -1,8 +1,6 @@
 package io.github.kachaya.karukan
 
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.View
@@ -17,7 +15,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
+import androidx.core.widget.doOnTextChanged
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 
 /**
@@ -76,14 +78,9 @@ class LearningListActivity : AppCompatActivity() {
             showClearAllConfirmDialog()
         }
 
-        etSearchQuery.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                filterList(s.toString())
-            }
-
-            override fun afterTextChanged(s: Editable?) {}
-        })
+        etSearchQuery.doOnTextChanged { text, _, _, _ ->
+            filterList(text?.toString().orEmpty())
+        }
 
         loadData()
     }
@@ -117,13 +114,8 @@ class LearningListActivity : AppCompatActivity() {
         adapter.submitList(filtered)
         tvLearningCount.text = getString(R.string.learning_count_format, filtered.size)
 
-        if (filtered.isEmpty()) {
-            tvEmptyMessage.visibility = View.VISIBLE
-            rvLearningList.visibility = View.GONE
-        } else {
-            tvEmptyMessage.visibility = View.GONE
-            rvLearningList.visibility = View.VISIBLE
-        }
+        tvEmptyMessage.isVisible = filtered.isEmpty()
+        rvLearningList.isVisible = filtered.isNotEmpty()
     }
 
     private fun showDeleteConfirmDialog(item: LearningItem) {
@@ -154,13 +146,14 @@ class LearningListActivity : AppCompatActivity() {
 
     private class LearningListAdapter(
         private val onDeleteClick: (LearningItem) -> Unit
-    ) : RecyclerView.Adapter<LearningListAdapter.ViewHolder>() {
+    ) : ListAdapter<LearningItem, LearningListAdapter.ViewHolder>(DiffCallback) {
 
-        private var items: List<LearningItem> = emptyList()
+        object DiffCallback : DiffUtil.ItemCallback<LearningItem>() {
+            override fun areItemsTheSame(oldItem: LearningItem, newItem: LearningItem): Boolean =
+                oldItem.reading == newItem.reading && oldItem.surface == newItem.surface
 
-        fun submitList(newItems: List<LearningItem>) {
-            items = newItems
-            notifyDataSetChanged()
+            override fun areContentsTheSame(oldItem: LearningItem, newItem: LearningItem): Boolean =
+                oldItem == newItem
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -170,11 +163,9 @@ class LearningListActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val item = items[position]
+            val item = getItem(position)
             holder.bind(item, onDeleteClick)
         }
-
-        override fun getItemCount(): Int = items.size
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             private val tvSurface: TextView = itemView.findViewById(R.id.tvSurface)

@@ -3,6 +3,7 @@ package io.github.kachaya.karukan
 import android.content.Context
 import android.util.AttributeSet
 import android.view.ViewGroup
+import androidx.core.view.isGone
 
 /**
  * IME 変換候補の複数行表示（折り返しレイアウト）用カスタム ViewGroup
@@ -22,21 +23,20 @@ class CandidateFlowLayout @JvmOverloads constructor(
         var currentLineWidth = 0
         var currentLineHeight = 0
         var totalHeight = paddingTop + paddingBottom
+        var hasVisibleChildInLine = false
 
         val childWidthSpec = MeasureSpec.makeMeasureSpec(maxOf(0, widthSize), MeasureSpec.AT_MOST)
         val childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
 
-        var hasVisibleChildInLine = false
-
         for (i in 0 until childCount) {
             val child = getChildAt(i)
-            if (child.visibility == GONE) continue
+            if (child.isGone) continue
 
             child.measure(childWidthSpec, childHeightSpec)
             val childWidth = child.measuredWidth
             val childHeight = child.measuredHeight
 
-            if (hasVisibleChildInLine && currentLineWidth + horizontalGapPx + childWidth > widthSize) {
+            if (hasVisibleChildInLine && (currentLineWidth + horizontalGapPx + childWidth > widthSize)) {
                 totalHeight += currentLineHeight + verticalGapPx
                 currentLineWidth = childWidth
                 currentLineHeight = childHeight
@@ -65,12 +65,12 @@ class CandidateFlowLayout @JvmOverloads constructor(
 
         for (i in 0 until childCount) {
             val child = getChildAt(i)
-            if (child.visibility == GONE) continue
+            if (child.isGone) continue
 
             val childWidth = child.measuredWidth
             val childHeight = child.measuredHeight
 
-            if (hasVisibleChildInLine && x + horizontalGapPx + childWidth > paddingLeft + widthSize) {
+            if (hasVisibleChildInLine && (x + horizontalGapPx + childWidth > paddingLeft + widthSize)) {
                 x = paddingLeft
                 y += currentLineHeight + verticalGapPx
                 currentLineHeight = 0

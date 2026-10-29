@@ -1,8 +1,6 @@
 package io.github.kachaya.karukan
 
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.View
@@ -18,7 +16,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
+import androidx.core.widget.doOnTextChanged
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 
@@ -94,14 +96,9 @@ class UserDictContentActivity : AppCompatActivity() {
             showAddEntryDialog()
         }
 
-        etSearchQuery.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                filterList(s.toString())
-            }
-
-            override fun afterTextChanged(s: Editable?) {}
-        })
+        etSearchQuery.doOnTextChanged { text, _, _, _ ->
+            filterList(text?.toString().orEmpty())
+        }
 
         loadData()
     }
@@ -132,13 +129,8 @@ class UserDictContentActivity : AppCompatActivity() {
         adapter.submitList(filtered)
         tvEntryCount.text = "登録単語: ${filtered.size}件"
 
-        if (filtered.isEmpty()) {
-            tvEmptyMessage.visibility = View.VISIBLE
-            rvEntryList.visibility = View.GONE
-        } else {
-            tvEmptyMessage.visibility = View.GONE
-            rvEntryList.visibility = View.VISIBLE
-        }
+        tvEmptyMessage.isVisible = filtered.isEmpty()
+        rvEntryList.isVisible = filtered.isNotEmpty()
     }
 
     private fun showAddEntryDialog() {
@@ -265,13 +257,14 @@ class UserDictContentActivity : AppCompatActivity() {
     private class DictEntryAdapter(
         private val onEdit: (DictEntryItem) -> Unit,
         private val onDelete: (DictEntryItem) -> Unit
-    ) : RecyclerView.Adapter<DictEntryAdapter.ViewHolder>() {
+    ) : ListAdapter<DictEntryItem, DictEntryAdapter.ViewHolder>(DiffCallback) {
 
-        private var items: List<DictEntryItem> = emptyList()
+        object DiffCallback : DiffUtil.ItemCallback<DictEntryItem>() {
+            override fun areItemsTheSame(oldItem: DictEntryItem, newItem: DictEntryItem): Boolean =
+                oldItem.reading == newItem.reading && oldItem.surface == newItem.surface
 
-        fun submitList(newItems: List<DictEntryItem>) {
-            items = newItems
-            notifyDataSetChanged()
+            override fun areContentsTheSame(oldItem: DictEntryItem, newItem: DictEntryItem): Boolean =
+                oldItem == newItem
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -281,11 +274,9 @@ class UserDictContentActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val item = items[position]
+            val item = getItem(position)
             holder.bind(item, onEdit, onDelete)
         }
-
-        override fun getItemCount(): Int = items.size
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             private val tvSurface: TextView = itemView.findViewById(R.id.tvSurface)
@@ -303,11 +294,9 @@ class UserDictContentActivity : AppCompatActivity() {
                 tvReading.text = item.reading
 
                 val extraInfo = listOf(item.pos, item.comment).filter { it.isNotEmpty() }.joinToString(" | ")
+                tvPosComment.isVisible = extraInfo.isNotEmpty()
                 if (extraInfo.isNotEmpty()) {
-                    tvPosComment.visibility = View.VISIBLE
                     tvPosComment.text = extraInfo
-                } else {
-                    tvPosComment.visibility = View.GONE
                 }
 
                 btnEdit.setOnClickListener { onEdit(item) }

@@ -142,8 +142,11 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
     outputs.dir(assetsDir)
     outputs.upToDateWhen {
         val tokenizer = File(assetsDir, "tokenizer.json")
-        val model = File(assetsDir, "jinen-v2-xsmall-Q5_K_M.gguf")
-        tokenizer.exists() && tokenizer.length() > 0L && model.exists() && model.length() > 0L
+        val modelXSmall = File(assetsDir, "jinen-v2-xsmall-Q5_K_M.gguf")
+        val modelSmall = File(assetsDir, "jinen-v2-small-Q5_K_M.gguf")
+        tokenizer.exists() && tokenizer.length() > 0L &&
+            modelXSmall.exists() && modelXSmall.length() > 0L &&
+            modelSmall.exists() && modelSmall.length() > 0L
     }
 
     doLast {
@@ -153,7 +156,8 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
 
         val downloads = mapOf(
             "tokenizer.json" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/tokenizer.json",
-            "jinen-v2-xsmall-Q5_K_M.gguf" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/jinen-v2-xsmall-Q5_K_M.gguf"
+            "jinen-v2-xsmall-Q5_K_M.gguf" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/jinen-v2-xsmall-Q5_K_M.gguf",
+            "jinen-v2-small-Q5_K_M.gguf" to "https://huggingface.co/togatogah/jinen-v2-small.gguf/resolve/main/jinen-v2-small-Q5_K_M.gguf"
         )
 
         for ((fileName, urlString) in downloads) {
@@ -401,4 +405,5 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
+    implementation(libs.commons.compress)
 }

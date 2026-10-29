@@ -2,6 +2,7 @@ package io.github.kachaya.karukan
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.preference.PreferenceManager
 
 /**
@@ -13,10 +14,10 @@ class PreferencesManager(
 ) : SharedPreferences.OnSharedPreferenceChangeListener {
 
     private val prefs: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
+    private val defaultOptimalThreads: Int = KarukanEngine.calculateOptimalNThreads()
+
     var currentSettings: KarukanSettings = loadSettings()
         private set
-
-    private val defaultOptimalThreads: Int = KarukanEngine(context).calculateOptimalNThreads()
 
     fun startListening() {
         prefs.registerOnSharedPreferenceChangeListener(this)
@@ -27,45 +28,56 @@ class PreferencesManager(
         prefs.unregisterOnSharedPreferenceChangeListener(this)
     }
 
+    /**
+     * ライブ変換の有効/無効を設定する。
+     *
+     * 通常の設定項目は PreferenceFragmentCompat (設定画面UI) 経由で SharedPreferences が自動更新されますが、
+     * ライブ変換は IME 実行中（キーボード操作・ショートカット等）から動的に切り替えるため、
+     * プログラム側で直接書き換える専用のセッターを用意しています。
+     */
+    fun setLiveConversionEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean("pref_live_conversion", enabled) }
+    }
+
     fun loadSettings(): KarukanSettings {
         val settings = KarukanSettings(
-            isKarukanEnabled = prefs.getBoolean("karukan_enabled", true),
+            modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
-            numCandidates = prefs.getString("pref_num_candidates", "9")?.toIntOrNull() ?: 9,
-            punctuationStyle = prefs.getString("pref_punctuation", "kuten_touten") ?: "kuten_touten",
-            spaceStyle = prefs.getString("pref_space", "half") ?: "half",
+            numCandidates = prefs.getIntFromString("pref_num_candidates", 9),
+            punctuationStyle = prefs.getStringNonNull("pref_punctuation", "kuten_touten"),
+            spaceStyle = prefs.getStringNonNull("pref_space", "half"),
 
-            strategy = prefs.getString("pref_strategy", "adaptive") ?: "adaptive",
-            nThreads = prefs.getString("pref_n_threads", null)?.toIntOrNull() ?: defaultOptimalThreads,
-            persona = prefs.getString("pref_persona", "") ?: "",
+            strategy = prefs.getStringNonNull("pref_strategy", "adaptive"),
+            nThreads = prefs.getIntFromString("pref_n_threads", defaultOptimalThreads),
+            persona = prefs.getStringNonNull("pref_persona", ""),
             useContext = prefs.getBoolean("pref_use_context", true),
-            contextChars = prefs.getString("pref_context_chars", "10")?.toIntOrNull() ?: 10,
-            maxLatencyMs = prefs.getString("pref_max_latency_ms", "100")?.toIntOrNull() ?: 100,
-            chunkChars = prefs.getString("pref_chunk_chars", "30")?.toIntOrNull() ?: 30,
-            chunkSymbols = prefs.getString("pref_chunk_symbols", "1")?.toIntOrNull() ?: 1,
-            chunkDigits = prefs.getString("pref_chunk_digits", "0")?.toIntOrNull() ?: 0,
-            chunkAlphabets = prefs.getString("pref_chunk_alphabets", "0")?.toIntOrNull() ?: 0,
-            beamWidth = prefs.getString("pref_beam_width", "3")?.toIntOrNull() ?: 3,
-            beamChars = prefs.getString("pref_beam_chars", "30")?.toIntOrNull() ?: 30,
+            contextChars = prefs.getIntFromString("pref_context_chars", 10),
+            maxLatencyMs = prefs.getIntFromString("pref_max_latency_ms", 300),
+            chunkChars = prefs.getIntFromString("pref_chunk_chars", 30),
+            chunkSymbols = prefs.getIntFromString("pref_chunk_symbols", 1),
+            chunkDigits = prefs.getIntFromString("pref_chunk_digits", 0),
+            chunkAlphabets = prefs.getIntFromString("pref_chunk_alphabets", 0),
+            beamWidth = prefs.getIntFromString("pref_beam_width", 9),
+            beamChars = prefs.getIntFromString("pref_beam_chars", 30),
 
             isLearningEnabled = prefs.getBoolean("pref_learning_enabled", true),
-            maxLearningEntries = prefs.getString("pref_max_learning_entries", "10000")?.toIntOrNull() ?: 10000,
+            maxLearningEntries = prefs.getIntFromString("pref_max_learning_entries", 10000),
 
             isDateConversionEnabled = prefs.getBoolean("pref_date_conversion", true),
             isAutoCapitalizationEnabled = prefs.getBoolean("pref_auto_capitalization", true),
-            bracketStyle = prefs.getString("pref_bracket", "corner") ?: "corner",
-            slashStyle = prefs.getString("pref_slash", "middle_dot") ?: "middle_dot",
-            digitWidth = prefs.getString("pref_width_digit", "half") ?: "half",
-            asciiWidth = prefs.getString("pref_width_ascii", "full") ?: "full",
-            kanaSymbolWidth = prefs.getString("pref_width_kana_symbol", "full") ?: "full",
+            bracketStyle = prefs.getStringNonNull("pref_bracket", "corner"),
+            slashStyle = prefs.getStringNonNull("pref_slash", "middle_dot"),
+            digitWidth = prefs.getStringNonNull("pref_width_digit", "half"),
+            asciiWidth = prefs.getStringNonNull("pref_width_ascii", "full"),
+            kanaSymbolWidth = prefs.getStringNonNull("pref_width_kana_symbol", "full"),
 
-            keyboardLayout = prefs.getString("pref_keyboard_layout", "qwerty") ?: "qwerty",
-            flickSensitivity = prefs.getString("pref_flick_sensitivity", "normal") ?: "normal",
+            keyboardLayout = prefs.getStringNonNull("pref_keyboard_layout", "qwerty"),
             isVibrationEnabled = prefs.getBoolean("pref_vibration_enabled", true),
             isSoundEnabled = prefs.getBoolean("pref_sound_enabled", false),
+            isForceShowSoftKeyboardEnabled = prefs.getBoolean("pref_force_show_soft_keyboard", true),
             isAutoCommitEnabled = prefs.getBoolean("pref_auto_commit", true),
-            keyboardHeight = prefs.getString("pref_keyboard_height", "medium") ?: "medium",
-            keyboardTheme = prefs.getString("pref_keyboard_theme", "dark") ?: "dark"
+            keyboardHeight = prefs.getStringNonNull("pref_keyboard_height", "medium"),
+            keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "dark")
         )
         currentSettings = settings
         return settings
@@ -75,4 +87,12 @@ class PreferencesManager(
         val updated = loadSettings()
         onSettingsChanged(updated)
     }
+}
+
+private fun SharedPreferences.getStringNonNull(key: String, defaultValue: String): String {
+    return getString(key, defaultValue) ?: defaultValue
+}
+
+private fun SharedPreferences.getIntFromString(key: String, defaultValue: Int): Int {
+    return getString(key, null)?.toIntOrNull() ?: defaultValue
 }

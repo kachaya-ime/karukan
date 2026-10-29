@@ -1,24 +1,28 @@
 # karukan-im (Android)
 
 Android 向け Karukan IME フロントエンドモジュールです。  
-`karukan-engine` (Rust) を JNI (`libkarukan_android.so`) 経由で呼び出し、オンデバイスで動作する言語モデル（llama.cpp / Jinen）を用いたかな漢字変換機能を提供します。
-
-まだ Android の IME としての実現可能性を検討している段階です。
+`karukan-engine` (Rust) を JNI (`libkarukan_android.so`) 経由で呼び出し、オンデバイスで動作する言語モデル（llama.cpp / Jinen）を用いたリアルタイムAIかな漢字変換機能を提供します。
 
 ## ドキュメント
 
-- [実装仕様書 (IMPLEMENTATION.md)](IMPLEMENTATION.md) - JNI (Rust) 連携仕様および主要コンポーネントの実装情報
+- [実装仕様書 (IMPLEMENTATION.md)](IMPLEMENTATION.md) - JNI (Rust) 連携仕様、コンポーネント構成、および物理キーボードショートカット一覧
 
 ## 機能仕様
 
 - **入力インターフェース**:
   - QWERTY ソフトウェアキーボード（ローマ字入力対応）
+  - ニコタッチ入力（12キー配列）
   - 長音 (`-`)、スペース / 変換、確定、BS (Backspace)、クリアキー
   - 物理キーボード / エミュレータからの KeyEvent (`onKeyDown`) サポート
 - **変換処理**:
   - リアルタイムでのローマ字→ひらがな変換 (`RomajiConverter`)
   - Jinen GGUF モデルによるビームサーチ推論 (`KanaKanjiConverter`)
-  - 候補表示バーにおける候補の列挙およびテキストコミット (`InputConnection.commitText`)
+  - リアルタイムライブ変換および非同期クエリキャンセル (`cancelQuery`)
+  - 候補バーおよびフローティング候補表示、全画面多段展開表示
+- **辞書・学習機能**:
+  - システム辞書 (`dict.bin`)、追加プリセット辞書、ユーザー辞書の管理
+  - 選択候補の学習履歴記録および学習削除 (`Ctrl+Backspace` / `Ctrl+Delete`)
+  - 絵文字・記号パレット (`EmojiPaletteController`)
 - **システム対応**:
   - Android 15 (API レベル 35) Edge-to-Edge 仕様に準拠 (`WindowInsetsCompat` によるシステムバー領域のインセット調整)
 - **設定およびライセンス表示**:
@@ -29,17 +33,12 @@ Android 向け Karukan IME フロントエンドモジュールです。
   - Gradle タスク `copyLegalInfo`: リポジトリルートからライセンスファイルを `src/main/assets/legal/` に同期
   - Gradle タスク `buildRust`: NDK を利用した Rust コード (`src/lib.rs`) の自動クロスコンパイル
 
-## TODO（今後の開発課題）
-
-- [ ] 候補一覧の表示方法の拡張・改善
-- [ ] 画面キーボードレイアウトのカスタマイズ機能
-
 ## ディレクトリ構成
 
 ```text
 android/
 ├── app/                      # Android アプリケーションモジュール (Kotlin)
-│   ├── src/main/java/        # IME サービス、エンジンブリッジ、設定アクティビティ
+│   ├── src/main/java/        # IME サービス、エンジンブリッジ、設定アクティビティ、キーボードUI
 │   ├── src/main/res/         # レイアウト XML、Preference XML、各種リソース
 │   └── build.gradle.kts      # モジュールレベル Gradle ビルドスクリプト
 ├── src/                      # JNI ブリッジ用 Rust ソースコード (lib.rs)
@@ -85,4 +84,5 @@ android/
 - **Karukan (本体・Android モジュール)**: MIT License または Apache License 2.0 (デュアルライセンス)
 - **サードパーティデータ・素材**:
   - Mozc 由来の辞書データ・記号ルールに関する著作権表記については `THIRD_PARTY_LICENSES` を参照してください。
+  - **ニコタッチ方式 (Niko Touch)**: パナソニック株式会社の携帯電話等で採用されていた「ニコタッチ」入力方式に基づくレイアウト・マッピング仕様を採用しています（詳細は `THIRD_PARTY_LICENSES` を参照）。
   - **アプリアイコン (Android Robot)**: Android ロボットは、Google が作成および提供している作品から複製または変更したものであり、クリエイティブ・コモンズ 3.0 表示ライセンス (CC BY 3.0) に記載された条件に従って使用しています。

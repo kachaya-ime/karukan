@@ -16,7 +16,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.switchmaterial.SwitchMaterial
 
@@ -113,16 +116,16 @@ class PresetDictActivity : AppCompatActivity() {
         tvPresetDictCount.text = getString(R.string.preset_dict_count_format, items.size)
 
         if (items.isEmpty()) {
-            tvEmptyMessage.visibility = View.VISIBLE
-            rvPresetDictList.visibility = View.GONE
+            tvEmptyMessage.isVisible = true
+            rvPresetDictList.isVisible = false
         } else {
-            tvEmptyMessage.visibility = View.GONE
-            rvPresetDictList.visibility = View.VISIBLE
+            tvEmptyMessage.isVisible = false
+            rvPresetDictList.isVisible = true
         }
     }
 
     private fun importDictFromUri(uri: Uri) {
-        val fileName = uri.getFileName(this) ?: "imported_dict_${System.currentTimeMillis()}.bin"
+        val fileName = uri.getFileName(this) ?: "imported_dict_${System.currentTimeMillis()}.txt"
         executeWithProgress("辞書ファイル「$fileName」を読み込み中...", action = { progressCallback ->
             contentResolver.openInputStream(uri)?.use { stream ->
                 engine.importDictFile(stream, fileName, onProgress = { text, percent ->
@@ -165,13 +168,14 @@ class PresetDictActivity : AppCompatActivity() {
         private val onItemClick: (PresetDictItem) -> Unit,
         private val onToggle: (PresetDictItem, Boolean) -> Unit,
         private val onDelete: (PresetDictItem) -> Unit
-    ) : RecyclerView.Adapter<PresetDictAdapter.ViewHolder>() {
+    ) : ListAdapter<PresetDictItem, PresetDictAdapter.ViewHolder>(DiffCallback) {
 
-        private var items: List<PresetDictItem> = emptyList()
+        object DiffCallback : DiffUtil.ItemCallback<PresetDictItem>() {
+            override fun areItemsTheSame(oldItem: PresetDictItem, newItem: PresetDictItem): Boolean =
+                oldItem.file.absolutePath == newItem.file.absolutePath
 
-        fun submitList(newItems: List<PresetDictItem>) {
-            items = newItems
-            notifyDataSetChanged()
+            override fun areContentsTheSame(oldItem: PresetDictItem, newItem: PresetDictItem): Boolean =
+                oldItem == newItem
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -181,11 +185,9 @@ class PresetDictActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val item = items[position]
+            val item = getItem(position)
             holder.bind(item, onItemClick, onToggle, onDelete)
         }
-
-        override fun getItemCount(): Int = items.size
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             private val tvDictName: TextView = itemView.findViewById(R.id.tvDictName)

@@ -6,13 +6,16 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 data class LearningItem(
     val reading: String,
     val surface: String,
-    val count: Int = 1
+    val count: Int = 1,
+    val timestamp: Long = 0L
 )
 
 data class PresetDictItem(
@@ -27,6 +30,18 @@ data class DictEntryItem(
     val surface: String,
     val pos: String = "",
     val comment: String = ""
+)
+
+data class ProcessKeyResult(
+    val consumed: Boolean,
+    val commitText: String? = null,
+    val hasPreedit: Boolean = false,
+    val preeditText: String? = null,
+    val caret: Int = 0,
+    val hasCandidates: Boolean = false,
+    val candidates: List<String>? = null,
+    val hideCandidates: Boolean = false,
+    val auxText: String? = null
 )
 
 fun interface DictLoadProgressListener {
@@ -44,9 +59,11 @@ class KarukanEngine(private val context: Context) {
     private var learningCache: MutableList<LearningItem>? = null
     private val learningLock = Any()
 
+    private var currentLoadedModelName: String? = null
+
     companion object {
         private const val TAG = "KarukanEngine"
-        private const val MODEL_NAME = "jinen-v2-xsmall-Q5_K_M.gguf"
+        private const val DEFAULT_MODEL_NAME = "jinen-v2-xsmall-Q5_K_M.gguf"
         private const val TOKENIZER_NAME = "tokenizer.json"
         private const val SYSTEM_DICT_TGZ_NAME = "dict.tgz"
         private const val SYSTEM_DICT_FILE_NAME = "dict.bin"
@@ -89,15 +106,10 @@ class KarukanEngine(private val context: Context) {
             return try {
                 context.assets.open(fileName).use { input ->
                     FileOutputStream(targetFile).use { output ->
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        while (input.read(buffer).also { read = it } != -1) {
-                            output.write(buffer, 0, read)
-                        }
-                        output.flush()
-                        targetFile.absolutePath
+                        input.copyTo(output)
                     }
                 }
+                targetFile.absolutePath
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to prepare asset file: $fileName", e)
                 if (targetFile.exists()) targetFile.delete()
@@ -135,7 +147,6 @@ class KarukanEngine(private val context: Context) {
 
                         try {
                             extractTarGzAsset(context, assetPath, userDictDir, onProgress)
-                            Log.i(TAG, "Extracted tgz asset user dict $fileName to ${userDictDir.absolutePath}")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to extract tgz user dict asset $fileName", e)
                         }
@@ -155,7 +166,6 @@ class KarukanEngine(private val context: Context) {
                                     input.copyTo(output)
                                 }
                             }
-                            Log.i(TAG, "Decompressed asset user dict $fileName to ${targetFile.absolutePath}")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to copy user dict asset $fileName", e)
                         }
@@ -173,104 +183,60 @@ class KarukanEngine(private val context: Context) {
             targetDir: File,
             onProgress: ((progressText: String, percent: Int) -> Unit)? = null
         ) {
-            GZIPInputStream(context.assets.open(assetPath)).use { gzipIn ->
-                val header = ByteArray(512)
-                while (true) {
-                    var bytesRead = 0
-                    while (bytesRead < 512) {
-                        val read = gzipIn.read(header, bytesRead, 512 - bytesRead)
-                        if (read <= 0) break
-                        bytesRead += read
-                    }
-                    if (bytesRead < 512) break
-
-                    var allZero = true
-                    for (b in header) {
-                        if (b != 0.toByte()) {
-                            allZero = false
-                            break
-                        }
-                    }
-                    if (allZero) break
-
-                    val nameEnd = header.indexOf(0.toByte()).let { if (it in 0..99) it else 100 }
-                    val entryName = String(header, 0, nameEnd, Charsets.UTF_8).trim()
-
-                    val sizeStr = String(header, 124, 12, Charsets.UTF_8).trim { it <= ' ' || it.code == 0 }
-                    val entrySize = sizeStr.toLongOrNull(8) ?: 0L
-
-                    val fileName = File(entryName).name
-                    if (fileName == "dict.bin") {
-                        val outputFile = File(targetDir, fileName)
-                        val tempFile = File(targetDir, "$fileName.tmp")
-                        try {
-                            FileOutputStream(tempFile).use { output ->
-                                copyExactBytes(gzipIn, output, entrySize) { written, total ->
-                                    if (total > 0) {
-                                        val percent = ((written * 100) / total).toInt().coerceIn(0, 95)
-                                        val text = "展開中: ${formatFileSize(written)} / ${formatFileSize(total)} (${percent}%)"
-                                        onProgress?.invoke(text, percent)
+            context.assets.open(assetPath).use { rawIn ->
+                GZIPInputStream(rawIn).use { gzipIn ->
+                    TarArchiveInputStream(gzipIn).use { tarIn ->
+                        var entry = tarIn.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory) {
+                                val fileName = File(entry.name).name
+                                if (fileName == "dict.bin") {
+                                    val outputFile = File(targetDir, fileName)
+                                    val tempFile = File(targetDir, "$fileName.tmp")
+                                    try {
+                                        val totalSize = entry.size
+                                        FileOutputStream(tempFile).use { output ->
+                                            copyStreamWithProgress(tarIn, output, totalSize, onProgress)
+                                        }
+                                        if (outputFile.exists()) outputFile.delete()
+                                        tempFile.renameTo(outputFile)
+                                    } catch (e: Exception) {
+                                        if (tempFile.exists()) tempFile.delete()
+                                        throw e
                                     }
                                 }
                             }
-                            if (outputFile.exists()) outputFile.delete()
-                            tempFile.renameTo(outputFile)
-                        } catch (e: Exception) {
-                            if (tempFile.exists()) tempFile.delete()
-                            throw e
+                            entry = tarIn.nextEntry
                         }
-                        val padBytes = ((512 - (entrySize % 512)) % 512).toInt()
-                        if (padBytes > 0) {
-                            skipExactBytes(gzipIn, padBytes.toLong())
-                        }
-                        continue
                     }
-
-                    val totalBytesToSkip = entrySize + ((512 - (entrySize % 512)) % 512)
-                    skipExactBytes(gzipIn, totalBytesToSkip)
                 }
             }
         }
 
-        private fun copyExactBytes(
+        private fun copyStreamWithProgress(
             input: InputStream,
             output: FileOutputStream,
             totalBytes: Long,
-            onBytesWritten: ((written: Long, total: Long) -> Unit)? = null
+            onProgress: ((progressText: String, percent: Int) -> Unit)? = null
         ) {
             val buffer = ByteArray(65536)
-            var remaining = totalBytes
             var written = 0L
             var lastReportTime = 0L
 
-            while (remaining > 0) {
-                val toRead = minOf(buffer.size.toLong(), remaining).toInt()
-                val read = input.read(buffer, 0, toRead)
+            while (true) {
+                val read = input.read(buffer)
                 if (read <= 0) break
                 output.write(buffer, 0, read)
-                remaining -= read
                 written += read
 
                 val now = System.currentTimeMillis()
-                if (now - lastReportTime > 100 || remaining == 0L) {
+                if (now - lastReportTime > 100 || (totalBytes > 0 && written == totalBytes)) {
                     lastReportTime = now
-                    onBytesWritten?.invoke(written, totalBytes)
-                }
-            }
-        }
-
-        private fun skipExactBytes(input: InputStream, totalBytes: Long) {
-            var remaining = totalBytes
-            val buffer = ByteArray(8192)
-            while (remaining > 0) {
-                val toSkip = minOf(buffer.size.toLong(), remaining)
-                val skipped = input.skip(toSkip)
-                if (skipped <= 0) {
-                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-                    if (read <= 0) break
-                    remaining -= read
-                } else {
-                    remaining -= skipped
+                    if (totalBytes > 0) {
+                        val percent = ((written * 100) / totalBytes).toInt().coerceIn(0, 95)
+                        val text = "展開中: ${formatFileSize(written)} / ${formatFileSize(totalBytes)} (${percent}%)"
+                        onProgress?.invoke(text, percent)
+                    }
                 }
             }
         }
@@ -283,7 +249,6 @@ class KarukanEngine(private val context: Context) {
 
         init {
             try {
-                Log.i(TAG, "Loading native library libkarukan_android.so...")
                 try {
                     System.loadLibrary("c++_shared")
                 } catch (e: UnsatisfiedLinkError) {
@@ -291,14 +256,30 @@ class KarukanEngine(private val context: Context) {
                 }
                 System.loadLibrary("karukan_android")
                 isLibraryLoaded = true
-                Log.i(TAG, "Native library karukan_android loaded successfully.")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to load native library karukan_android", e)
+            }
+        }
+
+        fun calculateOptimalNThreads(): Int {
+            val processors = Runtime.getRuntime().availableProcessors()
+            return when {
+                processors >= 8 -> 4 // big.LITTLE構成の高性能コア群を想定
+                processors >= 4 -> 3
+                else -> maxOf(1, processors - 1)
             }
         }
     }
 
     init {
+        val initialModel = PreferencesManager(context) {}.loadSettings().modelName
+        switchModel(initialModel)
+    }
+
+    fun switchModel(modelName: String) {
+        val targetModelName = modelName.ifEmpty { DEFAULT_MODEL_NAME }
+        if (currentLoadedModelName == targetModelName && isLoaded) return
+
         executor.execute {
             try {
                 if (!isLibraryLoaded) {
@@ -307,22 +288,23 @@ class KarukanEngine(private val context: Context) {
                 }
 
                 prepareAssetFile(context, TOKENIZER_NAME)
-                val modelPath = prepareAssetFile(context, MODEL_NAME)
+                val modelPath = prepareAssetFile(context, targetModelName)
 
                 if (modelPath != null) {
                     val success = nativeInit(modelPath)
                     isLoaded = success
-                    Log.i(TAG, "KarukanEngine nativeInit success: $success ($modelPath)")
-
                     if (isLoaded) {
+                        currentLoadedModelName = targetModelName
                         loadSystemDict()
                         loadUserDicts()
+                    } else {
+                        Log.e(TAG, "KarukanEngine nativeInit failed for $targetModelName")
                     }
                 } else {
-                    Log.e(TAG, "Model file preparation failed ($MODEL_NAME)")
+                    Log.e(TAG, "Model file preparation failed ($targetModelName)")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing KarukanEngine", e)
+                Log.e(TAG, "Error switching model to $targetModelName", e)
             }
         }
     }
@@ -343,8 +325,7 @@ class KarukanEngine(private val context: Context) {
                     val totalPercent = 50 + (percent / 2)
                     onProgress?.invoke(message, totalPercent)
                 }
-                val success = nativeLoadSystemDict(systemDictFile.absolutePath, nativeListener)
-                Log.i(TAG, "loadSystemDict from ${systemDictFile.absolutePath}: $success")
+                nativeLoadSystemDict(systemDictFile.absolutePath, nativeListener)
             } else {
                 Log.w(TAG, "System dict file does not exist: ${systemDictFile.absolutePath}")
             }
@@ -376,14 +357,12 @@ class KarukanEngine(private val context: Context) {
                 val totalPercent = 50 + (percent / 2)
                 onProgress?.invoke(message, totalPercent)
             }
-            val success = nativeLoadUserDicts(dir.absolutePath, nativeListener)
-            Log.i(TAG, "loadUserDicts from ${dir.absolutePath}: $success")
+            nativeLoadUserDicts(dir.absolutePath, nativeListener)
 
             // メモリ上の学習データキャッシュを復元
             val learningFile = getLearningHistoryFile()
             if (learningFile.exists()) {
-                val loaded = nativeLoadLearning(learningFile.absolutePath)
-                Log.i(TAG, "nativeLoadLearning from ${learningFile.absolutePath}: $loaded")
+                nativeLoadLearning(learningFile.absolutePath)
             }
 
             synchronized(learningLock) {
@@ -593,6 +572,19 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
+    fun hiraganaToKatakana(hiragana: String): String {
+        if (hiragana.isEmpty()) return hiragana
+        val sb = StringBuilder(hiragana.length)
+        for (c in hiragana) {
+            if (c in '\u3041'..'\u3096' || c in '\u309D'..'\u309E') {
+                sb.append((c.code + 0x60).toChar())
+            } else {
+                sb.append(c)
+            }
+        }
+        return sb.toString()
+    }
+
     fun romajiToHiragana(query: String): String {
         if (query.isEmpty() || !isLibraryLoaded) return query
         return try {
@@ -613,18 +605,18 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun convert(query: String, maxCandidates: Int = 9, context: String = ""): List<String> {
+    fun convert(query: String, maxCandidates: Int = 9, context: String = "", queryId: Long = 0): List<String> {
         if (query.isBlank() || !isLibraryLoaded || !isLoaded) return listOf(query)
 
         return try {
-            val joinedCandidates = nativeConvert(query, maxCandidates, context)
+            val joinedCandidates = nativeConvert(query, maxCandidates, context, queryId)
             if (joinedCandidates.isNotEmpty()) {
                 joinedCandidates.split("\t")
             } else {
                 listOf(query)
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "Error converting query: $query", e)
+            Log.e(TAG, "Error converting query: $query, queryId: $queryId", e)
             listOf(query)
         }
     }
@@ -652,8 +644,9 @@ class KarukanEngine(private val context: Context) {
                         val reading = parts[0].trim()
                         val surface = parts[1].trim()
                         val count = if (parts.size >= 3) parts[2].trim().toIntOrNull() ?: 1 else 1
+                        val timestamp = if (parts.size >= 4) parts[3].trim().toLongOrNull() ?: 0L else 0L
                         if (reading.isNotEmpty() && surface.isNotEmpty()) {
-                            list.add(LearningItem(reading, surface, count))
+                            list.add(LearningItem(reading, surface, count, timestamp))
                         }
                     }
                 }
@@ -752,115 +745,85 @@ class KarukanEngine(private val context: Context) {
     }
 
     /**
-     * 機種変更・バックアップ用の学習データ JSON 出力機能
+     * 学習履歴ファイルをOutputStreamへそのまま出力する (バックアップ)
      */
-    fun exportLearningToJson(): String {
-        val items = getLearningEntries()
-        val sb = java.lang.StringBuilder()
-        sb.append("{\n")
-        sb.append("  \"version\": 1,\n")
-        sb.append("  \"app\": \"KarukanIME\",\n")
-        sb.append("  \"exportedAt\": ${System.currentTimeMillis()},\n")
-        sb.append("  \"entries\": [\n")
-        for ((index, item) in items.withIndex()) {
-            val escReading = escapeJsonString(item.reading)
-            val escSurface = escapeJsonString(item.surface)
-            sb.append("    {\"reading\": \"$escReading\", \"surface\": \"$escSurface\", \"count\": ${item.count}}")
-            if (index < items.size - 1) {
-                sb.append(",")
+    fun backupLearningToStream(outputStream: OutputStream) {
+        val sourceFile = getLearningHistoryFile()
+        if (sourceFile.exists()) {
+            sourceFile.inputStream().use { input ->
+                input.copyTo(outputStream)
             }
-            sb.append("\n")
+        } else {
+            outputStream.write("# karukan 学習履歴データ (TSV形式)\n".toByteArray(Charsets.UTF_8))
         }
-        sb.append("  ]\n")
-        sb.append("}\n")
-        return sb.toString()
     }
 
     /**
-     * 機種変更・バックアップからの学習データ JSON インポート機能
+     * 入力ストリームから学習履歴ファイルをそのまま読み込んで内部学習辞書ファイルに書き込み、ロードする (復元)
      */
-    fun importLearningFromJson(jsonString: String): Boolean {
+    fun restoreLearningFromStream(inputStream: InputStream): Boolean {
         try {
-            val jsonObject = org.json.JSONObject(jsonString)
-            val entriesArray = jsonObject.optJSONArray("entries") ?: return false
+            val destFile = getLearningHistoryFile()
+            destFile.outputStream().use { output ->
+                inputStream.copyTo(output)
+            }
 
-            for (i in 0 until entriesArray.length()) {
-                val itemObj = entriesArray.getJSONObject(i)
-                val reading = itemObj.optString("reading", "").trim()
-                val surface = itemObj.optString("surface", "").trim()
-                val count = itemObj.optInt("count", 1)
-
-                if (reading.isNotEmpty() && surface.isNotEmpty()) {
-                    repeat(maxOf(1, count)) {
-                        if (isLibraryLoaded && isLoaded) {
-                            nativeRecordLearning(reading, surface)
-                        }
-                    }
-                }
+            if (isLibraryLoaded && isLoaded) {
+                nativeLoadLearning(destFile.absolutePath)
             }
 
             synchronized(learningLock) {
                 learningCache = null
             }
-
-            fileIoExecutor.execute {
-                if (isLibraryLoaded && isLoaded) {
-                    nativeSaveLearning(getLearningHistoryFile().absolutePath)
-                }
-            }
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Error importing learning from JSON", e)
+            Log.e(TAG, "Error restoring learning history stream", e)
             return false
         }
     }
 
-    private fun escapeJsonString(str: String): String {
-        return str.replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-    }
+    @Volatile
+    private var cachedEmojiCategories: Map<String, List<String>>? = null
 
     fun getEmojiCategories(): Map<String, List<String>> {
-        val categories = LinkedHashMap<String, List<String>>()
-        val paint = Paint()
-        try {
-            context.assets.open("emoji_categories.txt").bufferedReader(Charsets.UTF_8).useLines { lines ->
-                for (line in lines) {
-                    val parts = line.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val name = parts[0].trim()
-                        val emojis = parts[1].split(",")
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() && paint.hasGlyph(it) }
-                        if (emojis.isNotEmpty()) {
-                            categories[name] = emojis
+        cachedEmojiCategories?.let { return it }
+        synchronized(this) {
+            cachedEmojiCategories?.let { return it }
+            val categories = LinkedHashMap<String, List<String>>()
+            val paint = Paint()
+            try {
+                context.assets.open("emoji_categories.txt").bufferedReader(Charsets.UTF_8).useLines { lines ->
+                    for (line in lines) {
+                        val parts = line.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val name = parts[0].trim()
+                            val emojis = parts[1].split(",")
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() && paint.hasGlyph(it) }
+                            if (emojis.isNotEmpty()) {
+                                categories[name] = emojis
+                            }
                         }
                     }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading emoji categories from assets", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading emoji categories from assets", e)
+            cachedEmojiCategories = categories
+            return categories
         }
-        return categories
     }
 
-    fun calculateOptimalNThreads(): Int {
-        val processors = Runtime.getRuntime().availableProcessors()
-        return when {
-            processors >= 8 -> 4 // big.LITTLE構成の高性能コア群を想定
-            processors >= 4 -> 3
-            else -> maxOf(1, processors - 1)
-        }
-    }
+    fun calculateOptimalNThreads(): Int = Companion.calculateOptimalNThreads()
 
     /**
      * KarukanSettings のすべての設定値をエンジンおよびネイティブ各コンポーネントへ一括反映します
      */
     fun updateEngineConfig(settings: KarukanSettings) {
         if (!isLibraryLoaded) return
+        if (settings.modelName.isNotEmpty() && settings.modelName != currentLoadedModelName) {
+            switchModel(settings.modelName)
+        }
         try {
             nativeUpdateEngineConfig(
                 nThreads = settings.nThreads,
@@ -880,6 +843,7 @@ class KarukanEngine(private val context: Context) {
                 asciiSymbolWidth = settings.asciiWidth,
                 digitWidth = settings.digitWidth,
                 maxLearningEntries = settings.maxLearningEntries,
+                isLearningEnabled = settings.isLearningEnabled,
                 isDateConversionEnabled = settings.isDateConversionEnabled
             )
         } catch (e: Throwable) {
@@ -924,14 +888,28 @@ class KarukanEngine(private val context: Context) {
         asciiSymbolWidth: String,
         digitWidth: String,
         maxLearningEntries: Int,
+        isLearningEnabled: Boolean,
         isDateConversionEnabled: Boolean
     )
+
+    fun processKey(keysym: Int, modifiers: Int, isRelease: Boolean = false): ProcessKeyResult {
+        if (!isLibraryLoaded) return ProcessKeyResult(consumed = false)
+        return try {
+            nativeProcessKey(keysym, modifiers, isRelease) ?: ProcessKeyResult(consumed = false)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error in processKey: keysym=$keysym, modifiers=$modifiers", e)
+            ProcessKeyResult(consumed = false)
+        }
+    }
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeProcessKey(keysym: Int, modifiers: Int, isRelease: Boolean): ProcessKeyResult?
 
     @Suppress("JniMissingFunction")
     private external fun nativeCancelQuery(queryId: Long)
 
     @Suppress("JniMissingFunction")
-    private external fun nativeConvert(query: String, maxCandidates: Int, context: String): String
+    private external fun nativeConvert(query: String, maxCandidates: Int, context: String, queryId: Long): String
 
     @Suppress("JniMissingFunction")
     private external fun nativeRecordLearning(reading: String, surface: String)

@@ -1,65 +1,20 @@
+mod config;
+mod converter;
+mod dict_engine;
+
+use config::*;
+use converter::*;
+use dict_engine::*;
+
 use jni::JNIEnv;
-use jni::objects::{JClass, JObject, JString};
-use jni::sys::jboolean;
+use jni::objects::{JClass, JObject, JString, JValue};
+use jni::sys::{jboolean, jobject};
 use karukan_engine::{
-    AlphabetRewriter, BracketStyle, DateConfig, DateRewriter, Dictionary, EmojiRewriter,
-    HalfWidthKatakanaRewriter, KanaKanjiConverter, LearningCache, LearningConfig, ModelSource,
-    NumberRewriter, PunctuationStyle, Rewriter, RomajiConverter, SlashStyle, SymbolRewriter,
-    SymbolStyle, Width, WidthRules,
+    BracketStyle, Dictionary, KanaKanjiConverter, LearningCache, ModelSource, PunctuationStyle,
+    RomajiConverter, SlashStyle, SymbolStyle, Width, WidthRules,
 };
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
-
-static CONVERTER: Mutex<Option<KanaKanjiConverter>> = Mutex::new(None);
-static ROMAJI_CONVERTER: Mutex<Option<RomajiConverter>> = Mutex::new(None);
-static DATE_REWRITER: Mutex<Option<DateRewriter>> = Mutex::new(None);
-static LEARNING_CACHE: Mutex<Option<LearningCache>> = Mutex::new(None);
-static SYSTEM_DICT: Mutex<Option<Dictionary>> = Mutex::new(None);
-static USER_DICTS: Mutex<Vec<Dictionary>> = Mutex::new(Vec::new());
-
-static LATEST_CANCELLED_QUERY_ID: AtomicU64 = AtomicU64::new(0);
-static CURRENT_MAX_LEARNING_ENTRIES: AtomicUsize = AtomicUsize::new(LearningConfig::DEFAULT_MAX_ENTRIES);
-static IS_DATE_CONVERSION_ENABLED: AtomicBool = AtomicBool::new(true);
-
-fn get_current_learning_config() -> LearningConfig {
-    let max_entries = CURRENT_MAX_LEARNING_ENTRIES.load(Ordering::Relaxed);
-    LearningConfig {
-        max_entries,
-        ..LearningConfig::default()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AndroidEngineConfig {
-    pub strategy: String,
-    pub max_latency_ms: i32,
-    pub chunk_chars: i32,
-    pub chunk_symbols: i32,
-    pub chunk_digits: i32,
-    pub chunk_alphabets: i32,
-    pub beam_width: i32,
-    pub beam_chars: i32,
-}
-
-impl Default for AndroidEngineConfig {
-    fn default() -> Self {
-        Self {
-            strategy: "adaptive".to_string(),
-            max_latency_ms: 100,
-            chunk_chars: 30,
-            chunk_symbols: 1,
-            chunk_digits: 0,
-            chunk_alphabets: 0,
-            beam_width: 3,
-            beam_chars: 30,
-        }
-    }
-}
-
-static ENGINE_CONFIG: Mutex<Option<AndroidEngineConfig>> = Mutex::new(None);
-
+use std::sync::atomic::Ordering;
 
 fn report_progress(env: &mut JNIEnv, listener: &JObject, message: &str, percent: i32) {
     if listener.is_null() {
@@ -72,6 +27,7 @@ fn report_progress(env: &mut JNIEnv, listener: &JObject, message: &str, percent:
             "(Ljava/lang/String;I)V",
             &[(&msg_jstring).into(), percent.into()],
         );
+        let _ = env.delete_local_ref(JObject::from(msg_jstring));
     }
 }
 
@@ -85,6 +41,13 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeInit<'
         Ok(s) => s.into(),
         Err(_) => return 0,
     };
+
+    if let Ok(mut m_guard) = MODEL_PATH.lock() {
+        *m_guard = Some(path_str.clone());
+    }
+    if let Ok(mut e_guard) = ENGINE.lock() {
+        *e_guard = None;
+    }
 
     let path_buf = PathBuf::from(path_str);
     let source = ModelSource::Path(path_buf);
@@ -116,6 +79,13 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadSy
         Ok(s) => s.into(),
         Err(_) => return 0,
     };
+
+    if let Ok(mut s_guard) = SYSTEM_DICT_PATH.lock() {
+        *s_guard = Some(path_str.clone());
+    }
+    if let Ok(mut e_guard) = ENGINE.lock() {
+        *e_guard = None;
+    }
 
     report_progress(&mut env, &progress_listener, "システム辞書をロード中...", 50);
 
@@ -153,6 +123,13 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadUs
         Ok(s) => s.into(),
         Err(_) => return 0,
     };
+
+    if let Ok(mut u_guard) = USER_DICT_DIR.lock() {
+        *u_guard = Some(dir_str.clone());
+    }
+    if let Ok(mut e_guard) = ENGINE.lock() {
+        *e_guard = None;
+    }
 
     report_progress(&mut env, &progress_listener, "追加辞書ファイルを確認中...", 5);
 
@@ -232,11 +209,12 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
     ascii_symbol_width: JString<'a>,
     digit_width: JString<'a>,
     max_learning_entries: jni::sys::jint,
+    is_learning_enabled: jboolean,
     is_date_conversion_enabled: jboolean,
 ) {
     IS_DATE_CONVERSION_ENABLED.store(is_date_conversion_enabled != 0, Ordering::Relaxed);
+    IS_LEARNING_ENABLED.store(is_learning_enabled != 0, Ordering::Relaxed);
 
-    // 1. 推論スレッド数の更新
     if n_threads > 0 {
         let mut guard = CONVERTER.lock().unwrap();
         if let Some(ref mut converter) = *guard {
@@ -244,7 +222,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
         }
     }
 
-    // 2. AI推論パラメータの更新
     let strat_str: String = env
         .get_string(&strategy)
         .map(|s| s.into())
@@ -263,7 +240,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
         config.beam_chars = beam_chars;
     }
 
-    // 3. ローマ字・記号設定の更新
     let p_str: String = env.get_string(&punctuation).map(|s| s.into()).unwrap_or_default();
     let b_str: String = env.get_string(&bracket).map(|s| s.into()).unwrap_or_default();
     let sl_str: String = env.get_string(&slash).map(|s| s.into()).unwrap_or_default();
@@ -306,27 +282,31 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
         *guard = Some(RomajiConverter::with_rules(symbol_style, width_rules));
     }
 
-    // 4. 最大学習数の更新
     let max_entries_usize = if max_learning_entries > 0 {
         max_learning_entries as usize
     } else {
-        LearningConfig::DEFAULT_MAX_ENTRIES
+        karukan_engine::LearningConfig::DEFAULT_MAX_ENTRIES
     };
-    CURRENT_MAX_LEARNING_ENTRIES.store(max_entries_usize, Ordering::Relaxed);
+    let previous_max_entries = CURRENT_MAX_LEARNING_ENTRIES.swap(max_entries_usize, Ordering::Relaxed);
 
     {
         let mut guard = LEARNING_CACHE.lock().unwrap();
         let config = get_current_learning_config();
 
-        if let Some(ref old_cache) = *guard {
-            let mut new_cache = LearningCache::new(config);
-            let all_entries = old_cache.prefix_lookup("");
-            for (reading, surface, _) in all_entries.into_iter().rev() {
-                new_cache.record(&reading, &surface);
+        match *guard {
+            Some(ref old_cache) => {
+                if previous_max_entries != max_entries_usize {
+                    let mut new_cache = LearningCache::new(config);
+                    let all_entries = old_cache.prefix_lookup("");
+                    for (reading, surface, _) in all_entries.into_iter().rev() {
+                        new_cache.record(&reading, &surface);
+                    }
+                    *guard = Some(new_cache);
+                }
             }
-            *guard = Some(new_cache);
-        } else {
-            *guard = Some(LearningCache::new(config));
+            None => {
+                *guard = Some(LearningCache::new(config));
+            }
         }
     }
 }
@@ -338,217 +318,24 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     input: JString<'a>,
     max_candidates: jni::sys::jint,
     context: JString<'a>,
+    query_id: jni::sys::jlong,
 ) -> JString<'a> {
+    let q_id = if query_id > 0 { query_id as u64 } else { 0 };
+
     let input_str: String = match env.get_string(&input) {
         Ok(s) => s.into(),
         Err(_) => return env.new_string("").unwrap(),
     };
-
-    if input_str.is_empty() {
-        return env.new_string("").unwrap();
-    }
 
     let context_str: String = match env.get_string(&context) {
         Ok(s) => s.into(),
         Err(_) => String::new(),
     };
 
-    let max_cand_usize = if max_candidates > 0 {
-        max_candidates as usize
-    } else {
-        let guard = ENGINE_CONFIG.lock().unwrap();
-        guard.as_ref().map(|c| c.beam_width as usize).unwrap_or(9)
-    };
+    let result = convert_query(&input_str, max_candidates, &context_str, q_id)
+        .unwrap_or_default();
 
-    // 高速な重複防止のための HashSet
-    let mut seen_candidates = HashSet::new();
-
-    // 0. プライマリ・リライター (日付・数値・記号・絵文字)
-    let mut primary_rewriter_candidates = Vec::new();
-
-    // 日付・時刻リライター
-    if IS_DATE_CONVERSION_ENABLED.load(Ordering::Relaxed) {
-        let mut guard = DATE_REWRITER.lock().unwrap();
-        let rewriter = guard.get_or_insert_with(|| DateRewriter::new(DateConfig::default()));
-        for (text, _desc) in rewriter.rewrite(&input_str) {
-            if seen_candidates.insert(text.clone()) {
-                primary_rewriter_candidates.push(text);
-            }
-        }
-    }
-
-    // 数値リライター (123 -> 百二十三, 壱百弐拾参, Ⅻ, ⑫, 0x7B 等)
-    for (text, _desc) in NumberRewriter.rewrite(&input_str) {
-        if seen_candidates.insert(text.clone()) {
-            primary_rewriter_candidates.push(text);
-        }
-    }
-
-    // 記号リライター (かっこ -> 「」, やじるし -> → 等)
-    for (text, _desc) in SymbolRewriter.rewrite(&input_str) {
-        if seen_candidates.insert(text.clone()) {
-            primary_rewriter_candidates.push(text);
-        }
-    }
-
-    // 絵文字リライター
-    for (emoji, _desc) in EmojiRewriter.rewrite(&input_str) {
-        if seen_candidates.insert(emoji.clone()) {
-            primary_rewriter_candidates.push(emoji);
-        }
-    }
-
-    // 1. ユーザー辞書
-    let mut user_dict_candidates = Vec::new();
-    {
-        let dict_guard = USER_DICTS.lock().unwrap();
-        for dict in dict_guard.iter() {
-            if let Some(res) = dict.exact_match_search(&input_str) {
-                for cand in res.candidates {
-                    if seen_candidates.insert(cand.surface.clone()) {
-                        user_dict_candidates.push(cand.surface.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. システム辞書
-    let mut system_dict_candidates = Vec::new();
-    {
-        let dict_guard = SYSTEM_DICT.lock().unwrap();
-        if let Some(ref dict) = *dict_guard {
-            if let Some(res) = dict.exact_match_search(&input_str) {
-                for cand in res.candidates {
-                    if !seen_candidates.contains(&cand.surface) {
-                        system_dict_candidates.push(cand.surface.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. AIモデル推論
-    let raw_model_candidates = {
-        let guard = CONVERTER.lock().unwrap();
-        if let Some(ref converter) = *guard {
-            converter
-                .convert(&input_str, &context_str, max_cand_usize)
-                .unwrap_or_else(|_| vec![input_str.clone()])
-        } else {
-            vec![input_str.clone()]
-        }
-    };
-
-    // 4. セカンダリ/フォールバック候補 (全角カタカナ・平仮名・半角カナ・英数)
-    let full_katakana = karukan_engine::hiragana_to_katakana(&input_str);
-
-    let mut half_katakana_list = Vec::new();
-    for (text, _desc) in HalfWidthKatakanaRewriter.rewrite(&input_str) {
-        half_katakana_list.push(text);
-    }
-
-    let mut alphabet_list = Vec::new();
-    for (text, _desc) in AlphabetRewriter.rewrite(&input_str) {
-        alphabet_list.push(text);
-    }
-
-    // 漢字変換・語彙変換候補と、単なるひらがな原形を分離
-    let mut main_conversion_candidates = Vec::new();
-    let mut plain_kana_candidates = Vec::new();
-
-    for mc in raw_model_candidates {
-        if mc == input_str {
-            if !plain_kana_candidates.contains(&mc) {
-                plain_kana_candidates.push(mc);
-            }
-        } else if seen_candidates.insert(mc.clone()) {
-            main_conversion_candidates.push(mc);
-        }
-    }
-
-    for sdc in system_dict_candidates {
-        if sdc == input_str {
-            if !plain_kana_candidates.contains(&sdc) {
-                plain_kana_candidates.push(sdc);
-            }
-        } else if seen_candidates.insert(sdc.clone()) {
-            main_conversion_candidates.push(sdc);
-        }
-    }
-
-    // 5. 優先順位に従って候補を結合:
-    //    1) プライマリ・リライター (日付・数値・記号・絵文字)
-    //    2) ユーザー辞書
-    //    3) AIモデル / システム辞書 による漢字・語彙変換候補
-    //    4) 全角カタカナ
-    //    5) 原文ひらがな
-    //    6) 半角カタカナ
-    //    7) アルファベット (ローマ字)
-    let mut candidates = Vec::with_capacity(16);
-
-    for rc in primary_rewriter_candidates {
-        candidates.push(rc);
-    }
-    for udc in user_dict_candidates {
-        candidates.push(udc);
-    }
-    for mc in main_conversion_candidates {
-        candidates.push(mc);
-    }
-    if !full_katakana.is_empty() && seen_candidates.insert(full_katakana.clone()) {
-        candidates.push(full_katakana);
-    }
-    for pk in plain_kana_candidates {
-        if seen_candidates.insert(pk.clone()) {
-            candidates.push(pk);
-        }
-    }
-    if seen_candidates.insert(input_str.clone()) {
-        candidates.push(input_str.clone());
-    }
-    for hk in half_katakana_list {
-        if seen_candidates.insert(hk.clone()) {
-            candidates.push(hk);
-        }
-    }
-    for alpha in alphabet_list {
-        if seen_candidates.insert(alpha.clone()) {
-            candidates.push(alpha);
-        }
-    }
-
-    // 6. 学習キャッシュ（学習履歴）による順位繰り上げ処理
-    let learn_guard = LEARNING_CACHE.lock().unwrap();
-    if let Some(ref cache) = *learn_guard {
-        let learned = cache.lookup(&input_str);
-        for (surface, _score) in learned.into_iter().rev() {
-            if let Some(pos) = candidates.iter().position(|c| c == &surface) {
-                let item = candidates.remove(pos);
-                candidates.insert(0, item);
-            } else {
-                candidates.insert(0, surface);
-            }
-        }
-    }
-
-    // 単漢字アノテーション（解説）が存在する場合は「漢字 (解説)」を補足する処理を追加
-    let mut final_candidates = Vec::with_capacity(candidates.len());
-    for cand in candidates {
-        if cand.chars().count() == 1 {
-            if let Some(desc) = karukan_engine::single_kanji_description(&cand) {
-                final_candidates.push(format!("{} ({})", cand, desc));
-            } else {
-                final_candidates.push(cand);
-            }
-        } else {
-            final_candidates.push(cand);
-        }
-    }
-
-    // タブ区切り (`\t`) で1本の JString として結合し、JNI 境界のオブジェクト作成・GC オーバーヘッドを極小化
-    let result_str = final_candidates.join("\t");
-    env.new_string(result_str)
+    env.new_string(result)
         .unwrap_or_else(|_| env.new_string("").unwrap())
 }
 
@@ -568,13 +355,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRecord
         Err(_) => return,
     };
 
-    let mut guard = LEARNING_CACHE.lock().unwrap();
-    if guard.is_none() {
-        *guard = Some(LearningCache::new(get_current_learning_config()));
-    }
-    if let Some(ref mut cache) = *guard {
-        cache.record(&reading_str, &surface_str);
-    }
+    record_learning(&reading_str, &surface_str);
 }
 
 #[unsafe(no_mangle)]
@@ -593,13 +374,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRemove
         Err(_) => return 0,
     };
 
-    let mut guard = LEARNING_CACHE.lock().unwrap();
-    if let Some(ref mut cache) = *guard {
-        if cache.remove_suggestion(&reading_str, &surface_str) {
-            return 1;
-        }
+    if remove_learning(&reading_str, &surface_str) {
+        1
+    } else {
+        0
     }
-    0
 }
 
 #[unsafe(no_mangle)]
@@ -614,13 +393,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSaveLe
     };
     let path = PathBuf::from(path_str);
 
-    let mut guard = LEARNING_CACHE.lock().unwrap();
-    if let Some(ref mut cache) = *guard {
-        if cache.save(&path).is_ok() {
-            return 1;
-        }
+    if save_learning(&path) {
+        1
+    } else {
+        0
     }
-    0
 }
 
 #[unsafe(no_mangle)]
@@ -635,17 +412,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadLe
     };
     let path = PathBuf::from(path_str);
 
-    if !path.exists() {
-        return 0;
+    if load_learning(&path) {
+        1
+    } else {
+        0
     }
-
-    let config = get_current_learning_config();
-    if let Ok(cache) = LearningCache::load(&path, config) {
-        let mut guard = LEARNING_CACHE.lock().unwrap();
-        *guard = Some(cache);
-        return 1;
-    }
-    0
 }
 
 #[unsafe(no_mangle)]
@@ -653,11 +424,8 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeClearL
     _env: JNIEnv<'a>,
     _class: JClass<'a>,
 ) {
-    let mut guard = LEARNING_CACHE.lock().unwrap();
-    *guard = Some(LearningCache::new(get_current_learning_config()));
+    clear_learning();
 }
-
-
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomajiToHiragana<'a>(
@@ -698,4 +466,79 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomaji
         .unwrap_or_else(|_| env.new_string("").unwrap())
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeProcessKey<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    keysym: jni::sys::jint,
+    modifiers: jni::sys::jint,
+    is_release: jboolean,
+) -> jobject {
+    let res = process_key_struct(keysym as u32, modifiers as u32, is_release == 0);
 
+    let cls = match env.find_class("io/github/kachaya/karukan/ProcessKeyResult") {
+        Ok(c) => c,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let commit_jstr = match res.commit_text {
+        Some(ref s) => env.new_string(s).ok().map(JObject::from),
+        None => None,
+    };
+
+    let preedit_jstr = match res.preedit_text {
+        Some(ref s) => env.new_string(s).ok().map(JObject::from),
+        None => None,
+    };
+
+    let aux_jstr = match res.aux_text {
+        Some(ref s) => env.new_string(s).ok().map(JObject::from),
+        None => None,
+    };
+
+    let candidates_jlist = if let Some(ref c_list) = res.candidates {
+        let array_list_cls = match env.find_class("java/util/ArrayList") {
+            Ok(c) => c,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        let list_obj = match env.new_object(&array_list_cls, "(I)V", &[JValue::Int(c_list.len() as i32)]) {
+            Ok(o) => o,
+            Err(_) => return std::ptr::null_mut(),
+        };
+
+        for item in c_list {
+            if let Ok(item_jstr) = env.new_string(item) {
+                let _ = env.call_method(&list_obj, "add", "(Ljava/lang/Object;)Z", &[JValue::Object(&item_jstr)]);
+                let _ = env.delete_local_ref(JObject::from(item_jstr));
+            }
+        }
+        Some(list_obj)
+    } else {
+        None
+    };
+
+    let null_obj = JObject::null();
+
+    let args = [
+        JValue::Bool(if res.consumed { 1 } else { 0 }),
+        JValue::Object(commit_jstr.as_ref().unwrap_or(&null_obj)),
+        JValue::Bool(if res.has_preedit { 1 } else { 0 }),
+        JValue::Object(preedit_jstr.as_ref().unwrap_or(&null_obj)),
+        JValue::Int(res.caret as i32),
+        JValue::Bool(if res.has_candidates { 1 } else { 0 }),
+        JValue::Object(candidates_jlist.as_ref().unwrap_or(&null_obj)),
+        JValue::Bool(if res.hide_candidates { 1 } else { 0 }),
+        JValue::Object(aux_jstr.as_ref().unwrap_or(&null_obj)),
+    ];
+
+    let obj = match env.new_object(
+        &cls,
+        "(ZLjava/lang/String;ZLjava/lang/String;IZLjava/util/List;ZLjava/lang/String;)V",
+        &args,
+    ) {
+        Ok(o) => o,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    obj.into_raw()
+}

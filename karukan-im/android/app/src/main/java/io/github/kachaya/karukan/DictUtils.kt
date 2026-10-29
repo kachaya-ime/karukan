@@ -8,8 +8,11 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import java.util.Locale
-import java.util.concurrent.Executors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 辞書・ファイル操作共通ユーティリティ
@@ -34,19 +37,13 @@ object DictUtils {
 /**
  * Uri から表示用ファイル名を取得する拡張関数
  */
-fun Uri.getFileName(context: Context): String? {
-    var name: String? = null
-    val cursor = context.contentResolver.query(this, null, null, null, null)
-    cursor?.use {
-        if (it.moveToFirst()) {
-            val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex != -1) {
-                name = it.getString(nameIndex)
-            }
-        }
+fun Uri.getFileName(context: Context): String? =
+    context.contentResolver.query(this, null, null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex != -1) cursor.getString(nameIndex) else null
+        } else null
     }
-    return name
-}
 
 /**
  * バックグラウンド処理を実行し、進捗ダイアログを更新・完了通知を行う拡張関数
@@ -81,7 +78,7 @@ fun AppCompatActivity.executeWithProgress(
         .create()
 
     val updateProgress: (String, Int) -> Unit = { message, percent ->
-        runOnUiThread {
+        lifecycleScope.launch(Dispatchers.Main) {
             tvMessage.text = message
             if (percent in 0..100) {
                 progressBar.isIndeterminate = false
@@ -94,17 +91,17 @@ fun AppCompatActivity.executeWithProgress(
 
     dialog.show()
 
-    Executors.newSingleThreadExecutor().execute {
-        val success = try {
-            action(updateProgress)
-        } catch (_: Exception) {
-            false
-        }
-        runOnUiThread {
-            if (!isFinishing && !isDestroyed) {
-                dialog.dismiss()
-                onComplete(success)
+    lifecycleScope.launch {
+        val success = withContext(Dispatchers.IO) {
+            try {
+                action(updateProgress)
+            } catch (_: Exception) {
+                false
             }
+        }
+        if (!isFinishing && !isDestroyed) {
+            dialog.dismiss()
+            onComplete(success)
         }
     }
 }

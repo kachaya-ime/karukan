@@ -38,7 +38,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center"
-        android:text="利用可能な辞書ファイルはありません。\n「+ 辞書追加」から .bin, .txt, .tsv ファイルを追加してください。"
+        android:text="利用可能な辞書ファイルはありません。\n「+ 辞書追加」から .bin, .txt ファイルを追加してください。"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="15sp"
         android:visibility="gone" />

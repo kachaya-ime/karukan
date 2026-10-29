@@ -3,8 +3,10 @@ package io.github.kachaya.karukan
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.MenuItem
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +29,15 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // 初回インストール時やストレージクリア後などでIMEが未設定の場合はセットアップ画面(MainActivity)へ誘導
+        if (savedInstanceState == null && !isImeConfigured()) {
+            val intent = Intent(this, MainActivity::class.java)
+            startActivity(intent)
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_settings)
 
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
@@ -45,6 +56,15 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+    }
+
+    private fun isImeConfigured(): Boolean {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return false
+        val enabledImes = imm.enabledInputMethodList
+        val isEnabled = enabledImes.any { it.packageName == packageName }
+        val defaultIme = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: return false
+        val isSelected = defaultIme.contains(packageName)
+        return isEnabled && isSelected
     }
 
     override fun onPreferenceStartFragment(caller: PreferenceFragmentCompat, pref: Preference): Boolean {
@@ -77,15 +97,15 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
 class SettingsFragment : PreferenceFragmentCompat() {
 
-    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+    private val backupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null) {
-            exportLearningDataToUri(uri)
+            backupLearningDataToUri(uri)
         }
     }
 
-    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    private val restoreLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
-            importLearningDataFromUri(uri)
+            restoreLearningDataFromUri(uri)
         }
     }
 
@@ -99,12 +119,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
 
         findPreference<Preference>("pref_export_learning")?.setOnPreferenceClickListener {
-            exportLauncher.launch("karukan_learning_backup.json")
+            backupLauncher.launch("karukan_learning_backup.txt")
             true
         }
 
         findPreference<Preference>("pref_import_learning")?.setOnPreferenceClickListener {
-            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+            restoreLauncher.launch(arrayOf("text/plain", "*/*"))
             true
         }
 
@@ -125,14 +145,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private fun exportLearningDataToUri(uri: Uri) {
+    private fun backupLearningDataToUri(uri: Uri) {
         val context = requireContext()
         val engine = KarukanEngine(context)
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val json = engine.exportLearningToJson()
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    outputStream.write(json.toByteArray(Charsets.UTF_8))
+                    engine.backupLearningToStream(outputStream)
                 }
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
@@ -145,16 +164,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private fun importLearningDataFromUri(uri: Uri) {
+    private fun restoreLearningDataFromUri(uri: Uri) {
         val context = requireContext()
         val engine = KarukanEngine(context)
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                } ?: ""
+                val success = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    engine.restoreLearningFromStream(inputStream)
+                } ?: false
 
-                val success = engine.importLearningFromJson(jsonString)
                 withContext(Dispatchers.Main) {
                     if (success) {
                         Toast.makeText(context, R.string.import_success, Toast.LENGTH_SHORT).show()

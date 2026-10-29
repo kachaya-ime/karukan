@@ -9,5 +9,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni = "0.21"
+toml = "0.8"
 karukan-engine = { workspace = true }
 karukan-im = { workspace = true }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

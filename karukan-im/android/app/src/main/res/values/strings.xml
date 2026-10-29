@@ -15,10 +15,10 @@
     <string name="delete">削除</string>
     <string name="preset_dict_title">ユーザー辞書の管理</string>
     <string name="preset_dict_count_format">ユーザー辞書: %d件</string>
-    <string name="export_learning_title">学習データのエクスポート</string>
-    <string name="import_learning_title">学習データのインポート</string>
-    <string name="export_success">学習データをエクスポートしました</string>
-    <string name="export_failed">学習データのエクスポートに失敗しました</string>
-    <string name="import_success">学習データをインポートしました</string>
-    <string name="import_failed">学習データのインポートに失敗しました</string>
+    <string name="export_learning_title">学習データのバックアップ</string>
+    <string name="import_learning_title">学習データの復元</string>
+    <string name="export_success">学習データをバックアップしました</string>
+    <string name="export_failed">学習データのバックアップに失敗しました</string>
+    <string name="import_success">学習データを復元しました</string>
+    <string name="import_failed">学習データの復元に失敗しました</string>
 </resources>

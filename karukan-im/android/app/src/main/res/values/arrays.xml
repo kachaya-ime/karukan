@@ -224,26 +224,26 @@
         <item>half</item>
     </string-array>
 
+    <!-- AI 変換モデル -->
+    <string-array name="pref_model_name_entries">
+        <item>jinen-v2-xsmall (超軽量・デフォルト)</item>
+        <item>jinen-v2-small (高精度・標準)</item>
+    </string-array>
+    <string-array name="pref_model_name_values">
+        <item>jinen-v2-xsmall-Q5_K_M.gguf</item>
+        <item>jinen-v2-small-Q5_K_M.gguf</item>
+    </string-array>
+
     <!-- キーボードレイアウト -->
     <string-array name="pref_keyboard_layout_entries">
         <item>QWERTY 入力 (デフォルト)</item>
-        <item>12キー (フリック入力)</item>
+        <item>タブレット入力 (US配列)</item>
+        <item>ニコタッチ入力 (12キー)</item>
     </string-array>
     <string-array name="pref_keyboard_layout_values">
         <item>qwerty</item>
-        <item>flick</item>
-    </string-array>
-
-    <!-- フリック感度 -->
-    <string-array name="pref_flick_sensitivity_entries">
-        <item>敏感 (浅いフリックで反応)</item>
-        <item>標準 (デフォルト)</item>
-        <item>鈍感 (誤タップ防止)</item>
-    </string-array>
-    <string-array name="pref_flick_sensitivity_values">
-        <item>sensitive</item>
-        <item>normal</item>
-        <item>insensitive</item>
+        <item>tablet</item>
+        <item>niko</item>
     </string-array>
 
     <!-- キーボードの高さ -->

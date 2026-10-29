@@ -52,7 +52,7 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
-            android:defaultValue="100"
+            android:defaultValue="300"
             android:entries="@array/pref_max_latency_entries"
             android:entryValues="@array/pref_max_latency_values"
             android:key="pref_max_latency_ms"
@@ -104,7 +104,7 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
-            android:defaultValue="3"
+            android:defaultValue="9"
             android:entries="@array/pref_beam_width_entries"
             android:entryValues="@array/pref_beam_width_values"
             android:key="pref_beam_width"
