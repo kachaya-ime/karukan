@@ -171,12 +171,11 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
     }
 }
 
-// ビルド前にリポジトリルートからライセンス情報・権利表記ファイルを assets/legal/ へ自動コピーするタスク
+// ビルド前にローカルのライセンス情報・権利表記ファイルを assets/legal/ へ自動コピーするタスク
 val copyLegalInfoTask = tasks.register<Copy>("copyLegalInfo") {
-    val repoRootDir = project.rootDir.parentFile.parentFile
-    from(file("$repoRootDir/THIRD_PARTY_LICENSES"))
-    from(file("$repoRootDir/LICENSE-MIT"))
-    from(file("$repoRootDir/LICENSE-APACHE"))
+    from(file("${projectDir}/legal/THIRD_PARTY_LICENSES"))
+    from(file("${projectDir}/legal/LICENSE-MIT"))
+    from(file("${projectDir}/legal/LICENSE-APACHE"))
     into(file("${projectDir}/src/main/assets/legal"))
 }
 

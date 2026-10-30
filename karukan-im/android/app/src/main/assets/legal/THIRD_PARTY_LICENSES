@@ -1,4 +1,28 @@
 ===============================================================================
+Karukan IME (Android Front-end, UI & Integration)
+===============================================================================
+
+Copyright (c) kachaya
+Licensed under the MIT License and Apache License, Version 2.0 (Dual License).
+
+===============================================================================
+Niko Touch Layout Specification
+===============================================================================
+
+The Niko Touch input method layout and mapping specifications are based on
+the "Niko Touch" input method used in mobile phones and other devices by
+Panasonic Corporation (パナソニック株式会社).
+
+===============================================================================
+Android Robot Icon
+===============================================================================
+
+The Android robot is reproduced or modified from work created and shared by
+Google and used according to terms described in the Creative Commons 3.0
+Attribution License (CC BY 3.0).
+https://creativecommons.org/licenses/by/3.0/
+
+===============================================================================
 Mozc - Japanese Input Method Editor
 https://github.com/google/mozc
 ===============================================================================
