@@ -93,6 +93,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.pref_karukan, rootKey)
 
+        try {
+            val pInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
+            findPreference<Preference>("pref_app_version")?.summary = pInfo.versionName
+        } catch (_: Exception) {
+            findPreference<Preference>("pref_app_version")?.summary = "1.1.0"
+        }
+
         findPreference<Preference>("pref_learning_list")?.setOnPreferenceClickListener {
             val intent = Intent(requireContext(), LearningListActivity::class.java)
             startActivity(intent)
@@ -124,6 +131,35 @@ class SettingsFragment : PreferenceFragmentCompat() {
             showLegalDialog("Karukan ライセンス", "legal/LICENSE-MIT")
             true
         }
+
+        findPreference<Preference>("pref_persona_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), PersonaListActivity::class.java)
+            startActivity(intent)
+            true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePersonaSummary()
+    }
+
+    private fun updatePersonaSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_persona_list", null)
+        val itemsList = if (json != null) {
+            PersonaItem.fromJsonString(json)
+        } else {
+            emptyList()
+        }
+        val enabledCount = itemsList.count { it.isEnabled }
+        val summary = if (itemsList.isEmpty()) {
+            "設定されているペルソナはありません"
+        } else {
+            "登録: ${itemsList.size}件 (有効: ${enabledCount}件)"
+        }
+        findPreference<Preference>("pref_persona_management")?.summary = summary
     }
 
     private fun backupLearningDataToUri(uri: Uri) {

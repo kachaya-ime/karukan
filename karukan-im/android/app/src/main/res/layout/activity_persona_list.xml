@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/personaListMainLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 操作ボタンヘッダー -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="8dp">
+
+        <Button
+            android:id="@+id/btnAddPersona"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="+ ペルソナ追加" />
+    </LinearLayout>
+
+    <!-- 件数カウント -->
+    <TextView
+        android:id="@+id/tvPersonaCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="8dp"
+        android:text="登録ペルソナ: 0件"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 空状態メッセージ -->
+    <TextView
+        android:id="@+id/tvEmptyMessage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="登録されているペルソナはありません。\n「+ ペルソナ追加」からよく利用する専門分野や文脈を追加してください。"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <!-- リスト表示 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvPersonaList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+</LinearLayout>

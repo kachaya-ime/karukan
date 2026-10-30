@@ -40,6 +40,16 @@ class PreferencesManager(
     }
 
     fun loadSettings(): KarukanSettings {
+        val personaJson = prefs.getString("pref_persona_list", null)
+        val personaItems = if (personaJson != null) {
+            PersonaItem.fromJsonString(personaJson)
+        } else {
+            emptyList()
+        }
+        val combinedPersona = personaItems
+            .filter { it.isEnabled }
+            .joinToString(" ") { it.text }
+
         val settings = KarukanSettings(
             modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
@@ -49,7 +59,7 @@ class PreferencesManager(
 
             strategy = prefs.getStringNonNull("pref_strategy", "adaptive"),
             nThreads = prefs.getIntFromString("pref_n_threads", defaultOptimalThreads),
-            persona = prefs.getStringNonNull("pref_persona", ""),
+            persona = combinedPersona,
             useContext = prefs.getBoolean("pref_use_context", true),
             contextChars = prefs.getIntFromString("pref_context_chars", 10),
             maxLatencyMs = prefs.getIntFromString("pref_max_latency_ms", 300),

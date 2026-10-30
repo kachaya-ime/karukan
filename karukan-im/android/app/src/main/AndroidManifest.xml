@@ -34,6 +34,12 @@
             android:theme="@style/Theme.Karukan" />
 
         <activity
+            android:name=".PersonaListActivity"
+            android:exported="false"
+            android:label="変換ペルソナの管理"
+            android:theme="@style/Theme.Karukan" />
+
+        <activity
             android:name=".UserDictContentActivity"
             android:exported="false"
             android:theme="@style/Theme.Karukan" />

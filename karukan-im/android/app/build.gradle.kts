@@ -4,9 +4,11 @@ import java.net.HttpURLConnection
 import java.net.URI
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+val appVersion = "1.1.0"
+val appVersionCode = 10100
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
@@ -16,9 +18,9 @@ android {
         applicationId = "io.github.kachaya.karukan"
         minSdk = 25
         compileSdk = 37
-        targetSdk = 35
-        versionCode = 10000
-        versionName = "1.0.0"
+        targetSdk = 37
+        versionCode = appVersionCode
+        versionName = appVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -56,16 +58,6 @@ android {
         }
     }
 
-    applicationVariants.all {
-        val variant = this
-        if (variant.buildType.name == "release") {
-            outputs.all {
-                val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
-                output?.outputFileName = "kanakan-${variant.versionName}.apk"
-            }
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -73,6 +65,16 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        if (variant.buildType == "release") {
+            variant.outputs.forEach { output ->
+                output.outputFileName.set("karukan-$appVersion.apk")
+            }
+        }
     }
 }
 
@@ -138,6 +140,7 @@ fun downloadFileWithRedirects(urlString: String, targetFile: File) {
 
 // ビルド前に HuggingFace からモデルおよび tokenizer を自動ダウンロードするタスク
 val downloadAssetsTask = tasks.register("downloadAssets") {
+    description = "Download GGUF model and tokenizer assets from HuggingFace"
     val assetsDir = file("${projectDir}/src/main/assets")
     outputs.dir(assetsDir)
     outputs.upToDateWhen {
@@ -173,14 +176,16 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
 
 // ビルド前にローカルのライセンス情報・権利表記ファイルを assets/legal/ へ自動コピーするタスク
 val copyLegalInfoTask = tasks.register<Copy>("copyLegalInfo") {
-    from(file("${projectDir}/legal/THIRD_PARTY_LICENSES"))
-    from(file("${projectDir}/legal/LICENSE-MIT"))
-    from(file("${projectDir}/legal/LICENSE-APACHE"))
+    description = "Copy legal and license files to assets/legal"
+    from(file("${project.rootDir}/legal/THIRD_PARTY_LICENSES"))
+    from(file("${project.rootDir}/legal/LICENSE-MIT"))
+    from(file("${project.rootDir}/legal/LICENSE-APACHE"))
     into(file("${projectDir}/src/main/assets/legal"))
 }
 
 // ビルド前にリポジトリ等からユーザー辞書ファイルを assets/user_dicts/ へ自動コピーするタスク
 val copyUserDictsTask = tasks.register("copyUserDicts") {
+    description = "Copy default user dictionary to assets/user_dicts"
     val assetsUserDictsDir = file("${projectDir}/src/main/assets/user_dicts")
 
     doLast {
@@ -217,10 +222,12 @@ val copyUserDictsTask = tasks.register("copyUserDicts") {
 
 // Gradle ビルド前に Rust (.so) を自動ビルド＆同期するタスク
 val buildRustTask = tasks.register<Exec>("buildRust") {
+    description = "Build Rust JNI shared library via NDK"
     val ps1Script = file("${project.rootDir}/build.ps1")
 
     // Android Studio / Gradle が認識している NDK パスを自動取得して渡す
-    val ndkDir = android.ndkPath
+    val appExt = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
+    val ndkDir = appExt?.ndkPath ?: System.getenv("ANDROID_NDK_HOME") ?: System.getenv("ANDROID_NDK_ROOT") ?: System.getenv("NDK_ROOT")
     if (!ndkDir.isNullOrEmpty()) {
         environment("ANDROID_NDK_HOME", ndkDir)
         environment("ANDROID_NDK_ROOT", ndkDir)
@@ -229,7 +236,7 @@ val buildRustTask = tasks.register<Exec>("buildRust") {
     }
 
     // Android Studio が認識している SDK パスも渡す
-    val sdkDir = android.sdkDirectory.absolutePath
+    val sdkDir = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: ""
     if (sdkDir.isNotEmpty()) {
         environment("ANDROID_HOME", sdkDir)
         environment("ANDROID_SDK_ROOT", sdkDir)
@@ -240,6 +247,7 @@ val buildRustTask = tasks.register<Exec>("buildRust") {
 
 // ビルド前に公式システム辞書 (dict.tgz) を自動ダウンロードして assets/dict.tgz (システム辞書) へ配置するタスク
 val downloadDictTask = tasks.register("downloadDict") {
+    description = "Download official system dictionary archive"
     val assetsDir = file("${projectDir}/src/main/assets")
     val assetsUserDictsDir = file("${projectDir}/src/main/assets/user_dicts")
     val dictTgz = File(assetsDir, "dict.tgz")
@@ -270,6 +278,7 @@ val downloadDictTask = tasks.register("downloadDict") {
 
 // ビルド前に unicode.org から emoji-test.txt をダウンロードして絵文字をカテゴリ別に抽出・assets/emoji_categories.txtへ配置するタスク
 val generateEmojiListTask = tasks.register("generateEmojiList") {
+    description = "Generate emoji category list from Unicode data"
     val assetsDir = file("${projectDir}/src/main/assets")
     val outputFile = File(assetsDir, "emoji_categories.txt")
     val cacheFile = file("${layout.buildDirectory.get().asFile}/emoji-test.txt")

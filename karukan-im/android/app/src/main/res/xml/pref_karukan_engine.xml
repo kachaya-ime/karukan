@@ -26,15 +26,6 @@
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true" />
 
-        <EditTextPreference
-            android:defaultValue=""
-            android:dialogTitle="変換ペルソナの設定"
-            android:key="pref_persona"
-            android:summary="よく入力する単語や専門分野（例: プログラミング, 医療 等）を指定すると変換結果がそれに寄り易くなります"
-            android:title="変換ペルソナ"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true" />
-
         <SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="pref_use_context"
@@ -62,9 +53,9 @@
 
     </PreferenceCategory>
 
-    <!-- 2. チャンク・ビームサーチの高度な設定 -->
+    <!-- 2. チャンク・ビームサーチ詳細設定 -->
     <PreferenceCategory
-        android:title="チャンク・ビームサーチの高度な設定"
+        android:title="チャンク・ビームサーチ詳細設定"
         app:iconSpaceReserved="false">
 
         <ListPreference

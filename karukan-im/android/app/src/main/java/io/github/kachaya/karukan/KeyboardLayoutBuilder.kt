@@ -367,7 +367,7 @@ class KeyboardLayoutBuilder(
                             onContainerSwapRequested?.invoke(firstStageContainer)
                             listener.onNikoTouchInput(char)
                         }
-                    } else if (keySpec.normalType == KeyType.ESC) {
+                    } else if (keySpec.normalType == KeyType.ESC || keySpec.normalType == KeyType.BACKSPACE) {
                         btn.setOnClickListener {
                             listener.onKeyFeedback()
                             pendingNikoRowKey = null

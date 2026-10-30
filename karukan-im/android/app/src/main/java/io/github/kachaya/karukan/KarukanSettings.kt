@@ -11,7 +11,7 @@ data class KarukanSettings(
     val punctuationStyle: String = "kuten_touten",
     val spaceStyle: String = "half",
 
-    // パフォーマンス・高度な設定
+    // パフォーマンス・詳細設定
     val strategy: String = "adaptive",
     val nThreads: Int = 4,
     val persona: String = "",
