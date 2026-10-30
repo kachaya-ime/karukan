@@ -56,8 +56,7 @@ object TabletKeyboardLayout {
             ),
             // 4段目 (Row 3): Shift, z~m, ,, ., /, ↑, Shift
             listOf(
-                KeySpec("⇧", normalType = KeyType.SHIFT, shiftType = KeyType.SHIFT, weight = 1.3f),
-                KeySpec("`", shiftText = "~"),
+                KeySpec("⇧", normalType = KeyType.SHIFT, shiftType = KeyType.SHIFT, weight = 2.3f),
                 KeySpec("z", shiftText = "Z"),
                 KeySpec("x", shiftText = "X"),
                 KeySpec("c", shiftText = "C"),
@@ -73,9 +72,10 @@ object TabletKeyboardLayout {
             ),
             // 5段目 (Row 4): Ctrl, `, 絵文字, Space, ←, ↓, →
             listOf(
-                KeySpec("Ctrl", normalType = KeyType.CTRL, shiftType = KeyType.CTRL, weight = 2.5f),
+                KeySpec("Ctrl", normalType = KeyType.CTRL, shiftType = KeyType.CTRL, weight = 1.5f),
+                KeySpec("あa", normalType = KeyType.LANG, weight = 1.5f),
                 KeySpec("😊", normalType = KeyType.EMOJI, shiftType = KeyType.EMOJI, weight = 1.5f),
-                KeySpec("⌴", normalType = KeyType.SPACE, shiftType = KeyType.SPACE, weight = 6.7f),
+                KeySpec("⌴", normalType = KeyType.SPACE, shiftType = KeyType.SPACE, weight = 5.2f),
                 KeySpec("Ctrl", normalType = KeyType.CTRL, shiftType = KeyType.CTRL, weight = 1.5f),
                 KeySpec("←", normalType = KeyType.DPAD_LEFT, shiftType = KeyType.DPAD_LEFT, repeatable = true, weight = 1.1f),
                 KeySpec("↓", normalType = KeyType.DPAD_DOWN, shiftType = KeyType.DPAD_DOWN, repeatable = true, weight = 1.1f),
