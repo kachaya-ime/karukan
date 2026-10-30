@@ -1,14 +1,14 @@
 # Karukan Android 実装仕様書 (Implementation Guide)
 
-Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、JNI 連携、キーボード処理、辞書管理などの実装情報です。
+Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、JNI 連携、キーボード処理、辞書管理、およびライフサイクル制御などの実装情報です。
 
 ---
 
 ## 1. アプリ・コンポーネント構成
 
 - **入力サービス・表示ビュー**:
-  - `KarukanInputMethodService.kt`: IME ライフサイクル管理、キーイベント処理、ライブ変換・確定制御
-  - `KarukanInputView.kt`: キーボード表示、候補インライン表示、フローティング候補表示の親ビュー
+  - `KarukanInputMethodService.kt`: IME ライフサイクル管理（ウィンドウ非表示、入力ビュー終了・開始時のキーボード状態リセット）、キーイベント処理、ライブ変換・確定制御
+  - `KarukanInputView.kt`: キーボード表示、候補インライン表示、フローティング候補表示の親ビュー。絵文字・記号パレットおよび候補展開の管理 (`resetKeyboardState()`, `hideEmojiPalette()`)
   - `CandidateFlowLayout.kt`: 候補一覧のフローレイアウト管理
 - **エンジンブリッジ・設定管理**:
   - `KarukanEngine.kt`: JNI ブリッジ、GGUF モデル切り替え、Native 辞書・設定・推論制御 (`Companion.calculateOptimalNThreads()` 等)
@@ -17,12 +17,12 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
 - **キーボードUI・マッパー**:
   - `KeyboardCommon.kt`: キーボード共通UIモデル、スタイル、イベント定義
   - `KeyboardLayoutBuilder.kt`: ソフトキーボードレイアウト構築オーケストレーター
-  - `QwertyKeyboardLayout.kt`: QWERTY キーボードレイアウト定義
+  - `QwertyKeyboardLayout.kt`: QWERTY キーボードレイアウト定義（ベクターアイコン対応絵文字キー含む）
   - `TabletKeyboardLayout.kt`: タブレットキーボードレイアウト定義
-  - `NikoKeyboardLayout.kt`: ニコタッチ入力レイアウト & マッパー
+  - `NikoKeyboardLayout.kt`: ニコタッチ入力レイアウト & マッパー（ベクターアイコン対応絵文字キー含む）
   - `KeyEventMapper.kt`: 物理キーボード KeyEvent 変換マッパー
   - `KeyAction.kt`: キーボードキーアクション定義
-  - `EmojiPaletteController.kt`: 絵文字・記号パレット制御
+  - `EmojiPaletteController.kt`: ViewPager2 + RecyclerView を用いた絵文字・記号パレット制御（カテゴリ別タブ・グリッド描画、通常/シンボルモード対応）
 - **辞書・学習管理・UI**:
   - `DictUtils.kt`: 辞書ファイル操作ユーティリティ
   - `PresetDictActivity.kt`: プリセット辞書管理アクティビティ
@@ -32,7 +32,18 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
 
 ---
 
-## 2. JNI (Rust / Native) 連携仕様
+## 2. IME ライフサイクルとキーボード状態管理
+
+Karukan IME では、IME のライフサイクルイベントに応じてキーボードの表示状態（メインキーボード、絵文字・記号パレット、候補展開ビューなど）を制御する仕組みを備えています。
+
+- **`onWindowHidden()`**: IME ウィンドウが非表示になった際、`KarukanInputView.resetKeyboardState()` を呼び出してパレットや展開候補を非表示状態にします。
+- **`onFinishInputView(boolean finishingInput)`**: 入力ビューが終了する際、キーボード表示状態を標準のメインキーボードに復元します。
+- **`onFinishInput()`**: 入力セッションの終了時にオーバーレイやパレットを閉じます。
+- **`onStartInputView(EditorInfo attribute, boolean restarting)`**: 新しい入力セッションの開始時にキーボード状態をリセットし、メインキーボードとパレット等の重畳表示を防止します。
+
+---
+
+## 3. JNI (Rust / Native) 連携仕様
 
 JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotlin層 (`KarukanEngine.kt`) のメソッドは 1 対 1 で対応しています。
 
@@ -47,7 +58,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | `nativeRecordLearning` | `recordLearning(reading, surface)` | 選択された変換候補の学習履歴への記録 |
 | `nativeRemoveLearning` | `removeLearningEntry(reading, surface)` | 学習履歴から特定のエントリを削除 |
 | `nativeSaveLearning` | `backupLearningToStream` | 学習履歴のバックアップ（TSVファイルストリーム出力） |
-| `nativeLoadLearning` | `restoreLearningFromStream` | 学習履歴の復元（TSVファイルを内部学習辞書へ上書きコピーし、ネイティブパースによりカウント・タイムスタンプを100%ロスレスで読み込み） |
+| `nativeLoadLearning` | `restoreLearningFromStream` | 学習履歴の復元（TSVファイルを内部学習辞書へ上書きコピーし、ネイティブパースによりカウント・タイムスタンプをロスレスで読み込み） |
 | `nativeClearLearning` | `clearLearning()` | メモリ上の学習キャッシュのクリア |
 | `nativeRomajiToHiragana` | `romajiToHiragana(query)` | ローマ字→ひらがな変換 |
 | `nativeRomajiToHiraganaFlush` | `romajiToHiraganaFlush(query)` | ローマ字→ひらがな変換のフラッシュ（末尾の未確定ローマ字の確定処理） |
@@ -60,13 +71,11 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 - **記号・文字幅スタイル**: `punctuationStyle`, `bracketStyle`, `slashStyle`, `spaceStyle`, `kanaSymbolWidth`, `asciiWidth`, `digitWidth`
 - **変換学習設定**: `maxLearningEntries`, `isLearningEnabled`, `isDateConversionEnabled`
 
-*Note: `calculateOptimalNThreads()` は `KarukanEngine.Companion` に配置されているため、`PreferencesManager` の初期化時に `KarukanEngine` のインスタンス化や循環参照を発生させずに呼び出し可能です。*
-
 ---
 
-## 3. ショートカットキー・物理キーボード対応仕様 (Keyboard Shortcuts)
+## 4. ショートカットキー・物理キーボード対応仕様 (Keyboard Shortcuts)
 
-他フロントエンド（Mozc / ATOK / MS-IME / macOS ことえり 等）との互換性を持つ物理キーボードおよびソフトキーボードのショートカット仕様です。
+他フロントエンド（fcitx5 / macOS）との互換性を持つ物理キーボードおよびソフトキーボードのショートカット仕様です。
 
 ### ファンクションキー変換 (Function Keys)
 | キー | 機能 | 動作・処理 |
@@ -111,12 +120,12 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **Ctrl + Shift + L** | ライブ変換トグル | リアルタイムライブ変換の有効/無効切替 (`onToggleLiveConversion`) | 共通仕様 |
 | **Ctrl + Shift + V** | 詳細表示切替 | AI推論時間・モデル名等の詳細表示をトグル切替 (`onToggleDetailDisplay`) | 共通仕様 |
 
-### Shift キー組み合わせ操作 (Shift Combinations)
-| ショートカット | 機能 | 動作・処理 |
-|---|---|---|
-| **Shift + ← / → / ↑ / ↓** | テキスト範囲選択 | 選択範囲を変更する KeyEvent を送信 (`sendKeyEvent` with `META_SHIFT_ON`) |
-| **Shift + Tab** | 逆方向移動 / 前候補 | 候補選択時は前候補選択、非入力時は逆方向フォーカス移動 |
-| **Shift + Space** | 全角スペース | 非入力時は全角スペースを入力 (`onFullWidthSpace`) |
+  ### Shift キー組み合わせ操作 (Shift Combinations)
+  | ショートカット | 機能 | 動作・処理 |
+  |---|---|---|
+  | **Shift + ← / → / ↑ / ↓** | テキスト範囲選択 | 選択範囲を変更する KeyEvent を送信 (`sendKeyEvent` with `META_SHIFT_ON`) |
+  | **Shift + Tab** | 逆方向移動 / 前候補 | 候補選択時は前候補選択、非入力時は逆方向フォーカス移動 |
+  | **Shift + Space** | 全角スペース | 非入力時は全角スペースを入力 (`onFullWidthSpace`) |
 
 ### JIS配列・特殊物理キー (JIS & Physical Special Keys)
 | キー (シンボル名) | 機能 | 動作・処理 |
@@ -136,41 +145,3 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **PageDown (PAGE_DOWN)** | ページダウン | 候補一覧または画面のページダウン (`onPageDown`) |
 | **SYM (SYM)** | 絵文字・記号パレット | 絵文字・記号パレットの表示切替 (`ToggleEmojiPalette`) |
 
-### 機能からキー組み合わせへの逆引き (Function to Key Lookup)
-機能や目的から対応する物理キー（単体キーおよび組み合わせショートカット）・画面ボタンを検索するための逆引き一覧です。
-
-| 機能・目的 | 割り当てキー / ショートカット | 画面キーボードでの対応ボタン | 仕様区分 |
-|---|---|---|---|
-| **ひらがな変換** | `F6` | - | 共通仕様 |
-| **全角カタカナ変換** | `F7`, `無変換 (MUHENKAN)` | `カナ` ボタン | 共通仕様 |
-| **半角カタカナ変換** | `F8` | - | 共通仕様 |
-| **全角英数変換** | `F9` | - | 共通仕様 |
-| **半角英数変換** | `F10` | - | 共通仕様 |
-| **変換 / 次候補選択** | `Space`, `変換 (HENKAN)`, `↓` (候補選択時), `Ctrl + N` (コンポーズ時) | `Space (⌴)` ボタン | 共通仕様 |
-| **前候補選択** | `↑` (候補選択時), `Shift + Space` (候補選択時), `Shift + Tab`, `Ctrl + P` (コンポーズ時) | - | 共通仕様 |
-| **確定** | `Enter`, `Numpad Enter`, `Ctrl + M` | `⏎` (Enter) ボタン | 共通仕様 |
-| **確定取り消し (再変換)** | `Ctrl + S` (未入力時) | - | **Android独自** |
-| **候補の番号選択・確定** | `Ctrl + 1 〜 9` | - | 共通仕様 |
-| **候補一覧の全画面多段展開 / 縮小** | `Ctrl + D` | `∨` (展開) ボタン | **Android独自** |
-| **Chunk区切り・固定** | `Ctrl + J` (コンポーズ時) | - | 共通仕様 |
-| **キャンセル / 選択解除** | `Escape`, `Ctrl + G` | `Esc` ボタン | 共通仕様 |
-| **前方文字削除 (カーソル左)** | `Backspace`, `Ctrl + H` | `⌫` ボタン | 共通仕様 |
-| **後方文字削除 (カーソル右)** | `Delete (FORWARD_DEL)` | - | 共通仕様 |
-| **選択候補の学習削除** | `Ctrl + Backspace`, `Ctrl + Delete` | - | 共通仕様 |
-| **全選択** | `Ctrl + A` | - | 共通仕様 |
-| **テキスト範囲選択** | `Shift + ← / → / ↑ / ↓` | - | 共通仕様 |
-| **カーソル移動 (左)** | `←`, `Ctrl + B` (コンポーズ時) | `←` ボタン | 共通仕様 |
-| **カーソル移動 (右)** | `→`, `Ctrl + F` (コンポーズ時) | `→` ボタン | 共通仕様 |
-| **カーソル移動 (行末)** | `Ctrl + E` (コンポーズ時) | - | 共通仕様 |
-| **カーソル移動 (上 / 下)** | `↑`, `↓` (非候補選択時) | - | 共通仕様 |
-| **フォーカス移動 (順方向 / 逆方向)** | `Tab`, `Shift + Tab` | `Tab` ボタン | 共通仕様 |
-| **ページアップ / ページダウン** | `PageUp`, `PageDown` | - | 共通仕様 |
-| **日本語 / 英語切替** | `半角/全角 (ZENKAKU_HANKAKU)`, `英数 (EISU)` | `A / あ` (LANG) ボタン | 共通仕様 |
-| **ひらがな / カタカナ入力モード切替** | `Ctrl + K`, `かな (KANA)`, `ひらがな/カタカナ (KATAKANA_HIRAGANA)` | - | 共通仕様 |
-| **絵文字・記号パレット表示** | `SYM` | `😊` ボタン | **Android独自** |
-| **🤖AI 候補ビューオープン** | `Ctrl + I` | - | 共通仕様 |
-| **📝学習ソースビューオープン** | `Ctrl + T` | - | 共通仕様 |
-| **🔄記号・単漢字変換ビューオープン** | `Ctrl + Q` (Android独自), `Ctrl + R` | - | 共通 / **独自** |
-| **辞書ソースフィルター順巡回** | `Ctrl + W` (コンポーズ時) | - | **Android独自** |
-| **リアルタイムライブ変換切替** | `Ctrl + L` (Android独自), `Ctrl + Shift + L` | - | 共通 / **独自** |
-| **詳細情報表示切替** | `Ctrl + Y` (Android独自), `Ctrl + Shift + V` | - | 共通 / **独自** |

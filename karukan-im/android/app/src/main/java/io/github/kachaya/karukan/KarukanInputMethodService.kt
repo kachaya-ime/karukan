@@ -1222,10 +1222,27 @@ class KarukanInputMethodService : InputMethodService() {
         clearComposingState()
     }
 
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.resetKeyboardState()
+        }
+    }
+
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.resetKeyboardState()
+        }
+    }
+
     override fun onStartInputView(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(attribute, restarting)
         currentEditorInfo = attribute
         requestCursorUpdates()
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.resetKeyboardState()
+        }
         val effectiveLayout = getEffectiveKeyboardLayout()
         if (pendingInputViewReload || (currentEffectiveKeyboardLayout != null && currentEffectiveKeyboardLayout != effectiveLayout)) {
             pendingInputViewReload = false
@@ -1254,6 +1271,9 @@ class KarukanInputMethodService : InputMethodService() {
         dismissFloatingCandidates()
         if (settings.isAutoCommitEnabled && romajiBuffer.isNotEmpty()) {
             commitCurrentHiragana()
+        }
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.resetKeyboardState()
         }
     }
 

@@ -623,6 +623,18 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
+    fun hideEmojiPalette() {
+        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized && emojiPaletteController.isVisible) {
+            emojiPaletteController.hide(mainKeyboardContainer)
+        }
+    }
+
+    fun resetKeyboardState() {
+        hideEmojiPalette()
+        collapseCandidates()
+        dismissFloatingCandidates()
+    }
+
     fun toggleEmojiPalette() {
         collapseCandidates()
         if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {

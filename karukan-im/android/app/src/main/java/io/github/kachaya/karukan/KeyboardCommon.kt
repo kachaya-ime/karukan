@@ -153,8 +153,31 @@ data class KeySpec(
     val ctrlType: KeyType = normalType,
     val weight: Float = 1f,
     val textSize: Float = 22f,
-    val repeatable: Boolean = false
+    val repeatable: Boolean = false,
+    val drawableResId: Int = 0
 ) {
+    // アイコン/機能キー用コンストラクタ
+    constructor(
+        text: String,
+        type: KeyType,
+        drawableResId: Int,
+        weight: Float = 1f,
+        textSize: Float = 22f,
+        repeatable: Boolean = false
+    ) : this(
+        normalText = text,
+        shiftText = text,
+        symbolText = text,
+        ctrlText = text,
+        normalType = type,
+        shiftType = type,
+        symbolType = type,
+        ctrlType = type,
+        weight = weight,
+        textSize = textSize,
+        repeatable = repeatable,
+        drawableResId = drawableResId
+    )
     // 文字用コンストラクタ
     constructor(
         text: String,
@@ -481,6 +504,11 @@ class KeyButton(
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (spec.drawableResId != 0 && !isGuideMode) {
+            drawDrawable(canvas)
+            return
+        }
+
         val subT = if (isGuideMode) "" else spec.subText
         val subT2 = if (isGuideMode) "" else spec.subText2
 
@@ -491,6 +519,21 @@ class KeyButton(
         } else {
             drawStandardKeyText(canvas)
         }
+    }
+
+    private fun drawDrawable(canvas: Canvas) {
+        val resId = spec.drawableResId
+        if (resId == 0) return
+
+        val drawable = androidx.core.content.ContextCompat.getDrawable(context, resId)?.mutate() ?: return
+        androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, currentTextColor)
+
+        val density = context.resources.displayMetrics.density
+        val iconSize = (24f * density).toInt()
+        val left = (width - iconSize) / 2
+        val top = (height - iconSize) / 2
+        drawable.setBounds(left, top, left + iconSize, top + iconSize)
+        drawable.draw(canvas)
     }
 
     private fun drawSubTextsAsTwoLines(canvas: Canvas) {

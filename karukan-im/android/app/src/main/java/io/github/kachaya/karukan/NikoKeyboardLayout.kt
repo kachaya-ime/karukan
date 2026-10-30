@@ -132,7 +132,7 @@ object NikoKeyboardLayout {
         val chunkOrEmoji = if (hasInput) {
             KeySpec("区切", KeyType.CHUNK_FIX)
         } else {
-            KeySpec("😊", KeyType.EMOJI)
+            KeySpec("😊", KeyType.EMOJI, R.drawable.outline_emoji_emotions_24)
         }
         val starKey = if (isHiragana) {
             KeySpec(text = "", type = KeyType.KEY_STAR, subText = "゛゜", subText2 = "大⇔小")
@@ -230,7 +230,7 @@ object NikoKeyboardLayout {
         val chunkOrEmoji = if (hasInput) {
             KeySpec("区切", KeyType.CHUNK_FIX)
         } else {
-            KeySpec("😊", KeyType.EMOJI)
+            KeySpec("😊", KeyType.EMOJI, R.drawable.outline_emoji_emotions_24)
         }
         return listOf(
             listOf(

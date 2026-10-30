@@ -74,7 +74,7 @@ object TabletKeyboardLayout {
             listOf(
                 KeySpec("Ctrl", normalType = KeyType.CTRL, shiftType = KeyType.CTRL, weight = 1.5f),
                 KeySpec("あa", normalType = KeyType.LANG, weight = 1.5f),
-                KeySpec("😊", normalType = KeyType.EMOJI, shiftType = KeyType.EMOJI, weight = 1.5f),
+                KeySpec("😊", KeyType.EMOJI, R.drawable.outline_emoji_emotions_24, weight = 1.5f),
                 KeySpec("⌴", normalType = KeyType.SPACE, shiftType = KeyType.SPACE, weight = 5.2f),
                 KeySpec("Ctrl", normalType = KeyType.CTRL, shiftType = KeyType.CTRL, weight = 1.5f),
                 KeySpec("←", normalType = KeyType.DPAD_LEFT, shiftType = KeyType.DPAD_LEFT, repeatable = true, weight = 1.1f),

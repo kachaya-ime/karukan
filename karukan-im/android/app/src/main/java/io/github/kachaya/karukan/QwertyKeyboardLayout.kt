@@ -3,14 +3,14 @@ package io.github.kachaya.karukan
 object QwertyKeyboardLayout {
     fun getLayoutSpec(): List<List<KeySpec>> {
         return listOf(
-            // 1段目 (Row 0): 数字行
+            // 1段目 (Row 0): 数字行 (10キー)
             listOf(
                 KeySpec("1"), KeySpec("2"), KeySpec("3"), KeySpec("4"), KeySpec("5"),
                 KeySpec("6"), KeySpec("7"), KeySpec("8"), KeySpec("9"), KeySpec("0")
             ),
-            // 2段目 (Row 1): q .. p
+            // 2段目 (Row 1): QWERTY上段キー列 (q .. p, 10キー)
             listOf(
-                KeySpec("q", shiftText = "Q", symbolText = "/"),
+                KeySpec("q", shiftText = "Q", symbolText = "~"),
                 KeySpec("w", shiftText = "W", symbolText = "@"),
                 KeySpec("e", shiftText = "E", symbolText = "#"),
                 KeySpec("r", shiftText = "R", symbolText = "$"),
@@ -21,72 +21,71 @@ object QwertyKeyboardLayout {
                 KeySpec("o", shiftText = "O", symbolText = "("),
                 KeySpec("p", shiftText = "P", symbolText = ")")
             ),
-            // 3段目 (Row 2): a .. -
+            // 3段目 (Row 2): QWERTY中段キー列 (a .. -, 10キー)
             listOf(
                 KeySpec("a", shiftText = "A", symbolText = "+"),
                 KeySpec("s", shiftText = "S", symbolText = "="),
-                KeySpec("d", shiftText = "D", symbolText = "-"),
-                KeySpec("f", shiftText = "F", symbolText = "|"),
-                KeySpec("g", shiftText = "G", symbolText = "\\"),
-                KeySpec("h", shiftText = "H", symbolText = ":"),
-                KeySpec("j", shiftText = "J", symbolText = ";"),
-                KeySpec("k", shiftText = "K", symbolText = "\""),
-                KeySpec("l", shiftText = "L", symbolText = "'"),
-                KeySpec("-", shiftText = "_", symbolText = "`")
+                KeySpec("d", shiftText = "D", symbolText = "/"),
+                KeySpec("f", shiftText = "F", symbolText = "\\"),
+                KeySpec("g", shiftText = "G", symbolText = "<"),
+                KeySpec("h", shiftText = "H", symbolText = ">"),
+                KeySpec("j", shiftText = "J", symbolText = "{"),
+                KeySpec("k", shiftText = "K", symbolText = "}"),
+                KeySpec("l", shiftText = "L", symbolText = "["),
+                KeySpec("-", shiftText = "_", symbolText = "]")
             ),
-            // 4段目 (Row 3): Shift, z..m, , , BS
+            // 4段目 (Row 3): QWERTY下段キー列 (Shift/Esc, z .. m, ., BS, 10キー)
             listOf(
                 KeySpec(
                     normalText = "⇧",
                     shiftText = "⇧",
-                    symbolText = "Esc",
+                    symbolText = "esc",
                     normalType = KeyType.SHIFT,
                     shiftType = KeyType.SHIFT,
-                    symbolType = KeyType.ESC,
-                    weight = 1.5f
+                    symbolType = KeyType.ESC
                 ),
-                KeySpec("z", shiftText = "Z", symbolText = "~"),
-                KeySpec("x", shiftText = "X", symbolText = "<"),
-                KeySpec("c", shiftText = "C", symbolText = ">"),
-                KeySpec("v", shiftText = "V", symbolText = "{"),
-                KeySpec("b", shiftText = "B", symbolText = "}"),
-                KeySpec("n", shiftText = "N", symbolText = "["),
-                KeySpec("m", shiftText = "M", symbolText = "]"),
-                KeySpec("⌫", normalType = KeyType.BACKSPACE, weight = 1.5f, repeatable = true)
+                KeySpec("z", shiftText = "Z", symbolText = "|"),
+                KeySpec("x", shiftText = "X", symbolText = "`"),
+                KeySpec("c", shiftText = "C", symbolText = "'"),
+                KeySpec("v", shiftText = "V", symbolText = "\""),
+                KeySpec("b", shiftText = "B", symbolText = ";"),
+                KeySpec("n", shiftText = "N", symbolText = ":"),
+                KeySpec("m", shiftText = "M", symbolText = "!"),
+                KeySpec(".", shiftText = ",", symbolText = "?"),
+                KeySpec("⌫", normalType = KeyType.BACKSPACE, repeatable = true)
             ),
-            // 5段目 (Row 4): アクション行
+            // 5段目 (Row 4): アクション行 (Ctrl, @!?/ABCトグル, あa/Tab, 幅広Space, 絵文字, 左右矢印, Enter / 文字キーなし・10スロット構成)
             listOf(
+                KeySpec("ctrl", KeyType.CTRL),
                 KeySpec(
                     normalText = "@!?",
                     shiftText = "@!?",
-                    symbolText = "ABC",
+                    symbolText = "abc",
                     normalType = KeyType.SYMBOL,
                     shiftType = KeyType.SYMBOL,
-                    symbolType = KeyType.NORMAL,
-                    weight = 1.2f
-                ),
-                KeySpec(
-                    normalText = "Ctrl",
-                    shiftText = "Ctrl",
-                    symbolText = "Ctrl",
-                    normalType = KeyType.CTRL,
-                    shiftType = KeyType.CTRL,
-                    symbolType = KeyType.CTRL,
-                    weight = 1.0f
+                    symbolType = KeyType.NORMAL
                 ),
                 KeySpec(
                     normalText = "あa",
-                    symbolText = "Tab",
+                    shiftText = "あa",
+                    symbolText = "tab",
                     normalType = KeyType.LANG,
-                    symbolType = KeyType.TAB,
-                    weight = 0.9f
+                    shiftType = KeyType.LANG,
+                    symbolType = KeyType.TAB
                 ),
-                KeySpec(",", shiftText = "[", symbolText = "カナ", symbolType = KeyType.KATAKANA, weight = 0.8f),
-                KeySpec("⌴", normalType = KeyType.SPACE, weight = 1.8f),
-                KeySpec(".", shiftText = "]", symbolText = "?", weight = 0.8f),
-                KeySpec("←", normalType = KeyType.DPAD_LEFT, repeatable = true, weight = 0.75f),
-                KeySpec("→", normalType = KeyType.DPAD_RIGHT, repeatable = true, weight = 0.75f),
-                KeySpec("⏎", normalType = KeyType.ENTER, weight = 1.3f)
+                KeySpec(
+                    normalText = "⌴",
+                    shiftText = "⌴",
+                    symbolText = "⌴",
+                    normalType = KeyType.SPACE,
+                    shiftType = KeyType.SPACE,
+                    symbolType = KeyType.SPACE,
+                    weight = 3.0f
+                ),
+                KeySpec("😊", KeyType.EMOJI, R.drawable.outline_emoji_emotions_24),
+                KeySpec("←", KeyType.DPAD_LEFT, repeatable = true),
+                KeySpec("→", KeyType.DPAD_RIGHT, repeatable = true),
+                KeySpec("⏎", KeyType.ENTER)
             )
         )
     }
