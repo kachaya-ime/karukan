@@ -26,7 +26,6 @@ class KeyboardLayoutBuilder(
     private var pendingNikoRowKey: Int? = null
     private var currentHasInput: Boolean = false
     var onContainerSwapRequested: ((LinearLayout) -> Unit)? = null
-    private var escButton: KeyButton? = null
     private val nikoKeyButtons = mutableMapOf<Int, KeyButton>()
     private var currentInputMode: InputMode = inputModeSupplier()
 
@@ -143,12 +142,12 @@ class KeyboardLayoutBuilder(
 
     fun createQwertyKeyboardContainer(): LinearLayout {
         currentQwertyMode = QwertyMode.NORMAL
-        return buildKeyboardLayout(QwertyKeyboardLayout.getLayoutSpec())
+        return buildKeyboardLayout(KeyboardLayoutRegistry.getLayoutSpec("qwerty"))
     }
 
     fun createTabletKeyboardContainer(): LinearLayout {
         currentQwertyMode = QwertyMode.NORMAL
-        return buildKeyboardLayout(TabletKeyboardLayout.getLayoutSpec())
+        return buildKeyboardLayout(KeyboardLayoutRegistry.getLayoutSpec("tablet"))
     }
 
     fun createNikoKeyboardContainer(): LinearLayout {
@@ -185,15 +184,11 @@ class KeyboardLayoutBuilder(
     fun createNikoTouchKeyboardContainer(): LinearLayout {
         pendingNikoRowKey = null
         nikoKeyButtons.clear()
-        escButton = null
 
         val isHiragana = currentInputMode == InputMode.HIRAGANA
         return buildKeyboardLayout(
-            layoutSpec = NikoKeyboardLayout.getLayoutSpec(currentHasInput, isHiragana)
+            layoutSpec = KeyboardLayoutRegistry.getLayoutSpec("niko", isHiragana, currentHasInput)
         ) { keySpec, btn ->
-            if (keySpec.normalType == KeyType.ESC) {
-                escButton = btn
-            }
             keySpec.normalType.nikoKeyIndex?.let { index ->
                 nikoKeyButtons[index] = btn
             }
@@ -218,6 +213,12 @@ class KeyboardLayoutBuilder(
                 }
             },
             KeyType.BACKSPACE to { _ -> listener.onBackspace() },
+            KeyType.NIKO_BACKSPACE to { _ ->
+                pendingNikoRowKey = null
+                val firstStageContainer = createNikoTouchKeyboardContainer()
+                onContainerSwapRequested?.invoke(firstStageContainer)
+                listener.onBackspace()
+            },
             KeyType.DELETE to { _ -> listener.onDelete() },
             KeyType.SPACE to { _ -> listener.onSpaceOrConvert() },
             KeyType.ENTER to { _ -> listener.onCommit() },
@@ -244,14 +245,11 @@ class KeyboardLayoutBuilder(
             KeyType.TAB to { _ -> listener.onTab() },
             KeyType.KATAKANA to { _ -> listener.onKatakana() },
             KeyType.GAP to { _ -> },
-            KeyType.ESC to { _ ->
-                if (pendingNikoRowKey != null) {
-                    pendingNikoRowKey = null
-                    val firstStageContainer = createNikoTouchKeyboardContainer()
-                    onContainerSwapRequested?.invoke(firstStageContainer)
-                } else {
-                    listener.onEsc()
-                }
+            KeyType.ESC to { _ -> listener.onEsc() },
+            KeyType.NIKO_CANCEL to { _ ->
+                pendingNikoRowKey = null
+                val firstStageContainer = createNikoTouchKeyboardContainer()
+                onContainerSwapRequested?.invoke(firstStageContainer)
             },
             KeyType.NIKO_GUIDE_CHAR to { btn ->
                 val char = btn.text.toString()
@@ -262,22 +260,10 @@ class KeyboardLayoutBuilder(
                     listener.onNikoTouchInput(char)
                 }
             },
-            KeyType.KEY_STAR to { _ ->
-                val mode = inputModeSupplier()
-                if (mode == InputMode.NUMERIC || mode == InputMode.ALPHANUMERIC) {
-                    listener.onNikoTouchInput("*")
-                } else {
-                    listener.onNikoTouchToggle()
-                }
-            },
-            KeyType.KEY_POUND to { _ ->
-                val mode = inputModeSupplier()
-                if (mode == InputMode.NUMERIC || mode == InputMode.ALPHANUMERIC) {
-                    listener.onNikoTouchInput("#")
-                } else {
-                    listener.onToggleSymbolPalette()
-                }
-            }
+            KeyType.NIKO_TOGGLE to { _ -> listener.onNikoTouchToggle() },
+            KeyType.NIKO_INPUT_STAR to { _ -> listener.onNikoTouchInput("*") },
+            KeyType.NIKO_INPUT_POUND to { _ -> listener.onNikoTouchInput("#") },
+            KeyType.NIKO_SYMBOL_PALETTE to { _ -> listener.onToggleSymbolPalette() }
         )
 
         fun dispatchKeyAction(btn: KeyButton) {
@@ -298,12 +284,6 @@ class KeyboardLayoutBuilder(
             }
             btn.setOnClickListener {
                 listener.onKeyFeedback()
-                if (pendingNikoRowKey != null && btn == escButton) {
-                    pendingNikoRowKey = null
-                    val firstStageContainer = createNikoTouchKeyboardContainer()
-                    onContainerSwapRequested?.invoke(firstStageContainer)
-                    return@setOnClickListener
-                }
                 if (currentQwertyMode == QwertyMode.CTRL) {
                     when (btn.currentType) {
                         KeyType.CHARACTER -> {
@@ -358,22 +338,8 @@ class KeyboardLayoutBuilder(
                 val secondStageContainer = buildKeyboardLayout(
                     NikoKeyboardLayout.getSecondStageLayoutSpec(keyIdx, isHiragana)
                 ) { keySpec, btn ->
-                    val char = keySpec.normalText
-                    if (char.isNotEmpty() && keySpec.normalType == KeyType.CHARACTER) {
-                        btn.setOnClickListener {
-                            listener.onKeyFeedback()
-                            pendingNikoRowKey = null
-                            val firstStageContainer = createNikoTouchKeyboardContainer()
-                            onContainerSwapRequested?.invoke(firstStageContainer)
-                            listener.onNikoTouchInput(char)
-                        }
-                    } else if (keySpec.normalType == KeyType.ESC || keySpec.normalType == KeyType.BACKSPACE) {
-                        btn.setOnClickListener {
-                            listener.onKeyFeedback()
-                            pendingNikoRowKey = null
-                            val firstStageContainer = createNikoTouchKeyboardContainer()
-                            onContainerSwapRequested?.invoke(firstStageContainer)
-                        }
+                    keySpec.normalType.nikoKeyIndex?.let { index ->
+                        nikoKeyButtons[index] = btn
                     }
                 }
                 onContainerSwapRequested?.invoke(secondStageContainer)

@@ -135,9 +135,14 @@ object NikoKeyboardLayout {
             KeySpec("😊", KeyType.EMOJI, R.drawable.outline_emoji_emotions_24)
         }
         val starKey = if (isHiragana) {
-            KeySpec(text = "", type = KeyType.KEY_STAR, subText = "゛゜", subText2 = "大⇔小")
+            KeySpec(text = "", type = KeyType.NIKO_TOGGLE, subText = "゛゜", subText2 = "大⇔小")
         } else {
-            KeySpec("*", KeyType.KEY_STAR)
+            KeySpec("*", KeyType.NIKO_INPUT_STAR)
+        }
+        val poundKey = if (isHiragana) {
+            KeySpec("@!?", KeyType.NIKO_SYMBOL_PALETTE)
+        } else {
+            KeySpec("#", KeyType.NIKO_INPUT_POUND)
         }
         return listOf(
             listOf(
@@ -165,7 +170,7 @@ object NikoKeyboardLayout {
                 KeySpec("あ1", KeyType.NIKO_LANG),
                 starKey,
                 KeySpec("わ", KeyType.NIKO_KEY_0, subText = "0", subText2 = "をん"),
-                KeySpec("@!?", KeyType.KEY_POUND),
+                poundKey,
                 KeySpec("⏎", KeyType.ENTER)
             )
         )
@@ -183,17 +188,22 @@ object NikoKeyboardLayout {
     fun getSecondStageLayoutSpec(rowKey: Int, isHiragana: Boolean = true): List<List<KeySpec>> {
         val guideChars = getRowGuideChars(rowKey) ?: listOf("", "", "", "", "", "", "", "", "", "")
         val starKey = if (isHiragana) {
-            KeySpec(text = "", type = KeyType.KEY_STAR, subText = "゛゜", subText2 = "大⇔小")
+            KeySpec(text = "", type = KeyType.NIKO_TOGGLE, subText = "゛゜", subText2 = "大⇔小")
         } else {
-            KeySpec("*", KeyType.KEY_STAR)
+            KeySpec("*", KeyType.NIKO_INPUT_STAR)
+        }
+        val poundKey = if (isHiragana) {
+            KeySpec("@!?", KeyType.NIKO_SYMBOL_PALETTE)
+        } else {
+            KeySpec("#", KeyType.NIKO_INPUT_POUND)
         }
         return listOf(
             listOf(
-                KeySpec("戻る", KeyType.ESC),
+                KeySpec("戻る", KeyType.NIKO_CANCEL),
                 KeySpec(guideChars.getOrElse(0) { "" }, KeyType.NIKO_GUIDE_CHAR),
                 KeySpec(guideChars.getOrElse(1) { "" }, KeyType.NIKO_GUIDE_CHAR),
                 KeySpec(guideChars.getOrElse(2) { "" }, KeyType.NIKO_GUIDE_CHAR),
-                KeySpec("⌫", KeyType.BACKSPACE, repeatable = true)
+                KeySpec("⌫", KeyType.NIKO_BACKSPACE, repeatable = true)
             ),
             listOf(
                 KeySpec("◀", KeyType.DPAD_LEFT, repeatable = true),
@@ -213,7 +223,7 @@ object NikoKeyboardLayout {
                 KeySpec("あ1", KeyType.NIKO_LANG),
                 starKey,
                 KeySpec(guideChars.getOrElse(9) { "" }, KeyType.NIKO_GUIDE_CHAR),
-                KeySpec("@!?", KeyType.EMOJI),
+                poundKey,
                 KeySpec("⏎", KeyType.ENTER)
             )
         )
@@ -256,9 +266,9 @@ object NikoKeyboardLayout {
             ),
             listOf(
                 KeySpec("あ1", KeyType.NIKO_LANG),
-                KeySpec("*", KeyType.KEY_STAR),
+                KeySpec("*", KeyType.NIKO_INPUT_STAR),
                 KeySpec("0", KeyType.NIKO_KEY_0),
-                KeySpec("#", KeyType.KEY_POUND),
+                KeySpec("#", KeyType.NIKO_INPUT_POUND),
                 KeySpec("⏎", KeyType.ENTER)
             )
         )

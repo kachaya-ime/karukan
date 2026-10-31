@@ -10,21 +10,18 @@
         app:iconSpaceReserved="false"
         >
 
-        <ListPreference
-            android:defaultValue="jinen-v2-xsmall-Q5_K_M.gguf"
-            android:entries="@array/pref_model_name_entries"
-            android:entryValues="@array/pref_model_name_values"
-            android:key="pref_model_name"
-            android:title="AI 変換モデル"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true"
-            />
-
         <SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="pref_live_conversion"
             android:summary="入力中にリアルタイムで最適な変換候補をプレビュー表示します"
             android:title="ライブ変換を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_persona_management"
+            android:summary="複数の変換ペルソナを登録・管理・有効化します"
+            android:title="変換ペルソナの管理"
             app:iconSpaceReserved="false"
             />
 
@@ -246,11 +243,14 @@
         app:iconSpaceReserved="false"
         >
 
-        <Preference
-            android:key="pref_persona_management"
-            android:summary="複数の変換ペルソナを登録・管理・有効化します"
-            android:title="変換ペルソナの管理"
+        <ListPreference
+            android:defaultValue="jinen-v2-xsmall-Q5_K_M.gguf"
+            android:entries="@array/pref_model_name_entries"
+            android:entryValues="@array/pref_model_name_values"
+            android:key="pref_model_name"
+            android:title="AI 変換モデル"
             app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
             />
 
         <Preference

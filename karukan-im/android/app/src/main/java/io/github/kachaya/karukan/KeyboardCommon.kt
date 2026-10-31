@@ -70,7 +70,13 @@ enum class KeyType {
     KEY_STAR,      // * (STAR) キー (゛゜小)
     KEY_POUND,     // # (POUND) キー (確定)
     CHUNK_FIX,     // チャンク固定・文節区切りキー
-    NIKO_GUIDE_CHAR; // ニコタッチ2打目ガイド文字キー
+    NIKO_GUIDE_CHAR, // ニコタッチ2打目ガイド文字キー
+    NIKO_CANCEL,     // ニコタッチ1打目画面に戻るキー
+    NIKO_BACKSPACE,  // ニコタッチ2打目バックスペースキー
+    NIKO_TOGGLE,     // ニコタッチ濁音/小文字トグルキー (*)
+    NIKO_INPUT_STAR, // ニコタッチ *入力キー
+    NIKO_INPUT_POUND,// ニコタッチ #入力キー
+    NIKO_SYMBOL_PALETTE; // ニコタッチ記号パレット呼び出しキー (#)
 
     val isNikoKey: Boolean
         get() = this in NIKO_KEY_0..NIKO_KEY_9
