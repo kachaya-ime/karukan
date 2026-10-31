@@ -174,31 +174,33 @@ class KarukanInputView @JvmOverloads constructor(
         val initialPaddingRight = paddingRight
         val initialPaddingBottom = paddingBottom
 
-        val applyInsets: (View, WindowInsetsCompat) -> Unit = { view, insets ->
-            val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            view.setPadding(
-                initialPaddingLeft,
-                initialPaddingTop,
-                initialPaddingRight,
-                initialPaddingBottom + navInsets.bottom
-            )
-        }
-
-        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-            applyInsets(view, insets)
-            insets
-        }
-
-        addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) {
-                v.removeOnAttachStateChangeListener(this)
-                ViewCompat.getRootWindowInsets(v)?.let { rootInsets ->
-                    applyInsets(v, rootInsets)
-                }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            val applyInsets: (View, WindowInsetsCompat) -> Unit = { view, insets ->
+                val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+                view.setPadding(
+                    initialPaddingLeft,
+                    initialPaddingTop,
+                    initialPaddingRight,
+                    initialPaddingBottom + navInsets.bottom
+                )
             }
-            override fun onViewDetachedFromWindow(v: View) {}
-        })
-        requestApplyInsets()
+
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                applyInsets(view, insets)
+                insets
+            }
+
+            addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {
+                    v.removeOnAttachStateChangeListener(this)
+                    ViewCompat.getRootWindowInsets(v)?.let { rootInsets ->
+                        applyInsets(v, rootInsets)
+                    }
+                }
+                override fun onViewDetachedFromWindow(v: View) {}
+            })
+            requestApplyInsets()
+        }
 
         // 1. 未確定テキスト表示エリア
         composingTextView = TextView(context).apply {
@@ -224,13 +226,8 @@ class KarukanInputView @JvmOverloads constructor(
         candidateLayout = LinearLayout(context).apply {
             orientation = HORIZONTAL
         }
-        val defaultCandidateTextView = TextView(context).apply {
-            text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
-            textSize = 16f
-            setPadding(dpToPx(12f), dpToPx(8f), dpToPx(12f), dpToPx(8f))
-            setTextColor(colors.textColor)
-        }
-        candidateLayout.addView(defaultCandidateTextView)
+        val defaultCandidateView = createDefaultCandidateView(isEnglishMode)
+        candidateLayout.addView(defaultCandidateView)
         candidateScrollContainer.addView(candidateLayout)
 
         candidateBarContainer.addView(
@@ -333,6 +330,37 @@ class KarukanInputView @JvmOverloads constructor(
         addView(emojiPaletteContainer)
 
         updateKeyboardLayoutVisibility()
+    }
+
+    private fun createDefaultCandidateView(isEnglishMode: Boolean): View {
+        val density = resources.displayMetrics.density
+        val padH = (14 * density).toInt()
+        val padV = (8 * density).toInt()
+        val minHeightPx = (36 * density).toInt()
+        val colors = getThemeColors()
+        val isDark = listener?.isDarkTheme() ?: true
+
+        return Button(ContextThemeWrapper(context, R.style.Theme_Karukan)).apply {
+            text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
+            textSize = 15f
+            isAllCaps = false
+            minHeight = minHeightPx
+            minimumHeight = minHeightPx
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(padH, padV, padH, padV)
+            setTextColor(colors.textColor)
+            background = getCandidateButtonDrawable(false, isDark, 8f)
+            isClickable = false
+            isFocusable = false
+            val btnMarginPx = dpToPx(3f)
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(btnMarginPx, btnMarginPx, btnMarginPx, btnMarginPx)
+            }
+        }
     }
 
     private fun createNewCandidateButton(
@@ -520,14 +548,8 @@ class KarukanInputView @JvmOverloads constructor(
         if (isCandidateExpanded) {
             collapseCandidates()
         }
-        val colors = getThemeColors()
-        val defaultCandidateTextView = TextView(context).apply {
-            text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
-            textSize = 16f
-            setPadding(dpToPx(12f), dpToPx(8f), dpToPx(12f), dpToPx(8f))
-            setTextColor(colors.textColor)
-        }
-        candidateLayout.addView(defaultCandidateTextView)
+        val defaultCandidateView = createDefaultCandidateView(isEnglishMode)
+        candidateLayout.addView(defaultCandidateView)
     }
 
     fun updateInputMode(inputMode: InputMode) {
