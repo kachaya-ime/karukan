@@ -5,12 +5,12 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * 変換ペルソナの個別のアイテムデータを保持するデータクラス
+ * 変換ペルソナの個別のアイテムデータを保持するデータクラス（排他選択）
  */
 data class PersonaItem(
     val id: String = UUID.randomUUID().toString(),
     val text: String,
-    val isEnabled: Boolean = true
+    val isSelected: Boolean = false
 ) {
     companion object {
         fun fromJsonString(jsonStr: String): List<PersonaItem> {
@@ -21,8 +21,12 @@ data class PersonaItem(
                     val obj = jsonArray.getJSONObject(i)
                     val id = obj.optString("id", UUID.randomUUID().toString())
                     val text = obj.getString("text")
-                    val isEnabled = obj.optBoolean("isEnabled", true)
-                    list.add(PersonaItem(id, text, isEnabled))
+                    val isSelected = if (obj.has("isSelected")) {
+                        obj.getBoolean("isSelected")
+                    } else {
+                        obj.optBoolean("isEnabled", false)
+                    }
+                    list.add(PersonaItem(id, text, isSelected))
                 }
             } catch (_: Exception) {}
             return list
@@ -34,7 +38,7 @@ data class PersonaItem(
                 val obj = JSONObject().apply {
                     put("id", item.id)
                     put("text", item.text)
-                    put("isEnabled", item.isEnabled)
+                    put("isSelected", item.isSelected)
                 }
                 jsonArray.put(obj)
             }

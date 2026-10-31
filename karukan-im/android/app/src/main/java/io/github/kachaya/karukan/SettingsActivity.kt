@@ -153,11 +153,13 @@ class SettingsFragment : PreferenceFragmentCompat() {
         } else {
             emptyList()
         }
-        val enabledCount = itemsList.count { it.isEnabled }
+        val selectedItem = itemsList.firstOrNull { it.isSelected }
         val summary = if (itemsList.isEmpty()) {
             "設定されているペルソナはありません"
+        } else if (selectedItem == null) {
+            "未選択 (登録: ${itemsList.size}件)"
         } else {
-            "登録: ${itemsList.size}件 (有効: ${enabledCount}件)"
+            "選択中: ${selectedItem.text} (登録: ${itemsList.size}件)"
         }
         findPreference<Preference>("pref_persona_management")?.summary = summary
     }

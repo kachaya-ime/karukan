@@ -30,10 +30,6 @@ class PreferencesManager(
 
     /**
      * ライブ変換の有効/無効を設定する。
-     *
-     * 通常の設定項目は PreferenceFragmentCompat (設定画面UI) 経由で SharedPreferences が自動更新されますが、
-     * ライブ変換は IME 実行中（キーボード操作・ショートカット等）から動的に切り替えるため、
-     * プログラム側で直接書き換える専用のセッターを用意しています。
      */
     fun setLiveConversionEnabled(enabled: Boolean) {
         prefs.edit { putBoolean("pref_live_conversion", enabled) }
@@ -46,9 +42,7 @@ class PreferencesManager(
         } else {
             emptyList()
         }
-        val combinedPersona = personaItems
-            .filter { it.isEnabled }
-            .joinToString(" ") { it.text }
+        val activePersona = personaItems.firstOrNull { it.isSelected }?.text ?: ""
 
         val settings = KarukanSettings(
             modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
@@ -59,7 +53,7 @@ class PreferencesManager(
 
             strategy = prefs.getStringNonNull("pref_strategy", "adaptive"),
             nThreads = prefs.getIntFromString("pref_n_threads", defaultOptimalThreads),
-            persona = combinedPersona,
+            persona = activePersona,
             useContext = prefs.getBoolean("pref_use_context", true),
             contextChars = prefs.getIntFromString("pref_context_chars", 10),
             maxLatencyMs = prefs.getIntFromString("pref_max_latency_ms", 300),

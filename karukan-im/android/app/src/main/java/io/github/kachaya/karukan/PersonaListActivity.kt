@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -21,10 +22,9 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.switchmaterial.SwitchMaterial
 
 /**
- * 複数の変換ペルソナの登録・有効化・編集・削除を行う管理画面アクティビティ
+ * 変換ペルソナの登録・排他選択（1つだけ有効）・編集・削除を行う管理画面アクティビティ
  */
 class PersonaListActivity : AppCompatActivity() {
 
@@ -58,10 +58,10 @@ class PersonaListActivity : AppCompatActivity() {
 
         adapter = PersonaAdapter(
             onItemClick = { item ->
-                showEditPersonaDialog(item)
+                selectPersona(item)
             },
-            onToggle = { item, isEnabled ->
-                updatePersonaEnabled(item, isEnabled)
+            onEdit = { item ->
+                showEditPersonaDialog(item)
             },
             onDelete = { item ->
                 showDeleteConfirmDialog(item)
@@ -89,8 +89,8 @@ class PersonaListActivity : AppCompatActivity() {
     private fun loadData() {
         val items = getPersonaItemsFromPrefs()
         adapter.submitList(items)
-        val enabledCount = items.count { it.isEnabled }
-        tvPersonaCount.text = "登録ペルソナ: ${items.size}件 (有効: ${enabledCount}件)"
+        val selectedItem = items.firstOrNull { it.isSelected }
+        tvPersonaCount.text = "登録ペルソナ: ${items.size}件 (選択中: ${selectedItem?.text ?: "なし"})"
 
         if (items.isEmpty()) {
             tvEmptyMessage.isVisible = true
@@ -115,6 +115,19 @@ class PersonaListActivity : AppCompatActivity() {
         prefs.edit().putString("pref_persona_list", json).apply()
     }
 
+    private fun selectPersona(item: PersonaItem) {
+        val currentItems = getPersonaItemsFromPrefs().toMutableList()
+        val updatedItems = currentItems.map {
+            if (it.id == item.id) {
+                it.copy(isSelected = !it.isSelected)
+            } else {
+                it.copy(isSelected = false)
+            }
+        }
+        savePersonaItemsToPrefs(updatedItems)
+        loadData()
+    }
+
     private fun showAddPersonaDialog() {
         val input = EditText(this).apply {
             hint = "例: プログラミング, 医療, ビジネスメール"
@@ -128,7 +141,7 @@ class PersonaListActivity : AppCompatActivity() {
                 val text = input.text.toString().trim()
                 if (text.isNotEmpty()) {
                     val currentItems = getPersonaItemsFromPrefs().toMutableList()
-                    currentItems.add(PersonaItem(text = text, isEnabled = true))
+                    currentItems.add(PersonaItem(text = text, isSelected = false))
                     savePersonaItemsToPrefs(currentItems)
                     loadData()
                     Toast.makeText(this, "ペルソナを追加しました", Toast.LENGTH_SHORT).show()
@@ -169,16 +182,6 @@ class PersonaListActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun updatePersonaEnabled(item: PersonaItem, isEnabled: Boolean) {
-        val currentItems = getPersonaItemsFromPrefs().toMutableList()
-        val index = currentItems.indexOfFirst { it.id == item.id }
-        if (index >= 0) {
-            currentItems[index] = item.copy(isEnabled = isEnabled)
-            savePersonaItemsToPrefs(currentItems)
-            loadData()
-        }
-    }
-
     private fun showDeleteConfirmDialog(item: PersonaItem) {
         AlertDialog.Builder(this)
             .setTitle("ペルソナの削除")
@@ -196,7 +199,7 @@ class PersonaListActivity : AppCompatActivity() {
 
     private class PersonaAdapter(
         private val onItemClick: (PersonaItem) -> Unit,
-        private val onToggle: (PersonaItem, Boolean) -> Unit,
+        private val onEdit: (PersonaItem) -> Unit,
         private val onDelete: (PersonaItem) -> Unit
     ) : ListAdapter<PersonaItem, PersonaAdapter.ViewHolder>(DiffCallback) {
 
@@ -216,30 +219,30 @@ class PersonaListActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = getItem(position)
-            holder.bind(item, onItemClick, onToggle, onDelete)
+            holder.bind(item, onItemClick, onEdit, onDelete)
         }
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             private val tvPersonaText: TextView = itemView.findViewById(R.id.tvPersonaText)
-            private val switchEnable: SwitchMaterial = itemView.findViewById(R.id.switchEnable)
+            private val radioSelected: RadioButton = itemView.findViewById(R.id.radioSelected)
+            private val btnEdit: ImageButton = itemView.findViewById(R.id.btnEdit)
             private val btnDelete: ImageButton = itemView.findViewById(R.id.btnDelete)
 
             fun bind(
                 item: PersonaItem,
                 onItemClick: (PersonaItem) -> Unit,
-                onToggle: (PersonaItem, Boolean) -> Unit,
+                onEdit: (PersonaItem) -> Unit,
                 onDelete: (PersonaItem) -> Unit
             ) {
                 tvPersonaText.text = item.text
+                radioSelected.isChecked = item.isSelected
 
                 itemView.setOnClickListener {
                     onItemClick(item)
                 }
 
-                switchEnable.setOnCheckedChangeListener(null)
-                switchEnable.isChecked = item.isEnabled
-                switchEnable.setOnCheckedChangeListener { _, isChecked ->
-                    onToggle(item, isChecked)
+                btnEdit.setOnClickListener {
+                    onEdit(item)
                 }
 
                 btnDelete.setOnClickListener {
