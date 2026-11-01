@@ -7,6 +7,7 @@ data class KarukanSettings(
     // 基本変換設定
     val modelName: String = "jinen-v2-xsmall-Q5_K_M.gguf",
     val isLiveConversionEnabled: Boolean = true,
+    val isShowCandidateAnnotationsEnabled: Boolean = true,
     val numCandidates: Int = 9,
     val punctuationStyle: String = "kuten_touten",
     val spaceStyle: String = "half",
@@ -22,16 +23,17 @@ data class KarukanSettings(
     val chunkSymbols: Int = 1,
     val chunkDigits: Int = 0,
     val chunkAlphabets: Int = 0,
-    val beamWidth: Int = 9,
+    val beamWidth: Int = 3,
     val beamChars: Int = 30,
 
     // 変換学習設定
     val isLearningEnabled: Boolean = true,
     val maxLearningEntries: Int = 10000,
+    val maxLearningSurfaceChars: Int = 50,
 
     // 拡張設定（記号・幅・自動変換ルール）
     val isDateConversionEnabled: Boolean = true,
-    val isAutoCapitalizationEnabled: Boolean = true,
+    val dateConfigJson: String = "",
     val isAutoCommitEnabled: Boolean = true,
     val bracketStyle: String = "corner",
     val slashStyle: String = "middle_dot",
@@ -45,5 +47,6 @@ data class KarukanSettings(
     val isSoundEnabled: Boolean = false,
     val isForceShowSoftKeyboardEnabled: Boolean = true,
     val keyboardHeight: String = "medium",
-    val keyboardTheme: String = "dark"
+    val keyboardTheme: String = "dark",
+    val physicalKeyboardLayout: String = "jis109"
 )

@@ -137,11 +137,27 @@ class SettingsFragment : PreferenceFragmentCompat() {
             startActivity(intent)
             true
         }
+
+        findPreference<Preference>("pref_date_phrase_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), DatePhraseListActivity::class.java)
+            startActivity(intent)
+            true
+        }
     }
 
     override fun onResume() {
         super.onResume()
         updatePersonaSummary()
+        updateDatePhraseSummary()
+    }
+
+    private fun updateDatePhraseSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_date_config_json", null)
+        val config = DateConfigData.fromJsonString(json)
+        val summary = "登録フレーズ: ${config.phrases.size}件 (共通フォーマット: ${config.formats.size}件)"
+        findPreference<Preference>("pref_date_phrase_management")?.summary = summary
     }
 
     private fun updatePersonaSummary() {

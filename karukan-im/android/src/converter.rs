@@ -18,6 +18,36 @@ pub static ROMAJI_CONVERTER: Mutex<Option<RomajiConverter>> = Mutex::new(None);
 pub static LEARNING_CACHE: Mutex<Option<LearningCache>> = Mutex::new(None);
 pub static ENGINE: Mutex<Option<InputMethodEngine>> = Mutex::new(None);
 
+#[allow(dead_code)]
+fn android_log(tag: &str, msg: &str) {
+    use std::ffi::CString;
+    unsafe extern "C" {
+        fn __android_log_print(
+            prio: std::os::raw::c_int,
+            tag: *const std::os::raw::c_char,
+            fmt: *const std::os::raw::c_char,
+            ...
+        ) -> std::os::raw::c_int;
+    }
+    if let (Ok(c_tag), Ok(c_msg)) = (CString::new(tag), CString::new("%s")) {
+        if let Ok(c_val) = CString::new(msg) {
+            unsafe {
+                __android_log_print(3, c_tag.as_ptr(), c_msg.as_ptr(), c_val.as_ptr());
+            }
+        }
+    }
+}
+
+fn clean_model_candidate(s: &str) -> String {
+    let mut cleaned = s.trim();
+    if let Some(pos) = cleaned.find('(').or_else(|| cleaned.find('（')).or_else(|| cleaned.find('[')).or_else(|| cleaned.find('【')) {
+        if pos > 0 {
+            cleaned = &cleaned[..pos];
+        }
+    }
+    cleaned.trim().to_string()
+}
+
 pub fn convert_query(
     input_str: &str,
     max_candidates: i32,
@@ -27,6 +57,16 @@ pub fn convert_query(
     if is_query_cancelled(q_id) || input_str.is_empty() {
         return Some(String::new());
     }
+
+    let has_left_context = !context_str.trim().is_empty();
+
+    android_log(
+        "KarukanNative",
+        &format!(
+            "[convert_query] input='{}', context='{}', query_id={}, has_left_context={}",
+            input_str, context_str, q_id, has_left_context
+        ),
+    );
 
     // Chunk および Beam 設定パラメータの取得
     let (max_ai_len, chunk_symbols, chunk_digits, chunk_alphabets) = {
@@ -71,32 +111,11 @@ pub fn convert_query(
         (String::new(), input_str.to_string())
     };
 
-    // 高速な重複防止のための HashSet
-    let mut seen_candidates = HashSet::new();
-
     if is_query_cancelled(q_id) {
         return Some(String::new());
     }
 
-    // 0. プライマリ・リライター (日付・数値・記号・絵文字)
-    let primary_rewriter_candidates =
-        get_primary_rewriter_candidates(input_str, &mut seen_candidates);
-
-    if is_query_cancelled(q_id) {
-        return Some(String::new());
-    }
-
-    // 1. ユーザー辞書
-    let user_dict_candidates = get_user_dict_candidates(input_str, &mut seen_candidates);
-
-    // 2. システム辞書
-    let system_dict_candidates = get_system_dict_candidates(input_str, &seen_candidates);
-
-    if is_query_cancelled(q_id) {
-        return Some(String::new());
-    }
-
-    // strategy, beam_width および max_latency_ms / ADAPTIVE_USE_GREEDY に応じた実効AIモデル候補数 (effective_max_cand) の決定
+    // strategy, beam_width および max_latency_ms に応じた実効AIモデル候補数の決定
     let (effective_max_cand, max_lat_ms) = {
         let guard = ENGINE_CONFIG.lock().unwrap();
         if let Some(ref config) = *guard {
@@ -133,7 +152,7 @@ pub fn convert_query(
         }
     };
 
-    // 3. AIモデル推論 (時間計測付き) または Viterbi 探索
+    // 3. AIモデル推論 (文脈 context_str を考慮した推論)
     let start_time = std::time::Instant::now();
 
     let raw_model_candidates = {
@@ -142,11 +161,33 @@ pub fn convert_query(
             let res = converter
                 .convert(&query_for_ai, context_str, effective_max_cand)
                 .unwrap_or_else(|_| vec![query_for_ai.clone()]);
-            if prefix_str.is_empty() {
+            let raw = if prefix_str.is_empty() {
                 res
             } else {
                 res.into_iter().map(|cand| format!("{}{}", prefix_str, cand)).collect()
+            };
+
+            let mut cleaned_res = Vec::with_capacity(raw.len());
+            let mut seen = HashSet::new();
+            for cand in raw {
+                let cleaned = clean_model_candidate(&cand);
+                if !cleaned.is_empty() && seen.insert(cleaned.clone()) {
+                    cleaned_res.push(cleaned);
+                }
             }
+
+            // 短いかな入力 (3文字以下) で、モデルの上位3件以内にかな原文が含まれている場合は、
+            // ライブ変換中の不要な漢字フリッカー (例: 「はい」→「灰」) を防ぐため原文を1番目に配置する
+            if input_str.chars().count() <= 3 {
+                if let Some(pos) = cleaned_res.iter().take(3).position(|c| c == input_str) {
+                    if pos > 0 {
+                        let item = cleaned_res.remove(pos);
+                        cleaned_res.insert(0, item);
+                    }
+                }
+            }
+
+            cleaned_res
         } else {
             vec![input_str.to_string()]
         }
@@ -162,6 +203,11 @@ pub fn convert_query(
         }
     }
 
+    android_log(
+        "KarukanNative",
+        &format!("[raw_model_candidates] {:?}", raw_model_candidates),
+    );
+
     if is_query_cancelled(q_id) {
         return Some(String::new());
     }
@@ -170,100 +216,235 @@ pub fn convert_query(
     let full_katakana = karukan_engine::hiragana_to_katakana(input_str);
     let (half_katakana_list, alphabet_list) = get_secondary_rewriter_candidates(input_str);
 
-    // 漢字変換・語彙変換候補と、単なるひらがな原形を分離
-    let mut main_conversion_candidates = Vec::new();
-    let mut plain_kana_candidates = Vec::new();
+    // 5. 各辞書・候補ソースの個別検索
+    let user_dict_candidates = get_user_dict_candidates(input_str, &mut HashSet::new());
+    let system_dict_candidates = get_system_dict_candidates(input_str, &HashSet::new());
 
-    for mc in raw_model_candidates {
-        if mc == input_str {
-            if !plain_kana_candidates.contains(&mc) {
-                plain_kana_candidates.push(mc);
-            }
-        } else if seen_candidates.insert(mc.clone()) {
-            main_conversion_candidates.push(mc);
-        }
-    }
-
-    // 5. 公式コアエンジン (karukan-im/core) と完全に同じ優先順位に従って候補を結合:
-    //    1) ユーザー辞書 (User Dictionary)
-    //    2) AIモデル推論結果 (Model)
-    //    3) システム辞書 (System Dictionary)
-    //    4) 原文ひらがな / 全角カタカナ (Fallback)
-    //    5) 日付・数値・記号・絵文字・半角カタカナ・アルファベット (Date / Rewriter)
-    //    ※ 最終的な第 1 位最優先として学習履歴 (Learning) が先頭へ挿入される
-    let mut candidates = Vec::with_capacity(16);
-
-    for udc in user_dict_candidates {
-        candidates.push(udc);
-    }
-    for mc in main_conversion_candidates {
-        candidates.push(mc);
-    }
-    for sdc in system_dict_candidates {
-        if sdc == input_str {
-            if !plain_kana_candidates.contains(&sdc) {
-                plain_kana_candidates.push(sdc);
-            }
-        } else if seen_candidates.insert(sdc.clone()) {
-            candidates.push(sdc);
-        }
-    }
-    if seen_candidates.insert(input_str.to_string()) {
-        candidates.push(input_str.to_string());
-    }
-    if !full_katakana.is_empty() && seen_candidates.insert(full_katakana.clone()) {
-        candidates.push(full_katakana);
-    }
-    for pk in plain_kana_candidates {
-        if seen_candidates.insert(pk.clone()) {
-            candidates.push(pk);
-        }
-    }
-    for rc in primary_rewriter_candidates {
-        if seen_candidates.insert(rc.clone()) {
-            candidates.push(rc);
-        }
-    }
-    for hk in half_katakana_list {
-        if seen_candidates.insert(hk.clone()) {
-            candidates.push(hk);
-        }
-    }
-    for alpha in alphabet_list {
-        if seen_candidates.insert(alpha.clone()) {
-            candidates.push(alpha);
-        }
-    }
-
-    // 6. 学習キャッシュ（学習履歴）による順位繰り上げ処理 (isLearningEnabled が有効な場合のみ)
-    if IS_LEARNING_ENABLED.load(Ordering::Relaxed) {
+    let learned_entries = if IS_LEARNING_ENABLED.load(Ordering::Relaxed) {
         let learn_guard = LEARNING_CACHE.lock().unwrap();
         if let Some(ref cache) = *learn_guard {
-            let learned = cache.lookup(input_str);
-            for (surface, _score) in learned.into_iter().rev() {
-                if let Some(pos) = candidates.iter().position(|c| c == &surface) {
-                    let item = candidates.remove(pos);
-                    candidates.insert(0, item);
-                } else {
-                    candidates.insert(0, surface);
-                }
+            cache.lookup(input_str)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let learned_surfaces: HashSet<String> = learned_entries.iter().map(|(s, _)| s.clone()).collect();
+    let user_dict_map: std::collections::HashMap<String, Option<String>> = user_dict_candidates
+        .iter()
+        .map(|c| (c.surface.clone(), c.description.clone()))
+        .collect();
+    let system_dict_map: std::collections::HashMap<String, Option<String>> = system_dict_candidates
+        .iter()
+        .map(|c| (c.surface.clone(), c.description.clone()))
+        .collect();
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum CandidateSourceKind {
+        Learning,
+        UserDict,
+        Model,
+        SystemDict,
+        Rewriter,
+        Fallback,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CandidateAnnotated {
+        surface: String,
+        source: CandidateSourceKind,
+        description: Option<String>,
+    }
+
+    let determine_source = |surface: &str, is_from_model: bool| -> (CandidateSourceKind, Option<String>) {
+        if learned_surfaces.contains(surface) {
+            let desc = user_dict_map.get(surface).cloned().flatten()
+                .or_else(|| system_dict_map.get(surface).cloned().flatten());
+            (CandidateSourceKind::Learning, desc)
+        } else if let Some(desc) = user_dict_map.get(surface) {
+            (CandidateSourceKind::UserDict, desc.clone())
+        } else if is_from_model {
+            let desc = system_dict_map.get(surface).cloned().flatten();
+            (CandidateSourceKind::Model, desc)
+        } else if let Some(desc) = system_dict_map.get(surface) {
+            (CandidateSourceKind::SystemDict, desc.clone())
+        } else {
+            (CandidateSourceKind::Model, None)
+        }
+    };
+
+    let mut candidates: Vec<CandidateAnnotated> = Vec::with_capacity(16);
+    let mut seen_candidates = HashSet::new();
+
+    macro_rules! push_cand {
+        ($surface:expr, $forced_source:expr, $desc_override:expr, $is_model:expr) => {
+            let surface_val = $surface;
+            if seen_candidates.insert(surface_val.clone()) {
+                let (source, default_desc) = determine_source(&surface_val, $is_model);
+                let final_source = $forced_source.unwrap_or(source);
+                let final_desc = $desc_override.or(default_desc);
+                candidates.push(CandidateAnnotated {
+                    surface: surface_val,
+                    source: final_source,
+                    description: final_desc,
+                });
             }
+        };
+    }
+
+    if has_left_context {
+        // 【左文脈が存在する場合】
+        // AIモデルが context_str に照らして推論した候補 (raw_model_candidates) を最優先にする。
+        // （コンテキストフリーな過去の学習履歴や辞書単語が、現在の左文脈における AI 推論結果を上書きするのを防ぐ）
+
+        // 1. AIモデルによる文脈考慮の変換候補結果 (ユーザー辞書や学習済みの語も determine_source で適切なバッジが付与される)
+        for mc in &raw_model_candidates {
+            push_cand!(mc.clone(), None, None, true);
+        }
+
+        // 2. ユーザー辞書 (モデル候補に含まれなかったユーザー明示登録語)
+        for udc in &user_dict_candidates {
+            push_cand!(udc.surface.clone(), Some(CandidateSourceKind::UserDict), udc.description.clone(), false);
+        }
+
+        // 3. 残りの学習履歴候補
+        for (surface, _) in &learned_entries {
+            push_cand!(surface.clone(), Some(CandidateSourceKind::Learning), None, false);
+        }
+
+        // 4. 残りのシステム辞書候補
+        for sdc in &system_dict_candidates {
+            push_cand!(sdc.surface.clone(), Some(CandidateSourceKind::SystemDict), sdc.description.clone(), false);
+        }
+    } else {
+        // 【左文脈が存在しない場合】
+        // 文脈がない場合はユーザーの過去の学習履歴を最優先にする。
+
+        // 1. 学習履歴 (最大3件)
+        for (surface, _) in learned_entries.iter().take(3) {
+            push_cand!(surface.clone(), Some(CandidateSourceKind::Learning), None, false);
+        }
+
+        // 2. ユーザー辞書
+        for udc in &user_dict_candidates {
+            push_cand!(udc.surface.clone(), Some(CandidateSourceKind::UserDict), udc.description.clone(), false);
+        }
+
+        // 3. AIモデル変換結果
+        for mc in &raw_model_candidates {
+            push_cand!(mc.clone(), None, None, true);
+        }
+
+        // 4. システム辞書
+        for sdc in &system_dict_candidates {
+            push_cand!(sdc.surface.clone(), Some(CandidateSourceKind::SystemDict), sdc.description.clone(), false);
         }
     }
 
-    // 単漢字アノテーション（解説）が存在する場合は「漢字 (解説)」を補足する処理を追加
-    let mut final_candidates = Vec::with_capacity(candidates.len());
-    for cand in candidates {
-        if cand.chars().count() == 1 {
-            if let Some(desc) = karukan_engine::single_kanji_description(&cand) {
-                final_candidates.push(format!("{} ({})", cand, desc));
-            } else {
-                final_candidates.push(cand);
-            }
-        } else {
-            final_candidates.push(cand);
+    // 5. 原文ひらがな / 全角カタカナ (Fallback)
+    push_cand!(input_str.to_string(), Some(CandidateSourceKind::Fallback), None, false);
+
+    if !full_katakana.is_empty() {
+        push_cand!(full_katakana, Some(CandidateSourceKind::Fallback), None, false);
+    }
+
+    // 6. リライター候補 (日付・記号・数値・絵文字・半角カタカナ・アルファベット)
+    let primary_rewriter_candidates =
+        get_primary_rewriter_candidates(input_str, &mut seen_candidates);
+    for rc in primary_rewriter_candidates {
+        candidates.push(CandidateAnnotated {
+            surface: rc.surface,
+            source: CandidateSourceKind::Rewriter,
+            description: rc.description,
+        });
+    }
+
+    for hk in half_katakana_list {
+        if seen_candidates.insert(hk.surface.clone()) {
+            candidates.push(CandidateAnnotated {
+                surface: hk.surface,
+                source: CandidateSourceKind::Rewriter,
+                description: hk.description,
+            });
         }
     }
+
+    for alpha in alphabet_list {
+        if seen_candidates.insert(alpha.surface.clone()) {
+            candidates.push(CandidateAnnotated {
+                surface: alpha.surface,
+                source: CandidateSourceKind::Rewriter,
+                description: alpha.description,
+            });
+        }
+    }
+
+    // 7. アノテーション整形
+    let mut final_candidates = Vec::with_capacity(candidates.len());
+    for item in candidates {
+        let surface = item.surface;
+
+        let kanji_desc = if surface.chars().count() == 1 {
+            karukan_engine::single_kanji_description(&surface)
+        } else {
+            None
+        };
+        let effective_desc = item.description.or_else(|| kanji_desc.map(|s| s.to_string()));
+
+        let formatted = match item.source {
+            CandidateSourceKind::Learning => {
+                if let Some(desc) = effective_desc {
+                    format!("{} (📝 {})", surface, desc)
+                } else {
+                    format!("{} (📝)", surface)
+                }
+            }
+            CandidateSourceKind::UserDict => {
+                if let Some(desc) = effective_desc {
+                    format!("{} (👤 {})", surface, desc)
+                } else {
+                    format!("{} (👤)", surface)
+                }
+            }
+            CandidateSourceKind::Model => {
+                if let Some(desc) = effective_desc {
+                    format!("{} (🤖 {})", surface, desc)
+                } else {
+                    format!("{} (🤖)", surface)
+                }
+            }
+            CandidateSourceKind::SystemDict => {
+                if let Some(desc) = effective_desc {
+                    format!("{} ({})", surface, desc)
+                } else {
+                    surface
+                }
+            }
+            CandidateSourceKind::Rewriter => {
+                if let Some(desc) = effective_desc {
+                    format!("{} (🔄 {})", surface, desc)
+                } else {
+                    format!("{} (🔄)", surface)
+                }
+            }
+            CandidateSourceKind::Fallback => {
+                if let Some(desc) = effective_desc {
+                    format!("{} ({})", surface, desc)
+                } else {
+                    surface
+                }
+            }
+        };
+
+        final_candidates.push(formatted);
+    }
+
+    android_log(
+        "KarukanNative",
+        &format!("[final_candidates] {:?}", final_candidates),
+    );
 
     Some(final_candidates.join("\t"))
 }

@@ -150,6 +150,11 @@ class KeyboardLayoutBuilder(
         return buildKeyboardLayout(KeyboardLayoutRegistry.getLayoutSpec("tablet"))
     }
 
+    fun createBuiltinKeyboardContainer(): LinearLayout {
+        currentQwertyMode = QwertyMode.NORMAL
+        return buildKeyboardLayout(KeyboardLayoutRegistry.getLayoutSpec("builtin"))
+    }
+
     fun createNikoKeyboardContainer(): LinearLayout {
         currentInputMode = inputModeSupplier()
         return when (currentInputMode) {

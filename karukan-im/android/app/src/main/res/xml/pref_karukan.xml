@@ -18,6 +18,14 @@
             app:iconSpaceReserved="false"
             />
 
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_candidate_annotations"
+            android:summary="候補に種別アノテーション（📝/👤/🤖/🔄等）を表示します"
+            android:title="候補アノテーションを表示"
+            app:iconSpaceReserved="false"
+            />
+
         <Preference
             android:key="pref_persona_management"
             android:summary="複数の変換ペルソナを登録・管理・有効化します"
@@ -53,13 +61,20 @@
             app:iconSpaceReserved="false"
             />
 
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_auto_capitalization"
-            android:summary="英数モード時に文頭の英字を自動で大文字にします"
-            android:title="英字の自動大文字化"
+        <Preference
+            android:key="pref_date_phrase_management"
+            android:summary="「きょう」「いま」等の変換フレーズやフォーマットの追加・編集・削除"
+            android:title="日付・時刻変換フレーズの管理"
             app:iconSpaceReserved="false"
             />
+
+    </PreferenceCategory>
+
+    <!-- 2. 記号・文字幅設定 -->
+    <PreferenceCategory
+        android:title="記号・文字幅設定"
+        app:iconSpaceReserved="false"
+        >
 
         <ListPreference
             android:defaultValue="kuten_touten"
@@ -123,7 +138,7 @@
 
     </PreferenceCategory>
 
-    <!-- 2. 外観・操作設定 -->
+    <!-- 3. 外観・操作設定 -->
     <PreferenceCategory
         android:title="外観・操作設定"
         app:iconSpaceReserved="false"
@@ -155,6 +170,16 @@
             android:entryValues="@array/pref_keyboard_height_values"
             android:key="pref_keyboard_height"
             android:title="キーボードの高さ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="jis109"
+            android:entries="@array/pref_physical_keyboard_layout_entries"
+            android:entryValues="@array/pref_physical_keyboard_layout_values"
+            android:key="pref_physical_keyboard_layout"
+            android:title="物理キーボード配列"
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true"
             />
@@ -193,7 +218,7 @@
 
     </PreferenceCategory>
 
-    <!-- 3. 辞書・学習設定 -->
+    <!-- 4. 辞書・学習設定 -->
     <PreferenceCategory
         android:title="辞書・学習設定"
         app:iconSpaceReserved="false"
@@ -237,7 +262,7 @@
 
     </PreferenceCategory>
 
-    <!-- 4. AI・エンジン詳細設定 -->
+    <!-- 5. AI・エンジン詳細設定 -->
     <PreferenceCategory
         android:title="AI・エンジン詳細設定"
         app:iconSpaceReserved="false"
@@ -253,6 +278,28 @@
             app:useSimpleSummaryProvider="true"
             />
 
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_digits_entries"
+            android:entryValues="@array/pref_chunk_digits_values"
+            android:key="pref_chunk_digits"
+            android:summary="『第3回』等の数字でAIが数字を誤増減・変形するハルシネーションを抑止します"
+            android:title="AI数字ハルシネーション保護"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_alphabets_entries"
+            android:entryValues="@array/pref_chunk_alphabets_values"
+            android:key="pref_chunk_alphabets"
+            android:summary="『Rustで』等の英字混在入力時にAIが英字を誤変換するのを抑止します"
+            android:title="AI英字ハルシネーション保護"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
         <Preference
             android:fragment="io.github.kachaya.karukan.EngineSettingsFragment"
             android:key="pref_engine_settings"
@@ -263,7 +310,7 @@
 
     </PreferenceCategory>
 
-    <!-- 5. 情報・ライセンス -->
+    <!-- 6. 情報・ライセンス -->
     <PreferenceCategory
         android:title="情報・ライセンス"
         app:iconSpaceReserved="false"

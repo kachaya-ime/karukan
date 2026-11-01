@@ -47,6 +47,7 @@ class PreferencesManager(
         val settings = KarukanSettings(
             modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
+            isShowCandidateAnnotationsEnabled = prefs.getBoolean("pref_show_candidate_annotations", true),
             numCandidates = prefs.getIntFromString("pref_num_candidates", 9),
             punctuationStyle = prefs.getStringNonNull("pref_punctuation", "kuten_touten"),
             spaceStyle = prefs.getStringNonNull("pref_space", "half"),
@@ -61,14 +62,15 @@ class PreferencesManager(
             chunkSymbols = prefs.getIntFromString("pref_chunk_symbols", 1),
             chunkDigits = prefs.getIntFromString("pref_chunk_digits", 0),
             chunkAlphabets = prefs.getIntFromString("pref_chunk_alphabets", 0),
-            beamWidth = prefs.getIntFromString("pref_beam_width", 9),
+            beamWidth = prefs.getIntFromString("pref_beam_width", 3),
             beamChars = prefs.getIntFromString("pref_beam_chars", 30),
 
             isLearningEnabled = prefs.getBoolean("pref_learning_enabled", true),
             maxLearningEntries = prefs.getIntFromString("pref_max_learning_entries", 10000),
+            maxLearningSurfaceChars = prefs.getIntFromString("pref_max_learning_surface_chars", 50),
 
             isDateConversionEnabled = prefs.getBoolean("pref_date_conversion", true),
-            isAutoCapitalizationEnabled = prefs.getBoolean("pref_auto_capitalization", true),
+            dateConfigJson = prefs.getStringNonNull("pref_date_config_json", ""),
             bracketStyle = prefs.getStringNonNull("pref_bracket", "corner"),
             slashStyle = prefs.getStringNonNull("pref_slash", "middle_dot"),
             digitWidth = prefs.getStringNonNull("pref_width_digit", "half"),
@@ -81,7 +83,8 @@ class PreferencesManager(
             isForceShowSoftKeyboardEnabled = prefs.getBoolean("pref_force_show_soft_keyboard", true),
             isAutoCommitEnabled = prefs.getBoolean("pref_auto_commit", true),
             keyboardHeight = prefs.getStringNonNull("pref_keyboard_height", "medium"),
-            keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "dark")
+            keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "dark"),
+            physicalKeyboardLayout = prefs.getStringNonNull("pref_physical_keyboard_layout", "jis109")
         )
         currentSettings = settings
         return settings

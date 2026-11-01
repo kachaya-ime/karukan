@@ -3,13 +3,13 @@ package io.github.kachaya.karukan
 import android.content.Context
 import android.graphics.Paint
 import android.util.Log
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 data class LearningItem(
     val reading: String,
@@ -608,10 +608,13 @@ class KarukanEngine(private val context: Context) {
     fun convert(query: String, maxCandidates: Int = 9, context: String = "", queryId: Long = 0): List<String> {
         if (query.isBlank() || !isLibraryLoaded || !isLoaded) return listOf(query)
 
+        Log.d(TAG, "convert: query='$query', context='$context', queryId=$queryId")
         return try {
             val joinedCandidates = nativeConvert(query, maxCandidates, context, queryId)
             if (joinedCandidates.isNotEmpty()) {
-                joinedCandidates.split("\t")
+                val list = joinedCandidates.split("\t")
+                Log.d(TAG, "convert result for '$query' (context='$context'): count=${list.size}, top='${list.firstOrNull()}'")
+                list
             } else {
                 listOf(query)
             }
@@ -716,7 +719,6 @@ class KarukanEngine(private val context: Context) {
             }
         }
     }
-
 
 
     fun clearLearning() {
@@ -843,9 +845,11 @@ class KarukanEngine(private val context: Context) {
                 asciiSymbolWidth = settings.asciiWidth,
                 digitWidth = settings.digitWidth,
                 maxLearningEntries = settings.maxLearningEntries,
+                maxLearningSurfaceChars = settings.maxLearningSurfaceChars,
                 isLearningEnabled = settings.isLearningEnabled,
                 isDateConversionEnabled = settings.isDateConversionEnabled
             )
+            nativeSetDateConfigJson(settings.dateConfigJson)
         } catch (e: Throwable) {
             Log.e(TAG, "Error updating engine config", e)
         }
@@ -888,9 +892,13 @@ class KarukanEngine(private val context: Context) {
         asciiSymbolWidth: String,
         digitWidth: String,
         maxLearningEntries: Int,
+        maxLearningSurfaceChars: Int,
         isLearningEnabled: Boolean,
         isDateConversionEnabled: Boolean
     )
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeSetDateConfigJson(json: String)
 
     fun processKey(keysym: Int, modifiers: Int, isRelease: Boolean = false): ProcessKeyResult {
         if (!isLibraryLoaded) return ProcessKeyResult(consumed = false)

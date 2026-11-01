@@ -1,34 +1,18 @@
 package io.github.kachaya.karukan
 
 import android.content.res.Configuration
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
-import android.os.Handler
-import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
-import android.util.StateSet
-import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
-import android.widget.PopupWindow
-import android.widget.ScrollView
 import android.widget.TextView
-import androidx.appcompat.view.ContextThemeWrapper
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 /**
  * Karukan IME の Android InputMethodService 実装クラス (QWERTY & ニコタッチ 12キー入力対応)
@@ -98,6 +83,8 @@ class KarukanInputMethodService : InputMethodService() {
     private var currentLiveCandidate: String? = null
 
     private var audioManager: AudioManager? = null
+    private var powerManager: PowerManager? = null
+    private var thermalStatusListener: PowerManager.OnThermalStatusChangedListener? = null
 
     companion object {
         private const val TAG = "KarukanInputService"
@@ -108,6 +95,8 @@ class KarukanInputMethodService : InputMethodService() {
         setTheme(R.style.Theme_Karukan)
         super.onCreate()
         audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
+        powerManager = getSystemService(POWER_SERVICE) as? PowerManager
+
         engine = KarukanEngine(this)
 
         preferencesManager = PreferencesManager(this) { updatedSettings ->
@@ -121,6 +110,9 @@ class KarukanInputMethodService : InputMethodService() {
                 } else {
                     pendingInputViewReload = true
                 }
+                if (romajiBuffer.isNotEmpty()) {
+                    performConversion()
+                }
             }
         }
         preferencesManager.startListening()
@@ -128,21 +120,40 @@ class KarukanInputMethodService : InputMethodService() {
         if (::engine.isInitialized) {
             engine.updateEngineConfig(settings)
         }
+
+        // Android 10+ (minSdk 29+) 発熱状態リスナー (Thermal Adaptive AI)
+        try {
+            thermalStatusListener = PowerManager.OnThermalStatusChangedListener { status ->
+                val isOverheating = status >= PowerManager.THERMAL_STATUS_MODERATE
+                val targetThreads = if (isOverheating) 1 else settings.nThreads
+                if (::engine.isInitialized) {
+                    val adaptedSettings = settings.copy(nThreads = targetThreads)
+                    engine.updateEngineConfig(adaptedSettings)
+                    Log.i(TAG, "Thermal adaptive AI: status=$status, adapted nThreads=$targetThreads")
+                }
+            }
+            thermalStatusListener?.let { listener ->
+                powerManager?.addThermalStatusListener(mainExecutor, listener)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "ThermalStatusListener not supported or failed to register", e)
+        }
     }
 
     private val inputViewListener = object : KarukanInputView.Listener {
         override fun isDarkTheme(): Boolean = this@KarukanInputMethodService.isDarkTheme()
         override fun isHardKeyboardConnected(): Boolean = this@KarukanInputMethodService.isHardKeyboardConnected()
-        override fun is12KeyHardKeyboardConnected(): Boolean = this@KarukanInputMethodService.is12KeyHardKeyboardConnected()
         override fun getKeyboardHeightPx(): Int = this@KarukanInputMethodService.getKeyboardHeightPx()
         override fun triggerKeyFeedback() = this@KarukanInputMethodService.triggerKeyFeedback()
         override fun onCandidateSelected(hiragana: String, candidate: String, index: Int) {
             this@KarukanInputMethodService.selectedCandidateIndex = index
             this@KarukanInputMethodService.onCandidateSelected(hiragana, candidate)
         }
+
         override fun onEmojiSelected(emoji: String) {
             currentInputConnection?.commitText(emoji, 1)
         }
+
         override fun getKeyboardEventListener(): KeyboardLayoutBuilder.KeyboardEventListener = keyboardEventListener
         override fun getSourceFilterLabel(filter: SourceFilter): String = this@KarukanInputMethodService.getSourceFilterLabel(filter)
         override fun getActiveSourceFilter(): SourceFilter = activeSourceFilter
@@ -151,6 +162,13 @@ class KarukanInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        thermalStatusListener?.let { listener ->
+            try {
+                powerManager?.removeThermalStatusListener(listener)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to remove ThermalStatusListener", e)
+            }
+        }
         dismissFloatingCandidates()
         cancelLiveConversion()
         serviceScope.cancel()
@@ -279,7 +297,14 @@ class KarukanInputMethodService : InputMethodService() {
     private var currentEffectiveKeyboardLayout: String? = null
 
     private fun getEffectiveKeyboardLayout(): String {
-        return if (is12KeyHardKeyboardConnected()) "niko" else settings.keyboardLayout
+        if (isHardKeyboardConnected()) {
+            return when (settings.physicalKeyboardLayout) {
+                "titan", "clicks" -> "builtin"
+                "niko" -> "niko"
+                else -> settings.keyboardLayout
+            }
+        }
+        return settings.keyboardLayout
     }
 
     private fun getSpaceString(): String = if (settings.spaceStyle == "full") "　" else " "
@@ -322,17 +347,50 @@ class KarukanInputMethodService : InputMethodService() {
 
     private val keyboardEventListener = object : KeyboardLayoutBuilder.KeyboardEventListener {
         override fun onKeyFeedback() = triggerKeyFeedback()
-        override fun onKeyPress(key: String, isShift: Boolean) { executeKeyAction(KeyAction.InputChar(key, isShift)) }
-        override fun onNikoTouchInput(char: String) { executeKeyAction(KeyAction.NikoTouchInput(char)) }
-        override fun onNikoTouchToggle() { executeKeyAction(KeyAction.NikoTouchToggle) }
-        override fun onBackspace() { executeKeyAction(KeyAction.Backspace) }
-        override fun onDelete() { executeKeyAction(KeyAction.DeleteForward) }
-        override fun onCtrlBackspace() { executeKeyAction(KeyAction.DeleteSelectedCandidate) }
-        override fun onSpaceOrConvert() { executeKeyAction(KeyAction.SpaceOrConvert) }
-        override fun onCommit() { executeKeyAction(KeyAction.Commit()) }
-        override fun onToggleEmojiPalette() { executeKeyAction(KeyAction.ToggleEmojiPalette) }
-        override fun onToggleSymbolPalette() { executeKeyAction(KeyAction.ToggleSymbolPalette) }
-        override fun onToggleLanguageMode() { executeKeyAction(KeyAction.ToggleLanguageMode) }
+        override fun onKeyPress(key: String, isShift: Boolean) {
+            executeKeyAction(KeyAction.InputChar(key, isShift))
+        }
+
+        override fun onNikoTouchInput(char: String) {
+            executeKeyAction(KeyAction.NikoTouchInput(char))
+        }
+
+        override fun onNikoTouchToggle() {
+            executeKeyAction(KeyAction.NikoTouchToggle)
+        }
+
+        override fun onBackspace() {
+            executeKeyAction(KeyAction.Backspace)
+        }
+
+        override fun onDelete() {
+            executeKeyAction(KeyAction.DeleteForward)
+        }
+
+        override fun onCtrlBackspace() {
+            executeKeyAction(KeyAction.DeleteSelectedCandidate)
+        }
+
+        override fun onSpaceOrConvert() {
+            executeKeyAction(KeyAction.SpaceOrConvert)
+        }
+
+        override fun onCommit() {
+            executeKeyAction(KeyAction.Commit())
+        }
+
+        override fun onToggleEmojiPalette() {
+            executeKeyAction(KeyAction.ToggleEmojiPalette)
+        }
+
+        override fun onToggleSymbolPalette() {
+            executeKeyAction(KeyAction.ToggleSymbolPalette)
+        }
+
+        override fun onToggleLanguageMode() {
+            executeKeyAction(KeyAction.ToggleLanguageMode)
+        }
+
         override fun onNikoToggleLanguageMode() {
             if (romajiBuffer.isNotEmpty()) {
                 commitCurrentHiragana()
@@ -346,15 +404,42 @@ class KarukanInputMethodService : InputMethodService() {
                 karukanInputView.updateInputMode(inputMode)
             }
         }
-        override fun onFixChunk() { executeKeyAction(KeyAction.FixChunk) }
-        override fun onDpadLeft() { executeKeyAction(KeyAction.MoveLeft()) }
-        override fun onDpadRight() { executeKeyAction(KeyAction.MoveRight()) }
-        override fun onDpadUp() { executeKeyAction(KeyAction.MoveUp()) }
-        override fun onDpadDown() { executeKeyAction(KeyAction.MoveDown()) }
-        override fun onCtrlShortcut(key: String) { executeKeyAction(KeyAction.CtrlShortcut(key)) }
-        override fun onEsc() { executeKeyAction(KeyAction.Escape) }
-        override fun onTab() { executeKeyAction(KeyAction.Tab()) }
-        override fun onKatakana() { executeKeyAction(KeyAction.CommitKatakana) }
+
+        override fun onFixChunk() {
+            executeKeyAction(KeyAction.FixChunk)
+        }
+
+        override fun onDpadLeft() {
+            executeKeyAction(KeyAction.MoveLeft())
+        }
+
+        override fun onDpadRight() {
+            executeKeyAction(KeyAction.MoveRight())
+        }
+
+        override fun onDpadUp() {
+            executeKeyAction(KeyAction.MoveUp())
+        }
+
+        override fun onDpadDown() {
+            executeKeyAction(KeyAction.MoveDown())
+        }
+
+        override fun onCtrlShortcut(key: String) {
+            executeKeyAction(KeyAction.CtrlShortcut(key))
+        }
+
+        override fun onEsc() {
+            executeKeyAction(KeyAction.Escape)
+        }
+
+        override fun onTab() {
+            executeKeyAction(KeyAction.Tab())
+        }
+
+        override fun onKatakana() {
+            executeKeyAction(KeyAction.CommitKatakana)
+        }
     }
 
     fun executeKeyAction(action: KeyAction, isPhysicalKeyboard: Boolean = false): Boolean {
@@ -373,44 +458,53 @@ class KarukanInputMethodService : InputMethodService() {
                 }
                 onCommitKey()
             }
+
             KeyAction.Escape -> onEscape()
             is KeyAction.Tab -> onTabKey(action.isShift)
             KeyAction.CommitHiragana -> {
                 if (romajiBuffer.isEmpty()) return false
                 commitCurrentHiragana()
             }
+
             KeyAction.CommitKatakana -> {
                 if (isPhysicalKeyboard && romajiBuffer.isEmpty()) return false
                 commitKatakanaOrToggleMode()
             }
+
             KeyAction.CommitHankakuKatakana -> {
                 if (romajiBuffer.isEmpty()) return false
                 commitHankakuKatakana()
             }
+
             KeyAction.CommitZenkakuAlphanumeric -> {
                 if (romajiBuffer.isEmpty()) return false
                 commitZenkakuAlphanumeric()
             }
+
             KeyAction.CommitHankakuAlphanumeric -> {
                 if (romajiBuffer.isEmpty()) return false
                 commitHankakuAlphanumeric()
             }
+
             KeyAction.ToggleLanguageMode -> onToggleLanguageMode()
             KeyAction.FixChunk -> fixChunkPreedit()
             KeyAction.KatakanaHiraganaToggle -> {
                 isKatakanaMode = !isKatakanaMode
                 updateComposingText()
             }
+
             KeyAction.ToggleEmojiPalette -> {
                 if (::karukanInputView.isInitialized) {
                     karukanInputView.toggleEmojiPalette()
                 }
             }
+
             KeyAction.ToggleSymbolPalette -> {
                 if (::karukanInputView.isInitialized) {
                     karukanInputView.toggleSymbolPalette()
                 }
             }
+
             KeyAction.ToggleDetailDisplay -> onToggleDetailDisplay()
             KeyAction.ToggleLiveConversion -> onToggleLiveConversion()
             KeyAction.ToggleCandidateExpand -> {
@@ -418,6 +512,7 @@ class KarukanInputMethodService : InputMethodService() {
                     karukanInputView.toggleCandidateExpand()
                 }
             }
+
             KeyAction.Reconvert -> reconvert()
             KeyAction.SelectAll -> selectAllEditingArea()
             is KeyAction.SelectCandidateNumber -> {
@@ -427,6 +522,7 @@ class KarukanInputMethodService : InputMethodService() {
                     onCandidateSelected(hiragana, cand)
                 } else return false
             }
+
             is KeyAction.MoveLeft -> onDpadLeft(action.isShift)
             is KeyAction.MoveRight -> onDpadRight(action.isShift)
             is KeyAction.MoveUp -> if (selectedCandidateIndex >= 0) onPreviousCandidate() else onDpadUp(action.isShift)
@@ -519,11 +615,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onKeyPress(key: String, isShift: Boolean = false) {
-        var inputKey = key
+        val inputKey = key
         if (isEnglishMode) {
-            if (settings.isAutoCapitalizationEnabled && isFirstCharOfSentence()) {
-                inputKey = inputKey.uppercase(Locale.getDefault())
-            }
             currentInputConnection?.commitText(inputKey, 1)
             return
         }
@@ -548,11 +641,6 @@ class KarukanInputMethodService : InputMethodService() {
 
         romajiBuffer.append(inputKey)
         updateComposingText()
-    }
-
-    private fun isFirstCharOfSentence(): Boolean {
-        val textBefore = currentInputConnection?.getTextBeforeCursor(2, 0)?.toString() ?: ""
-        return textBefore.isEmpty() || textBefore.endsWith(". ") || textBefore.endsWith("\n")
     }
 
     private fun onBackspace() {
@@ -629,7 +717,7 @@ class KarukanInputMethodService : InputMethodService() {
         val katakanaTag = if (isKatakanaMode) " [カタカナ]" else ""
         if (!settings.isLiveConversionEnabled) {
             currentLiveCandidate = hiragana
-            composingTextView.text = "かな: $hiragana  [$raw]$katakanaTag"
+            composingTextView.text = "かな: $hiragana$katakanaTag"
             currentInputConnection?.setComposingText(hiragana, 1)
             if (::karukanInputView.isInitialized) {
                 karukanInputView.updateFloatingOverlay(selectedCandidateIndex)
@@ -639,7 +727,7 @@ class KarukanInputMethodService : InputMethodService() {
 
         // ライブ変換
         isLiveConversionPreviewActive = true
-        composingTextView.text = "かな: $hiragana  [$raw]$katakanaTag"
+        composingTextView.text = "かな: $hiragana$katakanaTag"
         currentInputConnection?.setComposingText(hiragana, 1)
         if (::karukanInputView.isInitialized) {
             karukanInputView.updateFloatingOverlay(selectedCandidateIndex)
@@ -665,10 +753,12 @@ class KarukanInputMethodService : InputMethodService() {
             }
 
             if (isActive && queryId == currentLiveConversionQueryId && romajiBuffer.toString() == raw) {
-                currentLiveCandidate = topCandidate
+                val pureTopCandidate = topCandidate.extractPureCandidate()
+                currentLiveCandidate = pureTopCandidate
                 val detailStr = if (showCandidateDetails) " (推論: Live, 候補数: ${candidates.size})" else ""
-                composingTextView.text = "かな: $flushHiragana → $topCandidate  [$raw]$katakanaTag$detailStr"
-                currentInputConnection?.setComposingText(topCandidate, 1)
+                val displayTopCandidate = if (settings.isShowCandidateAnnotationsEnabled) topCandidate else pureTopCandidate
+                composingTextView.text = "かな: $flushHiragana → $displayTopCandidate$katakanaTag$detailStr"
+                currentInputConnection?.setComposingText(pureTopCandidate, 1)
                 renderCandidates(flushHiragana, candidates)
             }
         }
@@ -692,15 +782,25 @@ class KarukanInputMethodService : InputMethodService() {
 
         var leftContext = ""
         if (settings.useContext) {
-            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 10, 0)?.toString() ?: ""
+            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 20, 0)?.toString() ?: ""
             val rawBuffer = romajiBuffer.toString()
             var cleanedContext = rawContext
 
-            // 未確定文字列 (hiragana や入力バッファ) が文脈末尾に含まれている場合は慎重に除去
-            if (hiragana.isNotEmpty() && cleanedContext.endsWith(hiragana)) {
-                cleanedContext = cleanedContext.substring(0, cleanedContext.length - hiragana.length)
-            } else if (rawBuffer.isNotEmpty() && cleanedContext.endsWith(rawBuffer)) {
-                cleanedContext = cleanedContext.substring(0, cleanedContext.length - rawBuffer.length)
+            // 確定前のプレビュー文字列（ライブ変換候補、ひらがな、ローマ字バッファ）を繰り返し除去
+            var changed = true
+            while (changed && cleanedContext.isNotEmpty()) {
+                changed = false
+                val liveCand = currentLiveCandidate?.extractPureCandidate() ?: ""
+                if (liveCand.isNotEmpty() && cleanedContext.endsWith(liveCand)) {
+                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - liveCand.length)
+                    changed = true
+                } else if (hiragana.isNotEmpty() && cleanedContext.endsWith(hiragana)) {
+                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - hiragana.length)
+                    changed = true
+                } else if (rawBuffer.isNotEmpty() && cleanedContext.endsWith(rawBuffer)) {
+                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - rawBuffer.length)
+                    changed = true
+                }
             }
 
             // 部分的なインクリメンタル入力の重複チェック（例: 「きょうはい」に対する「きょうは」の重複など）
@@ -712,19 +812,39 @@ class KarukanInputMethodService : InputMethodService() {
                     break
                 }
             }
+            for (len in rawBuffer.length downTo 1) {
+                if (cleanedContext.length >= len &&
+                    cleanedContext.regionMatches(cleanedContext.length - len, rawBuffer, 0, len)
+                ) {
+                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - len)
+                    break
+                }
+            }
+
+            // デバッグ用アノテーション等のクリーンアップ
+            cleanedContext = cleanedContext.replace(Regex("""\s*\([👤🤖📝🔄][^)]*\)"""), "")
 
             leftContext = cleanedContext.trimEnd('\r', '\n')
             if (leftContext.length > settings.contextChars) {
                 leftContext = leftContext.takeLast(settings.contextChars)
             }
         }
+
         val fullContext = if (settings.persona.isNotEmpty()) {
             if (leftContext.isNotEmpty()) "${settings.persona} $leftContext" else settings.persona
         } else {
             leftContext
         }
 
-        return engine.convert(hiragana, settings.numCandidates, fullContext, queryId)
+        Log.d("KarukanIME", "fetchCandidates: hiragana='$hiragana', leftContext='$leftContext', fullContext='$fullContext', queryId=$queryId")
+        val rawCandidates = engine.convert(hiragana, settings.numCandidates, fullContext, queryId)
+        val candidates = if (settings.isShowCandidateAnnotationsEnabled) {
+            rawCandidates
+        } else {
+            rawCandidates.map { it.extractPureCandidate() }.distinct()
+        }
+        Log.d("KarukanIME", "fetchCandidates result: count=${candidates.size}, top='${candidates.firstOrNull()}'")
+        return candidates
     }
 
     private fun filterCandidatesBySource(rawCandidates: List<String>): List<String> {
@@ -737,16 +857,18 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         return when (activeSourceFilter) {
-            SourceFilter.LEARNING -> rawCandidates.filter { it in learningEntries }
+            SourceFilter.LEARNING -> rawCandidates.filter { it.extractPureCandidate() in learningEntries }
             SourceFilter.SYMBOL -> rawCandidates.filter { cand ->
-                cand.any { c ->
+                val pure = cand.extractPureCandidate()
+                pure.any { c ->
                     c in '0'..'9' || c in '①'..'⑨' || c in '一'..'九' ||
-                    c in '!'..'/' || c in ':'..'@' || c in '['..'`' || c in '{'..'~' ||
-                    Character.getType(c) == Character.OTHER_SYMBOL.toInt() ||
-                    Character.getType(c) == Character.SURROGATE.toInt()
-                } || cand.contains("年") || cand.contains("月") || cand.contains("日")
+                            c in '!'..'/' || c in ':'..'@' || c in '['..'`' || c in '{'..'~' ||
+                            Character.getType(c) == Character.OTHER_SYMBOL.toInt() ||
+                            Character.getType(c) == Character.SURROGATE.toInt()
+                } || pure.contains("年") || pure.contains("月") || pure.contains("日")
             }
-            SourceFilter.AI -> rawCandidates.filter { it !in learningEntries }
+
+            SourceFilter.AI -> rawCandidates.filter { it.extractPureCandidate() !in learningEntries }
             SourceFilter.DICTIONARY -> rawCandidates.filter { it.isNotEmpty() }
             SourceFilter.ALL -> rawCandidates
         }
@@ -766,7 +888,12 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun renderCandidates(hiragana: String, rawCandidates: List<String>) {
-        val filtered = filterCandidatesBySource(rawCandidates)
+        val candidatesToProcess = if (settings.isShowCandidateAnnotationsEnabled) {
+            rawCandidates
+        } else {
+            rawCandidates.map { it.extractPureCandidate() }.distinct()
+        }
+        val filtered = filterCandidatesBySource(candidatesToProcess)
         val allCandidates = mutableListOf<String>()
         if (filtered.isNotEmpty()) {
             allCandidates.addAll(filtered)
@@ -916,7 +1043,7 @@ class KarukanInputMethodService : InputMethodService() {
         if (isEnglishMode || romajiBuffer.isEmpty()) return
         val raw = romajiBuffer.toString()
         val hiragana = engine.romajiToHiraganaFlush(raw)
-        val candidates = engine.convert(hiragana, settings.numCandidates, "")
+        val candidates = fetchCandidates(hiragana)
         selectedCandidateIndex = 0
         renderCandidates(hiragana, candidates)
         updateSelectionPreview()
@@ -1056,8 +1183,8 @@ class KarukanInputMethodService : InputMethodService() {
     private fun toHankakuKatakana(str: String): String {
         val zenkaku = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンァィゥェォッャュョーガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポ"
         val hankaku = arrayOf(
-            "ｱ","ｲ","ｳ","ｴ","ｵ","ｶ","ｷ","ｸ","ｹ","ｺ","ｻ","ｼ","ｽ","ｾ","ｿ","ﾀ","ﾁ","ﾂ","ﾃ","ﾄ","ﾅ","ﾆ","ﾇ","ﾈ","ﾉ","ﾊ","ﾋ","ﾌ","ﾍ","ﾎ","ﾏ","ﾐ","ﾑ","ﾒ","ﾓ","ﾔ","ﾕ","ﾖ","ﾗ","ﾘ","ﾙ","ﾚ","ﾛ","ﾜ","ｦ","ﾝ","ｧ","ｨ","ｩ","ｪ","ｫ","ｯ","ｬ","ｭ","ｮ","ｰ",
-            "ｶﾞ","ｷﾞ","ｸﾞ","ｹﾞ","ｺﾞ","ｻﾞ","ｼﾞ","ｽﾞ","ｾﾞ","ｿﾞ","ﾀﾞ","ﾁﾞ","ﾂﾞ","ﾃﾞ","ﾄﾞ","ﾊﾞ","ﾋﾞ","ﾌﾞ","ﾍﾞ","ﾎﾞ","ﾊﾟ","ﾋﾟ","ﾌﾟ","ﾍﾟ","ﾎﾟ"
+            "ｱ", "ｲ", "ｳ", "ｴ", "ｵ", "ｶ", "ｷ", "ｸ", "ｹ", "ｺ", "ｻ", "ｼ", "ｽ", "ｾ", "ｿ", "ﾀ", "ﾁ", "ﾂ", "ﾃ", "ﾄ", "ﾅ", "ﾆ", "ﾇ", "ﾈ", "ﾉ", "ﾊ", "ﾋ", "ﾌ", "ﾍ", "ﾎ", "ﾏ", "ﾐ", "ﾑ", "ﾒ", "ﾓ", "ﾔ", "ﾕ", "ﾖ", "ﾗ", "ﾘ", "ﾙ", "ﾚ", "ﾛ", "ﾜ", "ｦ", "ﾝ", "ｧ", "ｨ", "ｩ", "ｪ", "ｫ", "ｯ", "ｬ", "ｭ", "ｮ", "ｰ",
+            "ｶﾞ", "ｷﾞ", "ｸﾞ", "ｹﾞ", "ｺﾞ", "ｻﾞ", "ｼﾞ", "ｽﾞ", "ｾﾞ", "ｿﾞ", "ﾀﾞ", "ﾁﾞ", "ﾂﾞ", "ﾃﾞ", "ﾄﾞ", "ﾊﾞ", "ﾋﾞ", "ﾌﾞ", "ﾍﾞ", "ﾎﾞ", "ﾊﾟ", "ﾋﾟ", "ﾌﾟ", "ﾍﾟ", "ﾎﾟ"
         )
         val sb = StringBuilder()
         for (c in str) {
@@ -1111,10 +1238,14 @@ class KarukanInputMethodService : InputMethodService() {
     private val ctrlShortcutCommands: Map<String, CtrlCommand> by lazy {
         mapOf(
             "d" to CtrlCommand {
-                if (::karukanInputView.isInitialized) {
+                if (romajiBuffer.isNotEmpty()) {
+                    onDeleteForward()
+                } else if (::karukanInputView.isInitialized && karukanInputView.isCandidateExpanded) {
                     karukanInputView.toggleCandidateExpand()
-                    true
-                } else false
+                } else {
+                    onDeleteForward()
+                }
+                true
             },
             "s" to CtrlCommand(requiresNonComposing = true) { reconvert() },
             "w" to CtrlCommand(requiresComposing = true) { cycleSourceFilterNext(); true },
@@ -1124,17 +1255,41 @@ class KarukanInputMethodService : InputMethodService() {
             "r" to CtrlCommand { activeSourceFilter = SourceFilter.SYMBOL; performConversion(); true },
             "k" to CtrlCommand { commitKatakanaOrToggleMode(); true },
             "j" to CtrlCommand(requiresComposing = true) { fixChunkPreedit(); true },
-            "a" to CtrlCommand { selectAllEditingArea(); true },
+            "a" to CtrlCommand {
+                val isComposing = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+                if (isComposing) {
+                    selectAllEditingArea()
+                } else {
+                    moveCursorToStartOfLine()
+                }
+                true
+            },
             "h" to CtrlCommand { onBackspace(); true },
             "m" to CtrlCommand { onCommitKey(); true },
             "g" to CtrlCommand { onEscape(); true },
             "l" to CtrlCommand { onToggleLiveConversion(); true },
             "y" to CtrlCommand { onToggleDetailDisplay(); true },
-            "n" to CtrlCommand(requiresComposing = true) { onNextCandidate(); true },
-            "p" to CtrlCommand(requiresComposing = true) { onPreviousCandidate(); true },
-            "f" to CtrlCommand(requiresComposing = true) { onDpadRight(); true },
-            "b" to CtrlCommand(requiresComposing = true) { onDpadLeft(); true },
-            "e" to CtrlCommand(requiresComposing = true) { moveCursorToEndOfLine(); true }
+            "n" to CtrlCommand {
+                val isComposing = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+                if (isComposing) {
+                    onNextCandidate()
+                } else {
+                    onDpadDown()
+                }
+                true
+            },
+            "p" to CtrlCommand {
+                val isComposing = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+                if (isComposing) {
+                    onPreviousCandidate()
+                } else {
+                    onDpadUp()
+                }
+                true
+            },
+            "f" to CtrlCommand { onDpadRight(); true },
+            "b" to CtrlCommand { onDpadLeft(); true },
+            "e" to CtrlCommand { moveCursorToEndOfLine(); true }
         )
     }
 
@@ -1187,8 +1342,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun String.extractPureCandidate(): String {
-        val idx = this.indexOf(" (")
-        return if (idx > 0) this.substring(0, idx) else this
+        val lastOpen = this.lastIndexOf(" (")
+        return if (lastOpen > 0 && this.endsWith(")")) this.substring(0, lastOpen) else this
     }
 
     private fun clearComposingState() {
@@ -1278,7 +1433,6 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
 
-
     private var lastF3TimeMs: Long = 0L
     private var lastF4TimeMs: Long = 0L
 
@@ -1313,7 +1467,7 @@ class KarukanInputMethodService : InputMethodService() {
             return true
         }
 
-        val action = KeyEventMapper.fromKeyEvent(keyCode, event)
+        val action = KeyEventMapper.fromKeyEvent(keyCode, event, settings.physicalKeyboardLayout)
         Log.d(TAG, "onKeyDown: mapped action=$action for keyCode=$keyCode ($keyName)")
 
         if (action != null) {
@@ -1331,7 +1485,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     override fun onEvaluateInputViewShown(): Boolean {
-        return settings.isForceShowSoftKeyboardEnabled || super.onEvaluateInputViewShown()
+        super.onEvaluateInputViewShown()
+        return true
     }
 
     private fun isHardKeyboardConnected(): Boolean {
@@ -1340,12 +1495,6 @@ class KarukanInputMethodService : InputMethodService() {
                 config.keyboard == Configuration.KEYBOARD_12KEY ||
                 config.keyboard != Configuration.KEYBOARD_NOKEYS
         return isPresent && config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
-    }
-
-    private fun is12KeyHardKeyboardConnected(): Boolean {
-        val config = resources.configuration
-        return config.keyboard == Configuration.KEYBOARD_12KEY &&
-                config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
     }
 
     private fun updateKeyboardLayoutVisibility() {

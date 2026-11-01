@@ -40,6 +40,12 @@
             android:theme="@style/Theme.Karukan" />
 
         <activity
+            android:name=".DatePhraseListActivity"
+            android:exported="false"
+            android:label="日付・時刻変換フレーズの管理"
+            android:theme="@style/Theme.Karukan" />
+
+        <activity
             android:name=".UserDictContentActivity"
             android:exported="false"
             android:theme="@style/Theme.Karukan" />

@@ -6,37 +6,86 @@ import android.view.KeyEvent
  * Android の KeyEvent を KeyAction に変換するマッパー。
  */
 object KeyEventMapper {
+    // 物理日本語109キーボード等のスキャンコードマップテーブル
+    private val scancodeToKeyCodeMap = mapOf(
+        148 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU, // 半角/全角
+        41 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU,  // 半角/全角 (109 keyboard top-left key)
+        92 to KeyEvent.KEYCODE_HENKAN,           // 変換
+        94 to KeyEvent.KEYCODE_MUHENKAN,         // 無変換
+        208 to KeyEvent.KEYCODE_KATAKANA_HIRAGANA, // カタカナ/ひらがな
+        124 to KeyEvent.KEYCODE_YEN,             // ￥
+        89 to KeyEvent.KEYCODE_RO                // ろ / バックスラッシュキー
+    )
+
+    // JIS 109 キーボードの正式なベース・シフト文字マップ (US配列と異なる記号・コロン/セミコロン等を完全に一致させる)
+    private val jisCharacterMap = mapOf(
+        KeyEvent.KEYCODE_1 to Pair('1', '!'),
+        KeyEvent.KEYCODE_2 to Pair('2', '"'),
+        KeyEvent.KEYCODE_3 to Pair('3', '#'),
+        KeyEvent.KEYCODE_4 to Pair('4', '$'),
+        KeyEvent.KEYCODE_5 to Pair('5', '%'),
+        KeyEvent.KEYCODE_6 to Pair('6', '&'),
+        KeyEvent.KEYCODE_7 to Pair('7', '\''),
+        KeyEvent.KEYCODE_8 to Pair('8', '('),
+        KeyEvent.KEYCODE_9 to Pair('9', ')'),
+        KeyEvent.KEYCODE_0 to Pair('0', '0'),
+        KeyEvent.KEYCODE_MINUS to Pair('-', '='),
+        KeyEvent.KEYCODE_EQUALS to Pair('^', '~'), // JIS ^ key
+        KeyEvent.KEYCODE_YEN to Pair('\u00A5', '|'), // ￥ / |
+        KeyEvent.KEYCODE_LEFT_BRACKET to Pair('@', '`'), // @ / `
+        KeyEvent.KEYCODE_RIGHT_BRACKET to Pair('[', '{'), // [ / {
+        KeyEvent.KEYCODE_SEMICOLON to Pair(';', '+'), // ; / +
+        KeyEvent.KEYCODE_APOSTROPHE to Pair(':', '*'), // : / *
+        KeyEvent.KEYCODE_BACKSLASH to Pair(']', '}'), // ] / {
+        KeyEvent.KEYCODE_COMMA to Pair(',', '<'),
+        KeyEvent.KEYCODE_PERIOD to Pair('.', '>'),
+        KeyEvent.KEYCODE_SLASH to Pair('/', '?'),
+        KeyEvent.KEYCODE_RO to Pair('\\', '_') // \ / _ (Ro key)
+    )
 
     /**
      * 与えられた [keyCode] および [event] から対応する [KeyAction] を返します。
      * マッピングできるアクションがない場合は null を返します。
      */
-    fun fromKeyEvent(keyCode: Int, event: KeyEvent?): KeyAction? {
+    fun fromKeyEvent(keyCode: Int, event: KeyEvent?, physicalKeyboardLayout: String = "jis109"): KeyAction? {
         if (event == null) return null
+
+        val isJis109 = physicalKeyboardLayout == "jis109"
+
+        // 1. スキャンコードマップテーブルによる KeyCode 挿げ替え (JIS 109有効時のみ)
+        val scanCode = event.scanCode
+        val mappedKeyCode = if (isJis109 && scanCode != 0) {
+            scancodeToKeyCodeMap[scanCode] ?: keyCode
+        } else {
+            keyCode
+        }
 
         // 1. Ctrl ショートカットの優先判定
         if (event.isCtrlPressed) {
-            if (event.isShiftPressed && keyCode == KeyEvent.KEYCODE_V) {
+            if (event.isShiftPressed && mappedKeyCode == KeyEvent.KEYCODE_V) {
                 return KeyAction.ToggleDetailDisplay
             }
-            if (event.isShiftPressed && keyCode == KeyEvent.KEYCODE_L) {
+            if (event.isShiftPressed && mappedKeyCode == KeyEvent.KEYCODE_L) {
                 return KeyAction.CtrlShortcut("l")
             }
-            if (keyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
+            if (mappedKeyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
                 return KeyAction.DeleteSelectedCandidate
             }
-            if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
-                return KeyAction.SelectCandidateNumber(keyCode - KeyEvent.KEYCODE_1)
+            if (mappedKeyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
+                return KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_1)
             }
-            if (keyCode in KeyEvent.KEYCODE_NUMPAD_1..KeyEvent.KEYCODE_NUMPAD_9) {
-                return KeyAction.SelectCandidateNumber(keyCode - KeyEvent.KEYCODE_NUMPAD_1)
+            if (mappedKeyCode in KeyEvent.KEYCODE_NUMPAD_1..KeyEvent.KEYCODE_NUMPAD_9) {
+                return KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_NUMPAD_1)
+            }
+            if (mappedKeyCode == KeyEvent.KEYCODE_SPACE) {
+                return KeyAction.ToggleLanguageMode
             }
 
             return getCtrlShortcutChar(event)?.let { KeyAction.CtrlShortcut(it) }
         }
 
         // 2. 特殊操作キーの判定
-        when (keyCode) {
+        when (mappedKeyCode) {
             KeyEvent.KEYCODE_DEL -> return KeyAction.Backspace
             KeyEvent.KEYCODE_FORWARD_DEL -> return KeyAction.DeleteForward
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> return KeyAction.Commit(event.isShiftPressed)
@@ -67,9 +116,17 @@ object KeyEventMapper {
             KeyEvent.KEYCODE_SYM -> return KeyAction.ToggleEmojiPalette
         }
 
-        // 3. 印刷可能文字（通常キータイピング）
+        // 3. JIS 109キーボードの文字マッピング補正 (JIS 109有効時のみ適用)
+        if (isJis109) {
+            val jisPair = jisCharacterMap[mappedKeyCode]
+            if (jisPair != null) {
+                val charToInput = if (event.isShiftPressed) jisPair.second else jisPair.first
+                return KeyAction.InputChar(charToInput.toString(), false)
+            }
+        }
+
+        // 4. 印刷可能文字（通常キータイピング）
         // Android OS の Physical Keyboard Layout 判定結果 (event.unicodeChar) を最優先にする。
-        // これにより、JIS（日本語）配列・US（英語）配列のいずれの物理キーボードでも正確な文字・記号が得られる。
         val unicode = event.unicodeChar
         if (unicode in 32..126) {
             val charStr = unicode.toChar().toString()

@@ -4,8 +4,8 @@ import java.net.HttpURLConnection
 import java.net.URI
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-val appVersion = "1.1.0"
-val appVersionCode = 10100
+val appVersion = "1.2.0"
+val appVersionCode = 10200
 
 plugins {
     alias(libs.plugins.android.application)
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.kachaya.karukan"
-        minSdk = 25
+        minSdk = 29
         compileSdk = 37
         targetSdk = 37
         versionCode = appVersionCode

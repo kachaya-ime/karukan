@@ -19,6 +19,7 @@ object KeyboardLayoutRegistry {
      */
     fun getLayoutSpec(layoutName: String, isHiragana: Boolean = true, hasInput: Boolean = true): List<List<KeySpec>> {
         return when (layoutName.lowercase(Locale.getDefault())) {
+            "builtin" -> BuiltinKeyboardLayout.getLayoutSpec()
             "tablet" -> TabletKeyboardLayout.getLayoutSpec()
             "niko" -> NikoKeyboardLayout.getLayoutSpec(hasInput, isHiragana)
             "qwerty" -> QwertyKeyboardLayout.getLayoutSpec()
@@ -29,5 +30,5 @@ object KeyboardLayoutRegistry {
     /**
      * 利用可能な全標準レイアウト名のリストを返します。
      */
-    val supportedLayouts: List<String> = listOf("qwerty", "tablet", "niko")
+    val supportedLayouts: List<String> = listOf("qwerty", "tablet", "niko", "builtin")
 }

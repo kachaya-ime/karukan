@@ -9,6 +9,8 @@ pub static USER_DICT_DIR: Mutex<Option<String>> = Mutex::new(None);
 pub static LATEST_CANCELLED_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 pub static CURRENT_MAX_LEARNING_ENTRIES: AtomicUsize =
     AtomicUsize::new(LearningConfig::DEFAULT_MAX_ENTRIES);
+pub static CURRENT_MAX_LEARNING_SURFACE_CHARS: AtomicUsize =
+    AtomicUsize::new(LearningConfig::DEFAULT_MAX_SURFACE_CHARS);
 pub static IS_DATE_CONVERSION_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static IS_LEARNING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static ADAPTIVE_USE_GREEDY: AtomicBool = AtomicBool::new(false);
@@ -44,9 +46,10 @@ pub static ENGINE_CONFIG: Mutex<Option<AndroidEngineConfig>> = Mutex::new(None);
 
 pub fn get_current_learning_config() -> LearningConfig {
     let max_entries = CURRENT_MAX_LEARNING_ENTRIES.load(Ordering::Relaxed);
+    let max_surface_chars = CURRENT_MAX_LEARNING_SURFACE_CHARS.load(Ordering::Relaxed);
     LearningConfig {
         max_entries,
-        ..LearningConfig::default()
+        max_surface_chars,
     }
 }
 

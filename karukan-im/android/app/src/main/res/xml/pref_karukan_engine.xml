@@ -53,10 +53,30 @@
 
     </PreferenceCategory>
 
-    <!-- 2. チャンク・ビームサーチ詳細設定 -->
+    <!-- 2. チャンク・ビームサーチ・AIハルシネーション保護設定 -->
     <PreferenceCategory
-        android:title="チャンク・ビームサーチ詳細設定"
+        android:title="AIハルシネーション保護・チャンク詳細設定"
         app:iconSpaceReserved="false">
+
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_digits_entries"
+            android:entryValues="@array/pref_chunk_digits_values"
+            android:key="pref_chunk_digits"
+            android:summary="『第3回』等の数字でAIが数字を誤修正・増減させるハルシネーションを防ぎます (0桁で数字をAI変換から安全に分離)"
+            android:title="AI数字ハルシネーション保護 (維持桁数)"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pref_chunk_alphabets_entries"
+            android:entryValues="@array/pref_chunk_alphabets_values"
+            android:key="pref_chunk_alphabets"
+            android:summary="『Rustで』等の英和混在入力でAIが英字を誤変換するのを防ぎます (0文字で英字をAI変換から安全に分離)"
+            android:title="AI英字ハルシネーション保護 (維持文字数)"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
 
         <ListPreference
             android:defaultValue="30"
@@ -77,25 +97,7 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
-            android:defaultValue="0"
-            android:entries="@array/pref_chunk_digits_entries"
-            android:entryValues="@array/pref_chunk_digits_values"
-            android:key="pref_chunk_digits"
-            android:title="チャンク内維持数字桁数"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true" />
-
-        <ListPreference
-            android:defaultValue="0"
-            android:entries="@array/pref_chunk_alphabets_entries"
-            android:entryValues="@array/pref_chunk_alphabets_values"
-            android:key="pref_chunk_alphabets"
-            android:title="チャンク内維持英字数"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true" />
-
-        <ListPreference
-            android:defaultValue="9"
+            android:defaultValue="3"
             android:entries="@array/pref_beam_width_entries"
             android:entryValues="@array/pref_beam_width_values"
             android:key="pref_beam_width"
@@ -125,6 +127,15 @@
             android:key="pref_max_learning_entries"
             android:summary="学習履歴として保持する最大エントリ数を指定します"
             android:title="最大学習エントリ数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            android:defaultValue="50"
+            android:dialogTitle="学習対象の最大表記文字数"
+            android:key="pref_max_learning_surface_chars"
+            android:summary="ライブ変換等の長文（デフォルト50文字以上）が誤って学習履歴に保存されるのを防止します"
+            android:title="最大学習表記文字数"
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true" />
 

@@ -5,10 +5,8 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.util.AttributeSet
 import android.util.Log
-import android.util.StateSet
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -35,7 +33,6 @@ class KarukanInputView @JvmOverloads constructor(
     interface Listener {
         fun isDarkTheme(): Boolean
         fun isHardKeyboardConnected(): Boolean
-        fun is12KeyHardKeyboardConnected(): Boolean = false
         fun getKeyboardHeightPx(): Int
         fun triggerKeyFeedback()
         fun onCandidateSelected(hiragana: String, candidate: String, index: Int)
@@ -82,6 +79,7 @@ class KarukanInputView @JvmOverloads constructor(
     // フローティングオーバーレイ表示関連 (物理キーボード接続時用)
     private var floatingPopupWindow: PopupWindow? = null
     private var floatingStatusTextView: TextView? = null
+    private var floatingDividerView: View? = null
     private var floatingCandidateScrollView: ScrollView? = null
     private var floatingCandidateFlowLayout: CandidateFlowLayout? = null
     private var lastFloatingX: Int = Int.MIN_VALUE
@@ -154,12 +152,13 @@ class KarukanInputView @JvmOverloads constructor(
                 if (index != -1) {
                     removeView(mainKeyboardContainer)
                     mainKeyboardContainer = newContainer
-                    addView(mainKeyboardContainer, index, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        setMargins(0, 0, 0, 0)
-                    })
+                    addView(
+                        mainKeyboardContainer, index, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            setMargins(0, 0, 0, 0)
+                        })
                 }
             }
         }
@@ -174,33 +173,32 @@ class KarukanInputView @JvmOverloads constructor(
         val initialPaddingRight = paddingRight
         val initialPaddingBottom = paddingBottom
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            val applyInsets: (View, WindowInsetsCompat) -> Unit = { view, insets ->
-                val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-                view.setPadding(
-                    initialPaddingLeft,
-                    initialPaddingTop,
-                    initialPaddingRight,
-                    initialPaddingBottom + navInsets.bottom
-                )
-            }
-
-            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-                applyInsets(view, insets)
-                insets
-            }
-
-            addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {
-                    v.removeOnAttachStateChangeListener(this)
-                    ViewCompat.getRootWindowInsets(v)?.let { rootInsets ->
-                        applyInsets(v, rootInsets)
-                    }
-                }
-                override fun onViewDetachedFromWindow(v: View) {}
-            })
-            requestApplyInsets()
+        val applyInsets: (View, WindowInsetsCompat) -> Unit = { view, insets ->
+            val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            view.setPadding(
+                initialPaddingLeft,
+                initialPaddingTop,
+                initialPaddingRight,
+                initialPaddingBottom + navInsets.bottom
+            )
         }
+
+        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+            applyInsets(view, insets)
+            insets
+        }
+
+        addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                v.removeOnAttachStateChangeListener(this)
+                ViewCompat.getRootWindowInsets(v)?.let { rootInsets ->
+                    applyInsets(v, rootInsets)
+                }
+            }
+
+            override fun onViewDetachedFromWindow(v: View) {}
+        })
+        requestApplyInsets()
 
         // 1. 未確定テキスト表示エリア
         composingTextView = TextView(context).apply {
@@ -264,16 +262,18 @@ class KarukanInputView @JvmOverloads constructor(
 
         // 3. 画面キーボードの構築
         mainKeyboardContainer = when (keyboardLayoutSetting) {
+            "builtin" -> keyboardLayoutBuilder.createBuiltinKeyboardContainer()
             "niko" -> keyboardLayoutBuilder.createNikoKeyboardContainer()
             "tablet" -> keyboardLayoutBuilder.createTabletKeyboardContainer()
             else -> keyboardLayoutBuilder.createQwertyKeyboardContainer()
         }
-        addView(mainKeyboardContainer, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            setMargins(0, 0, 0, 0)
-        })
+        addView(
+            mainKeyboardContainer, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 0, 0, 0)
+            })
 
         // 4. 複数行変換候補表示エリア
         candidateExpandedContainer = LinearLayout(context).apply {
@@ -323,6 +323,7 @@ class KarukanInputView @JvmOverloads constructor(
             onCloseRequested = {
                 listener.triggerKeyFeedback()
                 emojiPaletteController.hide(mainKeyboardContainer)
+                updateKeyboardLayoutVisibility()
             }
         )
         emojiPaletteContainer = emojiPaletteController.createView()
@@ -473,19 +474,87 @@ class KarukanInputView @JvmOverloads constructor(
         container: ViewGroup?,
         hiragana: String,
         allCandidates: List<String>,
-        selectedIndex: Int
+        selectedIndex: Int,
+        isFloating: Boolean = false
     ) {
         if (container == null) return
 
         for ((index, cand) in allCandidates.withIndex()) {
             val isSelected = (index == selectedIndex)
-            bindCandidateButton(container, index, cand, isSelected) {
+            val displayText = if (isFloating && index < 9) "${index + 1}. $cand" else cand
+            bindCandidateButton(container, index, displayText, isSelected) {
                 listener?.onCandidateSelected(hiragana, cand, index)
             }
         }
 
         if (container.childCount > allCandidates.size) {
             container.removeViews(allCandidates.size, container.childCount - allCandidates.size)
+        }
+    }
+
+    private fun scrollToSelectedCandidateHorizontal(
+        scrollView: HorizontalScrollView,
+        container: ViewGroup,
+        selectedIndex: Int
+    ) {
+        if (selectedIndex < 0) {
+            scrollView.post { scrollView.scrollTo(0, 0) }
+            return
+        }
+        if (selectedIndex >= container.childCount) return
+        val selectedView = container.getChildAt(selectedIndex) ?: return
+
+        scrollView.post {
+            val left = selectedView.left
+            val right = selectedView.right
+            val scrollX = scrollView.scrollX
+            val width = scrollView.width
+            val padLeft = scrollView.paddingLeft
+            val padRight = scrollView.paddingRight
+
+            if (width <= 0) return@post
+
+            val margin = dpToPx(8f)
+            if (left - margin < scrollX + padLeft) {
+                val targetX = maxOf(0, left - padLeft - margin)
+                scrollView.smoothScrollTo(targetX, 0)
+            } else if (right + margin > scrollX + width - padRight) {
+                val targetX = right + padRight + margin - width
+                scrollView.smoothScrollTo(targetX, 0)
+            }
+        }
+    }
+
+    private fun scrollToSelectedCandidateVertical(
+        scrollView: ScrollView,
+        container: ViewGroup,
+        selectedIndex: Int
+    ) {
+        if (selectedIndex < 0) {
+            scrollView.post { scrollView.scrollTo(0, 0) }
+            return
+        }
+        if (selectedIndex >= container.childCount) return
+        val selectedView = container.getChildAt(selectedIndex) ?: return
+
+        scrollView.post {
+            val top = selectedView.top
+            val bottom = selectedView.bottom
+            val scrollY = scrollView.scrollY
+            val height = scrollView.height
+            val padTop = scrollView.paddingTop
+            val padBottom = scrollView.paddingBottom
+
+            if (height <= 0) return@post
+
+            val margin = dpToPx(4f)
+            if (top - margin < scrollY + padTop) {
+                val targetY = maxOf(0, top - padTop - margin)
+                scrollView.smoothScrollTo(0, targetY)
+            } else if (bottom + margin > scrollY + height - padBottom) {
+                val targetY = bottom + padBottom + margin - height
+                scrollView.smoothScrollTo(0, targetY)
+            }
         }
     }
 
@@ -498,7 +567,9 @@ class KarukanInputView @JvmOverloads constructor(
         lastCandidates = allCandidates
         lastSelectedIndex = selectedIndex
 
-        if (allCandidates.isNotEmpty()) {
+        val isHardKb = listener?.isHardKeyboardConnected() ?: false
+
+        if (allCandidates.isNotEmpty() && !isHardKb) {
             if (::expandButton.isInitialized) {
                 expandButton.visibility = VISIBLE
             }
@@ -509,16 +580,25 @@ class KarukanInputView @JvmOverloads constructor(
         }
 
         if (::candidateBarContainer.isInitialized) {
-            candidateBarContainer.visibility = VISIBLE
+            candidateBarContainer.visibility = if (isHardKb) GONE else VISIBLE
         }
 
-        // 1. メインの1行候補バー (常に表示されるため最優先で更新)
-        updateCandidateLayoutContainer(candidateLayout, hiragana, allCandidates, selectedIndex)
+        // 1. メインの1行候補バー (非ハードキーボード時のみ更新)
+        if (!isHardKb) {
+            updateCandidateLayoutContainer(candidateLayout, hiragana, allCandidates, selectedIndex)
+            if (::candidateScrollContainer.isInitialized) {
+                scrollToSelectedCandidateHorizontal(candidateScrollContainer, candidateLayout, selectedIndex)
+            }
+        }
 
         // 2. フローティング候補 (ハードキーボード接続時かつ表示対象の時のみ更新)
-        val isHardKb = listener?.isHardKeyboardConnected() ?: false
         if (isHardKb && floatingCandidateFlowLayout != null) {
-            updateCandidateLayoutContainer(floatingCandidateFlowLayout, hiragana, allCandidates, selectedIndex)
+            updateCandidateLayoutContainer(floatingCandidateFlowLayout, hiragana, allCandidates, selectedIndex, isFloating = true)
+            floatingCandidateScrollView?.let { sv ->
+                floatingCandidateFlowLayout?.let { fl ->
+                    scrollToSelectedCandidateVertical(sv, fl, selectedIndex)
+                }
+            }
         } else {
             floatingCandidateFlowLayout?.removeAllViews()
         }
@@ -526,6 +606,9 @@ class KarukanInputView @JvmOverloads constructor(
         // 3. 複数行展開パネル候補 (isCandidateExpanded == true の時のみLazy描画)
         if (isCandidateExpanded && ::candidateFlowLayout.isInitialized) {
             updateCandidateLayoutContainer(candidateFlowLayout, hiragana, allCandidates, selectedIndex)
+            if (::expandedScrollView.isInitialized) {
+                scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, selectedIndex)
+            }
         }
 
         updateFloatingOverlay(selectedIndex)
@@ -541,6 +624,12 @@ class KarukanInputView @JvmOverloads constructor(
         dismissFloatingCandidates()
         if (::candidateFlowLayout.isInitialized) {
             candidateFlowLayout.removeAllViews()
+        }
+        if (::candidateScrollContainer.isInitialized) {
+            candidateScrollContainer.scrollTo(0, 0)
+        }
+        if (::expandedScrollView.isInitialized) {
+            expandedScrollView.scrollTo(0, 0)
         }
         if (::expandButton.isInitialized) {
             expandButton.visibility = GONE
@@ -561,12 +650,13 @@ class KarukanInputView @JvmOverloads constructor(
             if (index != -1) {
                 removeView(mainKeyboardContainer)
                 mainKeyboardContainer = builder.createNikoKeyboardContainer()
-                addView(mainKeyboardContainer, index, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, 0, 0, 0)
-                })
+                addView(
+                    mainKeyboardContainer, index, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        setMargins(0, 0, 0, 0)
+                    })
             }
         }
         val modeText = when (inputMode) {
@@ -629,6 +719,9 @@ class KarukanInputView @JvmOverloads constructor(
         // 展開パネルが開いたタイミングで最新候補を描画
         if (::candidateFlowLayout.isInitialized) {
             updateCandidateLayoutContainer(candidateFlowLayout, lastHiragana, lastCandidates, lastSelectedIndex)
+            if (::expandedScrollView.isInitialized) {
+                scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, lastSelectedIndex)
+            }
         }
     }
 
@@ -660,14 +753,32 @@ class KarukanInputView @JvmOverloads constructor(
     fun toggleEmojiPalette() {
         collapseCandidates()
         if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
-            emojiPaletteController.toggle(mainKeyboardContainer, symbolMode = (inputModeState != InputMode.HIRAGANA))
+            val wasVisible = emojiPaletteController.isVisible
+            val isHardKb = listener?.isHardKeyboardConnected() ?: false
+            emojiPaletteController.toggle(
+                mainKeyboardContainer,
+                isHardKeyboard = isHardKb,
+                symbolMode = (inputModeState != InputMode.HIRAGANA)
+            )
+            if (wasVisible) {
+                updateKeyboardLayoutVisibility()
+            }
         }
     }
 
     fun toggleSymbolPalette() {
         collapseCandidates()
         if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
-            emojiPaletteController.toggle(mainKeyboardContainer, symbolMode = true)
+            val wasVisible = emojiPaletteController.isVisible
+            val isHardKb = listener?.isHardKeyboardConnected() ?: false
+            emojiPaletteController.toggle(
+                mainKeyboardContainer,
+                isHardKeyboard = isHardKb,
+                symbolMode = true
+            )
+            if (wasVisible) {
+                updateKeyboardLayoutVisibility()
+            }
         }
     }
 
@@ -677,17 +788,19 @@ class KarukanInputView @JvmOverloads constructor(
             mainKeyboardContainer.visibility = GONE
             return
         }
+        mainKeyboardContainer.visibility = VISIBLE
+
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
-        if (isHardKb) {
-            mainKeyboardContainer.visibility = GONE
-            if (::candidateBarContainer.isInitialized) {
-                candidateBarContainer.visibility = VISIBLE
-            }
-        } else {
-            mainKeyboardContainer.visibility = VISIBLE
-            if (::candidateBarContainer.isInitialized) {
-                candidateBarContainer.visibility = VISIBLE
-            }
+        val barVisibility = if (isHardKb) GONE else VISIBLE
+
+        if (::composingTextView.isInitialized) {
+            composingTextView.visibility = barVisibility
+        }
+        if (::candidateBarContainer.isInitialized) {
+            candidateBarContainer.visibility = barVisibility
+        }
+
+        if (!isHardKb) {
             dismissFloatingCandidates()
         }
     }
@@ -697,23 +810,30 @@ class KarukanInputView @JvmOverloads constructor(
     private fun createFloatingPopupWindow(): PopupWindow {
         val colors = getThemeColors()
         val density = resources.displayMetrics.density
+        val isDark = listener?.isDarkTheme() == true
 
         val container = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(dpToPx(8f), dpToPx(6f), dpToPx(8f), dpToPx(6f))
+            setPadding(dpToPx(10f), dpToPx(8f), dpToPx(10f), dpToPx(10f))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 setColor(colors.candidateBg)
                 cornerRadius = 8 * density
-                setStroke(dpToPx(1f), if (listener?.isDarkTheme() == true) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0"))
+                setStroke(dpToPx(1f), if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0"))
             }
             elevation = dpToPx(8f).toFloat()
         }
 
         val statusTextView = TextView(context).apply {
-            textSize = 14f
-            setPadding(dpToPx(6f), dpToPx(4f), dpToPx(6f), dpToPx(4f))
+            textSize = 15f
+            setPadding(dpToPx(4f), dpToPx(2f), dpToPx(4f), dpToPx(4f))
             setTextColor(colors.textColor)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            visibility = GONE
+        }
+
+        val dividerView = View(context).apply {
+            setBackgroundColor(if (isDark) Color.parseColor("#4A4D51") else Color.parseColor("#E0E0E0"))
             visibility = GONE
         }
 
@@ -724,8 +844,9 @@ class KarukanInputView @JvmOverloads constructor(
         }
 
         val flowLayout = CandidateFlowLayout(context).apply {
-            horizontalGapPx = dpToPx(4f)
-            verticalGapPx = dpToPx(4f)
+            horizontalGapPx = dpToPx(6f)
+            verticalGapPx = dpToPx(6f)
+            setPadding(0, 0, 0, dpToPx(6f))
         }
 
         scrollView.addView(
@@ -734,9 +855,13 @@ class KarukanInputView @JvmOverloads constructor(
         )
 
         container.addView(statusTextView, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        container.addView(dividerView, LayoutParams(LayoutParams.MATCH_PARENT, dpToPx(1f)).apply {
+            setMargins(0, dpToPx(4f), 0, dpToPx(4f))
+        })
         container.addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
         floatingStatusTextView = statusTextView
+        floatingDividerView = dividerView
         floatingCandidateScrollView = scrollView
         floatingCandidateFlowLayout = flowLayout
 
@@ -768,7 +893,10 @@ class KarukanInputView @JvmOverloads constructor(
 
         if (anchor.windowToken == null || !anchor.isAttachedToWindow) {
             if (popup.isShowing) {
-                try { popup.dismiss() } catch (e: Exception) {}
+                try {
+                    popup.dismiss()
+                } catch (e: Exception) {
+                }
             }
             return
         }
@@ -789,7 +917,7 @@ class KarukanInputView @JvmOverloads constructor(
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to show floating popup", e)
-            if (::candidateBarContainer.isInitialized) {
+            if (::candidateBarContainer.isInitialized && !(listener?.isHardKeyboardConnected() ?: false)) {
                 candidateBarContainer.visibility = VISIBLE
             }
         }
@@ -802,11 +930,19 @@ class KarukanInputView @JvmOverloads constructor(
             return
         }
 
-        val statusText = if (::composingTextView.isInitialized) composingTextView.text.toString() else ""
-        val isDefaultEmptyStatus = statusText.isEmpty() ||
-                statusText == "かな: (なし)" ||
-                statusText.startsWith("かな: (なし)") ||
-                statusText == "英数モード"
+        val rawStatusText = if (::composingTextView.isInitialized) composingTextView.text.toString() else ""
+
+        // "かな: " プレフィックスの削除と fcitx5 スタイルの Preedit テキスト整形
+        var formattedStatusText = rawStatusText
+        if (formattedStatusText.startsWith("かな: ")) {
+            formattedStatusText = formattedStatusText.substring("かな: ".length)
+        }
+        formattedStatusText = formattedStatusText.trim()
+
+        val isDefaultEmptyStatus = formattedStatusText.isEmpty() ||
+                formattedStatusText == "(なし)" ||
+                formattedStatusText.startsWith("(なし)") ||
+                formattedStatusText == "英数モード"
 
         val hasComposing = !isDefaultEmptyStatus
 
@@ -822,12 +958,13 @@ class KarukanInputView @JvmOverloads constructor(
         val statusView = floatingStatusTextView ?: return
         val scrollView = floatingCandidateScrollView ?: return
 
-        statusView.text = statusText
-        statusView.visibility = VISIBLE
+        statusView.text = formattedStatusText
+        statusView.visibility = if (hasComposing) VISIBLE else GONE
 
         val hasCandidates = (floatingCandidateFlowLayout?.childCount ?: 0) > 0
         val isSelectingCandidates = (selectedIndex >= 0) && hasCandidates
         scrollView.visibility = if (isSelectingCandidates) VISIBLE else GONE
+        floatingDividerView?.visibility = if (hasComposing && isSelectingCandidates) VISIBLE else GONE
 
         showFloatingOverlayInternal(isSelectingCandidates)
     }
@@ -846,7 +983,7 @@ class KarukanInputView @JvmOverloads constructor(
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
 
-        val maxPopupHeight = (screenHeight * 0.35f).toInt()
+        val maxPopupHeight = (screenHeight * 0.45f).toInt()
 
         val targetWidth = if (isSelectingCandidates) {
             screenWidth - dpToPx(32f)
@@ -855,23 +992,20 @@ class KarukanInputView @JvmOverloads constructor(
         }
 
         val statusText = floatingStatusTextView?.text?.toString() ?: ""
-        val stateChanged = lastFloatingStatusText != statusText || lastFloatingSelecting != isSelectingCandidates
 
-        if (stateChanged || contentView.measuredWidth == 0) {
-            if (targetWidth == ViewGroup.LayoutParams.WRAP_CONTENT) {
-                contentView.measure(
-                    MeasureSpec.makeMeasureSpec(screenWidth - dpToPx(32f), MeasureSpec.AT_MOST),
-                    MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
-                )
-            } else {
-                contentView.measure(
-                    MeasureSpec.makeMeasureSpec(targetWidth, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
-                )
-            }
-            lastFloatingStatusText = statusText
-            lastFloatingSelecting = isSelectingCandidates
+        if (targetWidth == ViewGroup.LayoutParams.WRAP_CONTENT) {
+            contentView.measure(
+                MeasureSpec.makeMeasureSpec(screenWidth - dpToPx(32f), MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
+            )
+        } else {
+            contentView.measure(
+                MeasureSpec.makeMeasureSpec(targetWidth, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
+            )
         }
+        lastFloatingStatusText = statusText
+        lastFloatingSelecting = isSelectingCandidates
 
         val popupWidth = contentView.measuredWidth
         val popupHeight = minOf(contentView.measuredHeight, maxPopupHeight)

@@ -119,6 +119,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **Ctrl + Backspace / Delete** | 候補学習削除 | 選択中の変換候補を学習辞書から削除 (`onDeleteSelectedCandidate`) | 共通仕様 |
 | **Ctrl + Shift + L** | ライブ変換トグル | リアルタイムライブ変換の有効/無効切替 (`onToggleLiveConversion`) | 共通仕様 |
 | **Ctrl + Shift + V** | 詳細表示切替 | AI推論時間・モデル名等の詳細表示をトグル切替 (`onToggleDetailDisplay`) | 共通仕様 |
+| **Ctrl + Space** | 言語モード切替 | 日本語(ひらがな) / 英語(英数) モードのトグル切替 (`onToggleLanguageMode`) | 共通仕様 |
 
   ### Shift キー組み合わせ操作 (Shift Combinations)
   | ショートカット | 機能 | 動作・処理 |
@@ -134,7 +135,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **無変換 (MUHENKAN)** | カタカナ変換 | カタカナ変換または入力モード切替 (`commitKatakanaOrToggleMode`) |
 | **かな (KANA)** | かなモード切替 | カタカナ/ひらがな入力モード切替 |
 | **ひらがな / カタカナ (KATAKANA_HIRAGANA)** | かなモード切替 | カタカナ/ひらがな入力モード切替 |
-| **半角/全角 (ZENKAKU_HANKAKU)** | 言語モード切替 | 日本語 / 英語モード切替 (`onToggleLanguageMode`) |
+| **半角/全角 (ZENKAKU_HANKAKU / GRAVE)** | 言語モード切替 | 日本語 / 英語モード切替 (`onToggleLanguageMode` ※Shift+Graveは `~` 入力) |
 | **英数 (EISU)** | 言語モード切替 | 日本語 / 英語モード切替 (`onToggleLanguageMode`) |
 | **Delete (FORWARD_DEL)** | 後方削除 | カーソル後方の1文字削除 (`onDeleteForward`) |
 | **Home (MOVE_HOME)** | 先頭移動 | カーソルを行頭（先頭）へ移動 (`moveCursorToStartOfLine`) |

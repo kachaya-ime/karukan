@@ -209,6 +209,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
     ascii_symbol_width: JString<'a>,
     digit_width: JString<'a>,
     max_learning_entries: jni::sys::jint,
+    max_learning_surface_chars: jni::sys::jint,
     is_learning_enabled: jboolean,
     is_date_conversion_enabled: jboolean,
 ) {
@@ -288,6 +289,13 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
         karukan_engine::LearningConfig::DEFAULT_MAX_ENTRIES
     };
     let previous_max_entries = CURRENT_MAX_LEARNING_ENTRIES.swap(max_entries_usize, Ordering::Relaxed);
+
+    let max_surface_usize = if max_learning_surface_chars > 0 {
+        max_learning_surface_chars as usize
+    } else {
+        karukan_engine::LearningConfig::DEFAULT_MAX_SURFACE_CHARS
+    };
+    CURRENT_MAX_LEARNING_SURFACE_CHARS.store(max_surface_usize, Ordering::Relaxed);
 
     {
         let mut guard = LEARNING_CACHE.lock().unwrap();
@@ -541,4 +549,17 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeProces
     };
 
     obj.into_raw()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSetDateConfigJson<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    date_config_json: JString<'a>,
+) {
+    let json_str: String = env
+        .get_string(&date_config_json)
+        .map(|s| s.into())
+        .unwrap_or_default();
+    dict_engine::update_date_config(&json_str);
 }

@@ -130,7 +130,23 @@ class EmojiPaletteController(
         return container
     }
 
-    fun show(targetKeyboardContainer: View, symbolMode: Boolean = false) {
+    companion object {
+        private fun calculateSingleRowHeight(context: Context): Int {
+            val tv = TextView(context).apply {
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setPadding(0, 10, 0, 10)
+                text = "😊"
+            }
+            tv.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            return tv.measuredHeight
+        }
+    }
+
+    fun show(targetKeyboardContainer: View, isHardKeyboard: Boolean = false, symbolMode: Boolean = false) {
         if (this.isSymbolMode != symbolMode) {
             this.isSymbolMode = symbolMode
             emojiCategoriesList = emptyList()
@@ -138,20 +154,50 @@ class EmojiPaletteController(
             selectedCategoryIndex = 0
         }
         isVisible = true
-        val targetHeight = if (targetKeyboardContainer.height > 0) {
-            targetKeyboardContainer.height
-        } else if (targetKeyboardContainer.measuredHeight > 0) {
-            targetKeyboardContainer.measuredHeight
+
+        if (isHardKeyboard) {
+            // 物理キーボード接続時: 1行分アイテムの計測高さ * 4行分 + ヘッダー (WRAP_CONTENT)
+            val singleRowHeight = calculateSingleRowHeight(context)
+            val fourRowsGridHeight = singleRowHeight * 4
+
+            val vpLp = viewPager.layoutParams as? LinearLayout.LayoutParams
+            if (vpLp != null) {
+                vpLp.height = fourRowsGridHeight
+                vpLp.weight = 0f
+                viewPager.layoutParams = vpLp
+            }
+
+            val containerLp = container.layoutParams
+            if (containerLp != null) {
+                containerLp.height = LinearLayout.LayoutParams.WRAP_CONTENT
+                container.layoutParams = containerLp
+            }
         } else {
-            keyboardHeightPxSupplier()
-        }
-        if (targetHeight > 0) {
-            val lp = container.layoutParams
-            if (lp != null && lp.height != targetHeight) {
-                lp.height = targetHeight
-                container.layoutParams = lp
+            // 画面キーボード時: 画面キーボードの高さに追従
+            val vpLp = viewPager.layoutParams as? LinearLayout.LayoutParams
+            if (vpLp != null) {
+                vpLp.height = 0
+                vpLp.weight = 1f
+                viewPager.layoutParams = vpLp
+            }
+
+            val targetHeight = if (targetKeyboardContainer.height > 0) {
+                targetKeyboardContainer.height
+            } else if (targetKeyboardContainer.measuredHeight > 0) {
+                targetKeyboardContainer.measuredHeight
+            } else {
+                keyboardHeightPxSupplier()
+            }
+
+            if (targetHeight > 0) {
+                val containerLp = container.layoutParams
+                if (containerLp != null && containerLp.height != targetHeight) {
+                    containerLp.height = targetHeight
+                    container.layoutParams = containerLp
+                }
             }
         }
+
         targetKeyboardContainer.isGone = true
         container.isVisible = true
         renderContent()
@@ -163,11 +209,11 @@ class EmojiPaletteController(
         targetKeyboardContainer.isVisible = true
     }
 
-    fun toggle(targetKeyboardContainer: View, symbolMode: Boolean = false) {
+    fun toggle(targetKeyboardContainer: View, isHardKeyboard: Boolean = false, symbolMode: Boolean = false) {
         if (isVisible && isSymbolMode == symbolMode) {
             hide(targetKeyboardContainer)
         } else {
-            show(targetKeyboardContainer, symbolMode)
+            show(targetKeyboardContainer, isHardKeyboard, symbolMode)
         }
     }
 
@@ -331,9 +377,9 @@ class EmojiPaletteController(
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmojiViewHolder {
             val textView = TextView(parent.context).apply {
-                textSize = 22f
+                textSize = 20f
                 gravity = Gravity.CENTER
-                setPadding(0, 12, 0, 12)
+                setPadding(0, 10, 0, 10)
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT

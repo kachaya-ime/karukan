@@ -122,10 +122,10 @@
 
     <!-- チャンク内維持数字桁数 -->
     <string-array name="pref_chunk_digits_entries">
-        <item>0 (数字はAI変換除外/デフォルト)</item>
-        <item>1 桁</item>
-        <item>2 桁</item>
-        <item>3 桁</item>
+        <item>0 (AI分離・ハルシネーション完全保護/デフォルト)</item>
+        <item>1 桁までAI維持 (例: 「第3回」)</item>
+        <item>2 桁までAI維持 (例: 「第12回」)</item>
+        <item>3 桁までAI維持</item>
     </string-array>
     <string-array name="pref_chunk_digits_values">
         <item>0</item>
@@ -136,10 +136,10 @@
 
     <!-- チャンク内維持英字数 -->
     <string-array name="pref_chunk_alphabets_entries">
-        <item>0 (英字はAI変換除外/デフォルト)</item>
-        <item>1 文字</item>
-        <item>2 文字</item>
-        <item>3 文字</item>
+        <item>0 (AI分離・ハルシネーション完全保護/デフォルト)</item>
+        <item>1 文字までAI維持 (例: 「C言語」)</item>
+        <item>2 文字までAI維持 (例: 「AI技術」)</item>
+        <item>3 文字までAI維持 (例: 「Rustで」)</item>
     </string-array>
     <string-array name="pref_chunk_alphabets_values">
         <item>0</item>
@@ -239,11 +239,13 @@
         <item>QWERTY 入力 (デフォルト)</item>
         <item>タブレット入力 (US配列)</item>
         <item>ニコタッチ入力 (12キー)</item>
+        <item>内蔵キーボード (Titan / Clicks 等)</item>
     </string-array>
     <string-array name="pref_keyboard_layout_values">
         <item>qwerty</item>
         <item>tablet</item>
         <item>niko</item>
+        <item>builtin</item>
     </string-array>
 
     <!-- キーボードの高さ -->
@@ -268,5 +270,19 @@
         <item>dark</item>
         <item>light</item>
         <item>system</item>
+    </string-array>
+
+    <!-- 物理キーボード配列 -->
+    <string-array name="pref_physical_keyboard_layout_entries">
+        <item>JIS 109 キーボード (標準)</item>
+        <item>標準 US キーボード (補正なし)</item>
+        <item>Unihertz Titan</item>
+        <item>Clicks Communicator</item>
+    </string-array>
+    <string-array name="pref_physical_keyboard_layout_values">
+        <item>jis109</item>
+        <item>us</item>
+        <item>titan</item>
+        <item>clicks</item>
     </string-array>
 </resources>
