@@ -39,20 +39,20 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyMenu, GetForegroundWindow, HICON, HWND_TOPMOST, LB_ADDSTRING,
+    DestroyMenu, DestroyWindow, GetCursorPos, GetForegroundWindow, HICON, HWND_TOPMOST, LB_ADDSTRING,
     LB_RESETCONTENT, LB_SETCURSEL, MA_NOACTIVATE, MF_CHECKED, MF_SEPARATOR, MF_STRING,
-    RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+    PostMessageW, RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     SendMessageW, SetForegroundWindow, SetWindowPos, SetWindowTextW, ShowWindow,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TrackPopupMenu,
-    WINDOW_STYLE, WM_MOUSEACTIVATE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_EX_NOACTIVATE,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    WINDOW_STYLE, WM_MOUSEACTIVATE, WM_NULL, WNDCLASSW, WS_BORDER, WS_CHILD, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{BSTR, BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, Ref, implement, w};
 
 use crate::{
     CLSID_KARUKAN_TIP, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION,
-    RES_ID_ICON_ALPHA, RES_ID_ICON_HIRAGANA, RES_ID_ICON_KATAKANA,
-    TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_KATAKANA,
+    RES_ID_ICON_ALPHA, RES_ID_ICON_HIRAGANA,
+    TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE,
     TF_CONVERSIONMODE_NATIVE, TF_CONVERSIONMODE_ROMAN,
 };
 
@@ -154,19 +154,7 @@ impl ITfCompartmentEventSink_Impl for CompartmentSink_Impl {
         } else if guid == GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION {
             if let Ok(conversion) = get_input_mode_conversion(&self.thread_mgr) {
                 tracing::info!("CompartmentSink: INPUTMODE_CONVERSION changed to 0x{conversion:04X}");
-                if (conversion & TF_CONVERSIONMODE_KATAKANA) != 0 {
-                    if let Ok(mut engine) = self.engine.lock() {
-                        let event = KeyEvent::new(
-                            Keysym::KEY_K,
-                            KeyModifiers {
-                                control_key: true,
-                                ..Default::default()
-                            },
-                            true,
-                        );
-                        let _ = engine.process_key(&event);
-                    }
-                } else if (conversion & TF_CONVERSIONMODE_NATIVE) != 0 {
+                if (conversion & TF_CONVERSIONMODE_NATIVE) != 0 {
                     if let Ok(mut engine) = self.engine.lock() {
                         let event = KeyEvent::new(Keysym::HENKAN, KeyModifiers::default(), true);
                         let _ = engine.process_key(&event);
@@ -305,28 +293,6 @@ impl LangBarButton_Impl {
                     let _ = engine.process_key(&event);
                 }
             }
-            2 => {
-                set_ime_openclose(&self.thread_mgr, self.client_id, true)?;
-                set_input_mode_conversion(
-                    &self.thread_mgr,
-                    self.client_id,
-                    TF_CONVERSIONMODE_NATIVE
-                        | TF_CONVERSIONMODE_KATAKANA
-                        | TF_CONVERSIONMODE_FULLSHAPE
-                        | TF_CONVERSIONMODE_ROMAN,
-                )?;
-                if let Ok(mut engine) = self.engine.lock() {
-                    let event = KeyEvent::new(
-                        Keysym::KEY_K,
-                        KeyModifiers {
-                            control_key: true,
-                            ..Default::default()
-                        },
-                        true,
-                    );
-                    let _ = engine.process_key(&event);
-                }
-            }
             3 => {
                 set_ime_openclose(&self.thread_mgr, self.client_id, false)?;
                 set_input_mode_conversion(
@@ -366,37 +332,69 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
         } else if click == TF_LBI_CLK_RIGHT {
             tracing::info!("LangBarButton context menu opening at ({}, {})", pt.x, pt.y);
             unsafe {
-                let hwnd = GetForegroundWindow();
+                // 自スレッド所有の軽量な非表示メッセージウィンドウを作成
+                let dummy_hwnd = CreateWindowExW(
+                    windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!(""),
+                    WS_POPUP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+
+                let owner_hwnd = dummy_hwnd.as_ref().copied().ok().unwrap_or_else(|| GetForegroundWindow());
+
                 if let Ok(hmenu) = CreatePopupMenu() {
                     let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-                    let conversion = get_input_mode_conversion(&self.thread_mgr).unwrap_or(
-                        TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
-                    );
-                    let is_katakana = is_open && (conversion & TF_CONVERSIONMODE_KATAKANA != 0);
-                    let is_hiragana = is_open && !is_katakana && (conversion & TF_CONVERSIONMODE_NATIVE != 0);
-                    let is_alpha = !is_open || (!is_katakana && !is_hiragana);
-
-                    let flag_hiragana = if is_hiragana { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
-                    let flag_katakana = if is_katakana { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
-                    let flag_alpha = if is_alpha { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
+                    let flag_hiragana = if is_open { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
+                    let flag_alpha = if !is_open { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
 
                     let _ = AppendMenuW(hmenu, MF_STRING | flag_hiragana, 1, w!("ひらがな (Hiragana)"));
-                    let _ = AppendMenuW(hmenu, MF_STRING | flag_katakana, 2, w!("全角カタカナ (Katakana)"));
                     let _ = AppendMenuW(hmenu, MF_STRING | flag_alpha, 3, w!("直接入力 / 半角英数 (Direct)"));
                     let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
                     let _ = AppendMenuW(hmenu, MF_STRING, 5, w!("設定 (Settings)..."));
 
-                    let _ = SetForegroundWindow(hwnd);
+                    // カーソル位置のフォールバック
+                    let mut cur_pt = POINT::default();
+                    let _ = GetCursorPos(&mut cur_pt);
+                    let (x, y) = if pt.x > 0 || pt.y > 0 {
+                        (pt.x, pt.y)
+                    } else {
+                        (cur_pt.x, cur_pt.y)
+                    };
+
+                    // Microsoft KB Q139526: メニューの前にオーナーをフォアグラウンドにする
+                    let _ = SetForegroundWindow(owner_hwnd);
+
+                    // TPM_RIGHTBUTTON: 右クリックによるトラッキングとメニュー選択を正常化
                     let cmd = TrackPopupMenu(
                         hmenu,
-                        TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-                        pt.x,
-                        pt.y,
+                        TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                        x,
+                        y,
                         Some(0),
-                        hwnd,
+                        owner_hwnd,
                         None,
                     );
+
+                    // KB Q139526: メニュー外クリック時にメニューを正常に終了させるためのダミーメッセージ
+                    let _ = PostMessageW(
+                        Some(owner_hwnd),
+                        WM_NULL,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    );
+
                     let _ = DestroyMenu(hmenu);
+                    if let Ok(hwnd) = dummy_hwnd {
+                        let _ = DestroyWindow(hwnd);
+                    }
 
                     tracing::info!("LangBarButton context menu result cmd: {}", cmd.0);
                     if cmd.0 != 0 {
@@ -414,31 +412,18 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
             return Ok(());
         };
         let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-        let conversion = get_input_mode_conversion(&self.thread_mgr).unwrap_or(
-            TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
-        );
-        let is_katakana = is_open && (conversion & TF_CONVERSIONMODE_KATAKANA != 0);
-        let is_hiragana = is_open && !is_katakana && (conversion & TF_CONVERSIONMODE_NATIVE != 0);
-        let is_alpha = !is_open || (!is_katakana && !is_hiragana);
-
-        let flag_hiragana = if is_hiragana {
+        let flag_hiragana = if is_open {
             TF_LBMENUF_RADIOCHECKED
         } else {
             0
         };
-        let flag_katakana = if is_katakana {
-            TF_LBMENUF_RADIOCHECKED
-        } else {
-            0
-        };
-        let flag_alpha = if is_alpha {
+        let flag_alpha = if !is_open {
             TF_LBMENUF_RADIOCHECKED
         } else {
             0
         };
 
         let hiragana_text: Vec<u16> = "ひらがな (Hiragana)".encode_utf16().collect();
-        let katakana_text: Vec<u16> = "全角カタカナ (Katakana)".encode_utf16().collect();
         let alpha_text: Vec<u16> = "直接入力 / 半角英数 (Direct)".encode_utf16().collect();
         let settings_text: Vec<u16> = "設定 (Settings)...".encode_utf16().collect();
 
@@ -449,14 +434,6 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
                 HBITMAP::default(),
                 HBITMAP::default(),
                 &hiragana_text,
-                ptr::null_mut(),
-            )?;
-            pmenu.AddMenuItem(
-                2,
-                flag_katakana,
-                HBITMAP::default(),
-                HBITMAP::default(),
-                &katakana_text,
                 ptr::null_mut(),
             )?;
             pmenu.AddMenuItem(
@@ -484,7 +461,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
                 ptr::null_mut(),
             )?;
         }
-        tracing::info!("LangBarButton::InitMenu added 5 menu items");
+        tracing::info!("LangBarButton::InitMenu added 4 menu items");
         Ok(())
     }
 
@@ -495,31 +472,17 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
 
     fn GetIcon(&self) -> windows::core::Result<HICON> {
         let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-        let conversion = get_input_mode_conversion(&self.thread_mgr).unwrap_or(
-            TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
-        );
-        let res_id = if !is_open {
-            RES_ID_ICON_ALPHA
-        } else if (conversion & TF_CONVERSIONMODE_KATAKANA) != 0 {
-            RES_ID_ICON_KATAKANA
-        } else {
+        let res_id = if is_open {
             RES_ID_ICON_HIRAGANA
+        } else {
+            RES_ID_ICON_ALPHA
         };
         load_resource_icon(res_id)
     }
 
     fn GetText(&self) -> windows::core::Result<BSTR> {
         let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-        let conversion = get_input_mode_conversion(&self.thread_mgr).unwrap_or(
-            TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
-        );
-        let text = if !is_open {
-            "A"
-        } else if (conversion & TF_CONVERSIONMODE_KATAKANA) != 0 {
-            "カ"
-        } else {
-            "あ"
-        };
+        let text = if is_open { "あ" } else { "A" };
         Ok(BSTR::from(text))
     }
 }
@@ -935,16 +898,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
             }
         }
         let modifiers = current_modifiers();
-        if modifiers.control_key && (keysym == Keysym::KEY_K || keysym == Keysym::KEY_K_UPPER) {
-            let _ = set_input_mode_conversion(
-                &self.thread_mgr,
-                self.client_id,
-                TF_CONVERSIONMODE_NATIVE
-                    | TF_CONVERSIONMODE_KATAKANA
-                    | TF_CONVERSIONMODE_FULLSHAPE
-                    | TF_CONVERSIONMODE_ROMAN,
-            );
-        } else if keysym == Keysym::HENKAN {
+        if keysym == Keysym::HENKAN {
             let _ = set_ime_openclose(&self.thread_mgr, self.client_id, true);
             let _ = set_input_mode_conversion(
                 &self.thread_mgr,
