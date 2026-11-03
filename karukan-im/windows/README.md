@@ -26,8 +26,8 @@ Windows向けのRustおよびC/C++依存ライブラリは静的CRT（`/MT`）�
 .\karukan-im\windows\package-windows.ps1
 ```
 
-GitHub ReleaseにはこのZIPを添付してください。インストーラーは実行時にGitHub Releasesの
-`dict.tgz`とHugging Faceのモデルをダウンロードするため、配布先のWindows PCは
+インストーラーは実行時にGitHub Releasesの
+`dict.tgz`とHugging Faceのモデルをダウンロードするため、インストール先のWindows PCは
 インストール時にインターネットへ接続できる必要があります。ZIPにはMITおよびApache-2.0の
 ライセンスファイルを含み、設定アプリの「ライセンス」カテゴリでもライセンス本文を確認できます。
 

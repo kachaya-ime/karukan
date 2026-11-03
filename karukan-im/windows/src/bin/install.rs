@@ -15,15 +15,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
         RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW,
     };
+    use windows_core::Interface;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, KLF_NOTELLSHELL, LoadKeyboardLayoutW};
     use windows::Win32::UI::TextServices::{
-        CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
-        ITfCategoryMgr, ITfInputProcessorProfiles,
+        CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+        GUID_TFCAT_TIP_KEYBOARD, ITfCategoryMgr, ITfInputProcessorProfileMgr,
+        ITfInputProcessorProfiles, TF_IPPMF_FORSESSION, TF_PROFILETYPE_INPUTPROCESSOR,
     };
-    use windows::core::{GUID, PCWSTR};
+    use windows::core::{GUID, PCWSTR, w};
 
     use karukan_engine::ModelSource;
     use karukan_im::config::{Settings, settings::StrategyMode};
-    use karukan_im_windows::{CLSID_KARUKAN_TIP, GUID_KARUKAN_PROFILE};
+    use karukan_im_windows::{
+        CLSID_KARUKAN_TIP, GUID_KARUKAN_PROFILE, GUID_TFCAT_TIPCAP_COMLESS,
+        GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT,
+        GUID_TFCAT_TIPCAP_SECUREMODE, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+        GUID_TFCAT_TIPCAP_UIELEMENTENABLED, OLD_BOGUS_IMMERSIVESUPPORT,
+        OLD_BOGUS_SYSTRAYSUPPORT, OLD_BOGUS_UIELEMENTENABLED,
+    };
 
     const LANGUAGE_ID_JAPANESE: u16 = 0x0411;
     const INSTALL_DIRECTORY: &str = "Programs\\Karukan";
@@ -323,6 +332,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     fn copy_dll_to_install_dir(source: &Path, install_dir: &Path) -> io::Result<PathBuf> {
+        if let Ok(entries) = std::fs::read_dir(install_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("karukan_im_windows-") && name.ends_with(".dll") {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
         let mut source = std::fs::File::open(source)?;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -368,7 +387,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    fn register_profile() -> Result<(), Box<dyn std::error::Error>> {
+    fn register_profile(dll_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
             let _: windows::core::IUnknown = with_step(
                 "Karukan TSF DLLのCOM起動に失敗",
@@ -394,22 +413,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &CLSID_KARUKAN_TIP,
                 ),
             )?;
+            with_step(
+                "システムトレイサポートカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "イマーシブサポートカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "入力モードコンパートメントカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "UIエレメントカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "セキュアモードカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_SECUREMODE,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "COMレスカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_COMLESS,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
+            with_step(
+                "表示属性プロバイダカテゴリの登録に失敗",
+                categories.RegisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            )?;
             let description: Vec<u16> = "Karukan Japanese Input"
                 .encode_utf16()
                 .chain(Some(0))
                 .collect();
-            let result = (windows::core::Interface::vtable(&profiles).AddLanguageProfile)(
-                windows::core::Interface::as_raw(&profiles),
-                &CLSID_KARUKAN_TIP,
-                LANGUAGE_ID_JAPANESE,
-                &GUID_KARUKAN_PROFILE,
-                PCWSTR(description.as_ptr()),
-                description.len().saturating_sub(1) as u32,
-                PCWSTR::null(),
-                0,
-                0,
-            );
-            with_step("日本語の言語プロファイル登録に失敗", result.ok())?;
+            let icon_file = wide(dll_path.as_os_str());
+            let mgr: ITfInputProcessorProfileMgr = profiles.cast()?;
+            let hkl = LoadKeyboardLayoutW(w!("00000411"), KLF_NOTELLSHELL)
+                .unwrap_or(HKL(std::ptr::null_mut()));
+            with_step(
+                "日本語の言語プロファイル登録 (RegisterProfile) に失敗",
+                mgr.RegisterProfile(
+                    &CLSID_KARUKAN_TIP,
+                    LANGUAGE_ID_JAPANESE,
+                    &GUID_KARUKAN_PROFILE,
+                    &description,
+                    &icon_file,
+                    0,
+                    hkl,
+                    0,
+                    true,
+                    0,
+                ),
+            )?;
             with_step(
                 "日本語の言語プロファイル有効化に失敗",
                 profiles.EnableLanguageProfile(
@@ -419,6 +501,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     true,
                 ),
             )?;
+            let _ = mgr.ActivateProfile(
+                TF_PROFILETYPE_INPUTPROCESSOR,
+                LANGUAGE_ID_JAPANESE,
+                &CLSID_KARUKAN_TIP,
+                &GUID_KARUKAN_PROFILE,
+                hkl,
+                TF_IPPMF_FORSESSION,
+            );
+            let _ = profiles.ActivateLanguageProfile(
+                &CLSID_KARUKAN_TIP,
+                LANGUAGE_ID_JAPANESE,
+                &GUID_KARUKAN_PROFILE,
+            );
         }
         Ok(())
     }
@@ -448,6 +543,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     false,
                 ),
             );
+            if let Ok(mgr) = profiles.cast::<ITfInputProcessorProfileMgr>() {
+                warn_profile_error(
+                    "日本語の言語プロファイル登録解除 (UnregisterProfile) に失敗",
+                    mgr.UnregisterProfile(&CLSID_KARUKAN_TIP, LANGUAGE_ID_JAPANESE, &GUID_KARUKAN_PROFILE, 0),
+                );
+            }
             warn_profile_error(
                 "日本語の言語プロファイル削除に失敗",
                 profiles.RemoveLanguageProfile(
@@ -461,6 +562,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 categories.UnregisterCategory(
                     &CLSID_KARUKAN_TIP,
                     &GUID_TFCAT_TIP_KEYBOARD,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "システムトレイサポートカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "イマーシブサポートカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "入力モードコンパートメントカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "UIエレメントカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "セキュアモードカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_SECUREMODE,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            warn_profile_error(
+                "COMレスカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_TIPCAP_COMLESS,
+                    &CLSID_KARUKAN_TIP,
+                ),
+            );
+            // 過去バージョンで登録された誤ったGUIDのクリーンアップ
+            let _ = categories.UnregisterCategory(
+                &CLSID_KARUKAN_TIP,
+                &OLD_BOGUS_SYSTRAYSUPPORT,
+                &CLSID_KARUKAN_TIP,
+            );
+            let _ = categories.UnregisterCategory(
+                &CLSID_KARUKAN_TIP,
+                &OLD_BOGUS_IMMERSIVESUPPORT,
+                &CLSID_KARUKAN_TIP,
+            );
+            let _ = categories.UnregisterCategory(
+                &CLSID_KARUKAN_TIP,
+                &OLD_BOGUS_UIELEMENTENABLED,
+                &CLSID_KARUKAN_TIP,
+            );
+            warn_profile_error(
+                "表示属性プロバイダカテゴリの解除に失敗",
+                categories.UnregisterCategory(
+                    &CLSID_KARUKAN_TIP,
+                    &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
                     &CLSID_KARUKAN_TIP,
                 ),
             );
@@ -506,12 +679,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(&install_dir)?;
             let installed_dll = copy_dll_to_install_dir(&source_dll, &install_dir)?;
             let installed_settings_app = install_dir.join("karukan-settings.exe");
-            std::fs::copy(&source_settings_app, &installed_settings_app).map_err(|error| {
-                format!(
-                    "Could not install settings app to {}: {error}",
-                    installed_settings_app.display()
-                )
-            })?;
+            let _ = std::fs::copy(&source_settings_app, &installed_settings_app);
             install_default_config()?;
             install_system_dictionary().map_err(|error| {
                 io::Error::new(
@@ -538,7 +706,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Err(error);
             }
-            if let Err(error) = register_profile() {
+            if let Err(error) = register_profile(&installed_dll) {
                 if let Err(cleanup_error) = unregister_profile() {
                     eprintln!("TSFプロファイルのロールバックに失敗: {cleanup_error}");
                 }
@@ -558,8 +726,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "The settings app is installed at {}.",
                 installed_settings_app.display()
             );
+
+            // Karukan を既定の入力方式に設定
+            let tip = format!("0411:{{{}}}{{{}}}", guid_key(&CLSID_KARUKAN_TIP), guid_key(&GUID_KARUKAN_PROFILE));
+            let _ = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", &format!("Set-WinDefaultInputMethodOverride -InputTip '{tip}'")])
+                .status();
         }
         "uninstall" => {
+            let _ = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", "Set-WinDefaultInputMethodOverride -InputTip ''"])
+                .status();
             unregister_profile()?;
             delete_com_server()?;
             println!("Karukan was removed from the current user's TSF profiles.");

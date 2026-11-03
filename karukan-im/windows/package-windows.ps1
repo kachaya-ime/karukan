@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $manifestPath = Join-Path $PSScriptRoot 'Cargo.toml'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw
