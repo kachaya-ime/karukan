@@ -1999,7 +1999,7 @@ mod app {
             let learning = is_learning_category(state);
             let user_dictionary = is_user_dictionary_category(state);
             let license = is_license_category(state);
-            let controls: Vec<&SettingControl> = if learning {
+            let controls: Vec<&SettingControl> = if learning || user_dictionary || license {
                 Vec::new()
             } else {
                 state
@@ -2385,6 +2385,7 @@ mod app {
                             if selected >= 0 && (selected as usize) < SECTIONS.len() {
                                 if !is_learning_category(state)
                                     && !is_user_dictionary_category(state)
+                                    && !is_license_category(state)
                                     && !apply_setting_fields(state)
                                 {
                                     send(state.categories, LB_SETCURSEL, state.category, 0);
@@ -2459,6 +2460,7 @@ mod app {
                         (SAVE_ID, BN_CLICKED)
                             if !is_learning_category(state)
                                 && !is_user_dictionary_category(state)
+                                && !is_license_category(state)
                                 && apply_setting_fields(state) =>
                         {
                             match save_config(&state.config) {
