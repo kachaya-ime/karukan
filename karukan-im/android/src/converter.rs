@@ -3,8 +3,8 @@ use crate::config::{
     IS_LEARNING_ENABLED, MODEL_PATH, SYSTEM_DICT_PATH,
 };
 use crate::dict_engine::{
-    get_primary_rewriter_candidates, get_secondary_rewriter_candidates, get_system_dict_candidates,
-    get_user_dict_candidates,
+    get_date_candidates, get_primary_rewriter_candidates, get_secondary_rewriter_candidates,
+    get_system_dict_candidates, get_user_dict_candidates, is_date_candidate,
 };
 use karukan_engine::{KanaKanjiConverter, LearningCache, RomajiConverter};
 use karukan_im::{EngineAction, InputMethodEngine, KeyEvent, KeyModifiers, Keysym};
@@ -13,30 +13,18 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
+// -------------------------------------------------------------------------------------------------
+// Region: Global Engine Mutex Instances
+// -------------------------------------------------------------------------------------------------
+
 pub static CONVERTER: Mutex<Option<KanaKanjiConverter>> = Mutex::new(None);
 pub static ROMAJI_CONVERTER: Mutex<Option<RomajiConverter>> = Mutex::new(None);
 pub static LEARNING_CACHE: Mutex<Option<LearningCache>> = Mutex::new(None);
 pub static ENGINE: Mutex<Option<InputMethodEngine>> = Mutex::new(None);
 
-#[allow(dead_code)]
-fn android_log(tag: &str, msg: &str) {
-    use std::ffi::CString;
-    unsafe extern "C" {
-        fn __android_log_print(
-            prio: std::os::raw::c_int,
-            tag: *const std::os::raw::c_char,
-            fmt: *const std::os::raw::c_char,
-            ...
-        ) -> std::os::raw::c_int;
-    }
-    if let (Ok(c_tag), Ok(c_msg)) = (CString::new(tag), CString::new("%s")) {
-        if let Ok(c_val) = CString::new(msg) {
-            unsafe {
-                __android_log_print(3, c_tag.as_ptr(), c_msg.as_ptr(), c_val.as_ptr());
-            }
-        }
-    }
-}
+// -------------------------------------------------------------------------------------------------
+// Region: Utility Helpers
+// -------------------------------------------------------------------------------------------------
 
 fn clean_model_candidate(s: &str) -> String {
     let mut cleaned = s.trim();
@@ -47,6 +35,10 @@ fn clean_model_candidate(s: &str) -> String {
     }
     cleaned.trim().to_string()
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Conversion Pipeline (convert_query)
+// -------------------------------------------------------------------------------------------------
 
 pub fn convert_query(
     input_str: &str,
@@ -59,14 +51,6 @@ pub fn convert_query(
     }
 
     let has_left_context = !context_str.trim().is_empty();
-
-    android_log(
-        "KarukanNative",
-        &format!(
-            "[convert_query] input='{}', context='{}', query_id={}, has_left_context={}",
-            input_str, context_str, q_id, has_left_context
-        ),
-    );
 
     // Chunk および Beam 設定パラメータの取得
     let (max_ai_len, chunk_symbols, chunk_digits, chunk_alphabets) = {
@@ -203,11 +187,6 @@ pub fn convert_query(
         }
     }
 
-    android_log(
-        "KarukanNative",
-        &format!("[raw_model_candidates] {:?}", raw_model_candidates),
-    );
-
     if is_query_cancelled(q_id) {
         return Some(String::new());
     }
@@ -223,7 +202,11 @@ pub fn convert_query(
     let learned_entries = if IS_LEARNING_ENABLED.load(Ordering::Relaxed) {
         let learn_guard = LEARNING_CACHE.lock().unwrap();
         if let Some(ref cache) = *learn_guard {
-            cache.lookup(input_str)
+            cache
+                .lookup(input_str)
+                .into_iter()
+                .filter(|(s, _)| !is_date_candidate(input_str, s))
+                .collect()
         } else {
             Vec::new()
         }
@@ -247,6 +230,7 @@ pub fn convert_query(
         UserDict,
         Model,
         SystemDict,
+        Date,
         Rewriter,
         Fallback,
     }
@@ -259,7 +243,9 @@ pub fn convert_query(
     }
 
     let determine_source = |surface: &str, is_from_model: bool| -> (CandidateSourceKind, Option<String>) {
-        if learned_surfaces.contains(surface) {
+        if is_date_candidate(input_str, surface) {
+            (CandidateSourceKind::Date, None)
+        } else if learned_surfaces.contains(surface) {
             let desc = user_dict_map.get(surface).cloned().flatten()
                 .or_else(|| system_dict_map.get(surface).cloned().flatten());
             (CandidateSourceKind::Learning, desc)
@@ -297,60 +283,50 @@ pub fn convert_query(
     if has_left_context {
         // 【左文脈が存在する場合】
         // AIモデルが context_str に照らして推論した候補 (raw_model_candidates) を最優先にする。
-        // （コンテキストフリーな過去の学習履歴や辞書単語が、現在の左文脈における AI 推論結果を上書きするのを防ぐ）
-
-        // 1. AIモデルによる文脈考慮の変換候補結果 (ユーザー辞書や学習済みの語も determine_source で適切なバッジが付与される)
         for mc in &raw_model_candidates {
             push_cand!(mc.clone(), None, None, true);
         }
 
-        // 2. ユーザー辞書 (モデル候補に含まれなかったユーザー明示登録語)
+        // ユーザー辞書
         for udc in &user_dict_candidates {
             push_cand!(udc.surface.clone(), Some(CandidateSourceKind::UserDict), udc.description.clone(), false);
         }
 
-        // 3. 残りの学習履歴候補
+        // 残りの学習履歴候補
         for (surface, _) in &learned_entries {
             push_cand!(surface.clone(), Some(CandidateSourceKind::Learning), None, false);
-        }
-
-        // 4. 残りのシステム辞書候補
-        for sdc in &system_dict_candidates {
-            push_cand!(sdc.surface.clone(), Some(CandidateSourceKind::SystemDict), sdc.description.clone(), false);
         }
     } else {
         // 【左文脈が存在しない場合】
         // 文脈がない場合はユーザーの過去の学習履歴を最優先にする。
 
-        // 1. 学習履歴 (最大3件)
+        // 学習履歴 (最大3件)
         for (surface, _) in learned_entries.iter().take(3) {
             push_cand!(surface.clone(), Some(CandidateSourceKind::Learning), None, false);
         }
 
-        // 2. ユーザー辞書
+        // ユーザー辞書
         for udc in &user_dict_candidates {
             push_cand!(udc.surface.clone(), Some(CandidateSourceKind::UserDict), udc.description.clone(), false);
         }
 
-        // 3. AIモデル変換結果
+        // AIモデル変換結果
         for mc in &raw_model_candidates {
             push_cand!(mc.clone(), None, None, true);
         }
-
-        // 4. システム辞書
-        for sdc in &system_dict_candidates {
-            push_cand!(sdc.surface.clone(), Some(CandidateSourceKind::SystemDict), sdc.description.clone(), false);
-        }
     }
 
-    // 5. 原文ひらがな / 全角カタカナ (Fallback)
-    push_cand!(input_str.to_string(), Some(CandidateSourceKind::Fallback), None, false);
-
-    if !full_katakana.is_empty() {
-        push_cand!(full_katakana, Some(CandidateSourceKind::Fallback), None, false);
+    // 4. 日付・時刻リライター候補 (📅 日付)
+    let date_candidates = get_date_candidates(input_str, &mut seen_candidates);
+    for dc in date_candidates {
+        candidates.push(CandidateAnnotated {
+            surface: dc.surface,
+            source: CandidateSourceKind::Date,
+            description: dc.description,
+        });
     }
 
-    // 6. リライター候補 (日付・記号・数値・絵文字・半角カタカナ・アルファベット)
+    // 5. リライター候補 (数値・記号・絵文字)
     let primary_rewriter_candidates =
         get_primary_rewriter_candidates(input_str, &mut seen_candidates);
     for rc in primary_rewriter_candidates {
@@ -359,6 +335,18 @@ pub fn convert_query(
             source: CandidateSourceKind::Rewriter,
             description: rc.description,
         });
+    }
+
+    // 6. システム辞書候補
+    for sdc in &system_dict_candidates {
+        push_cand!(sdc.surface.clone(), Some(CandidateSourceKind::SystemDict), sdc.description.clone(), false);
+    }
+
+    // 7. 原文ひらがな / 全角カタカナ (Fallback)
+    push_cand!(input_str.to_string(), Some(CandidateSourceKind::Fallback), None, false);
+
+    if !full_katakana.is_empty() {
+        push_cand!(full_katakana, Some(CandidateSourceKind::Fallback), None, false);
     }
 
     for hk in half_katakana_list {
@@ -381,7 +369,7 @@ pub fn convert_query(
         }
     }
 
-    // 7. アノテーション整形
+    // 8. アノテーション整形
     let mut final_candidates = Vec::with_capacity(candidates.len());
     for item in candidates {
         let surface = item.surface;
@@ -422,6 +410,13 @@ pub fn convert_query(
                     surface
                 }
             }
+            CandidateSourceKind::Date => {
+                if let Some(desc) = effective_desc {
+                    format!("{} (📅 {})", surface, desc)
+                } else {
+                    format!("{} (📅)", surface)
+                }
+            }
             CandidateSourceKind::Rewriter => {
                 if let Some(desc) = effective_desc {
                     format!("{} (🔄 {})", surface, desc)
@@ -441,15 +436,17 @@ pub fn convert_query(
         final_candidates.push(formatted);
     }
 
-    android_log(
-        "KarukanNative",
-        &format!("[final_candidates] {:?}", final_candidates),
-    );
-
     Some(final_candidates.join("\t"))
 }
 
+// -------------------------------------------------------------------------------------------------
+// Region: Learning Persistence Functions
+// -------------------------------------------------------------------------------------------------
+
 pub fn record_learning(reading_str: &str, surface_str: &str) {
+    if is_date_candidate(reading_str, surface_str) {
+        return;
+    }
     let mut guard = LEARNING_CACHE.lock().unwrap();
     if guard.is_none() {
         *guard = Some(LearningCache::new(get_current_learning_config()));
@@ -496,6 +493,10 @@ pub fn clear_learning() {
     *guard = Some(LearningCache::new(get_current_learning_config()));
 }
 
+// -------------------------------------------------------------------------------------------------
+// Region: Engine Configuration Factory
+// -------------------------------------------------------------------------------------------------
+
 pub fn create_android_settings() -> karukan_im::config::Settings {
     let mut settings = karukan_im::config::Settings::default();
 
@@ -534,6 +535,10 @@ pub fn create_android_settings() -> karukan_im::config::Settings {
 
     settings
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Process Key Struct & Processor
+// -------------------------------------------------------------------------------------------------
 
 pub struct ProcessKeyResultStruct {
     pub consumed: bool,

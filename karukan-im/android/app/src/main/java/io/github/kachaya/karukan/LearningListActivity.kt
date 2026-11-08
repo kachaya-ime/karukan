@@ -27,6 +27,10 @@ import androidx.recyclerview.widget.RecyclerView
  */
 class LearningListActivity : AppCompatActivity() {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Activity Lifecycle & Views
+    // ---------------------------------------------------------------------------------------------
+
     private lateinit var engine: KarukanEngine
     private lateinit var adapter: LearningListAdapter
 
@@ -93,6 +97,10 @@ class LearningListActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Data Filtering & Loading
+    // ---------------------------------------------------------------------------------------------
+
     private fun loadData() {
         allEntries = engine.getLearningEntries()
         val hasData = allEntries.isNotEmpty()
@@ -117,6 +125,10 @@ class LearningListActivity : AppCompatActivity() {
         tvEmptyMessage.isVisible = filtered.isEmpty()
         rvLearningList.isVisible = filtered.isNotEmpty()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Dialog Handlers (Delete, Clear All)
+    // ---------------------------------------------------------------------------------------------
 
     private fun showDeleteConfirmDialog(item: LearningItem) {
         AlertDialog.Builder(this)
@@ -143,6 +155,10 @@ class LearningListActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: RecyclerView Adapter & ViewHolder
+    // ---------------------------------------------------------------------------------------------
 
     private class LearningListAdapter(
         private val onDeleteClick: (LearningItem) -> Unit

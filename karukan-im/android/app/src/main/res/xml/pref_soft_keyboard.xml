@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:iconSpaceReserved="false"
+    >
+
+    <PreferenceCategory
+        android:title="画面キーボード・外観設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <ListPreference
+            android:defaultValue="qwerty"
+            android:entries="@array/pref_keyboard_layout_entries"
+            android:entryValues="@array/pref_keyboard_layout_values"
+            android:key="pref_keyboard_layout"
+            android:title="キーボード配列"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="dark"
+            android:entries="@array/pref_keyboard_theme_entries"
+            android:entryValues="@array/pref_keyboard_theme_values"
+            android:key="pref_keyboard_theme"
+            android:title="キーボードテーマ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="medium"
+            android:entries="@array/pref_keyboard_height_entries"
+            android:entryValues="@array/pref_keyboard_height_values"
+            android:key="pref_keyboard_height"
+            android:title="キーボードの高さ"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_show_input_status_bar"
+            android:summary="キーボード上部の入力ステータスバー（「かな: (なし)」等）を表示します"
+            android:title="入力ステータスバーを表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_vibration_enabled"
+            android:summary="キーをタップした際に振動フィードバックを発生させます"
+            android:title="キー操作時の振動"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_sound_enabled"
+            android:summary="キーをタップした際に操作音を再生します"
+            android:title="キー操作時の効果音"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

@@ -1,17 +1,258 @@
 package io.github.kachaya.karukan
 
+import android.widget.LinearLayout
+
 /**
  * ニコタッチ入力（12キーマトリクス入力）のキーボードレイアウト定義、
- * 文字マッピング、および濁音/小文字等のトグル変換処理を提供するオブジェクトです。
+ * 文字マッピング、プロバイダ機能および 2段階状態管理を提供するオブジェクトです。
  */
-object NikoKeyboardLayout {
+object NikoKeyboardLayout : KeyboardLayoutProvider {
 
-    /**
-     * ニコタッチ 10×10 文字対応表
-     * 1打目 (1〜9, 0) × 2打目 (1〜9, 0)
-     *
-     * 漢字ひらがな入力モード（全角大文字）オリジナルに対して括弧類を追加。
-     */
+    // ---------------------------------------------------------------------------------------------
+    // Region: Container & Input State Management
+    // ---------------------------------------------------------------------------------------------
+
+    override val layoutId: String = "niko"
+    override val rowCount: Int = 4
+
+    private var pendingNikoRowKey: Int? = null
+    private var currentHasInput: Boolean = false
+    private val nikoKeyButtons = mutableMapOf<Int, KeyButton>()
+    private var lastParamsRef: java.lang.ref.WeakReference<KeyboardCreateParams>? = null
+    private var activeButtons: List<KeyButton>? = null
+
+    override fun createContainer(params: KeyboardCreateParams): LinearLayout {
+        lastParamsRef = java.lang.ref.WeakReference(params)
+        pendingNikoRowKey = null
+        val mode = params.currentInputModeSupplier()
+        return if (mode == InputMode.NUMERIC) {
+            createNumericContainer(params)
+        } else {
+            createTouchContainer(params)
+        }
+    }
+
+    override fun updateInputState(hasInput: Boolean) {
+        if (currentHasInput == hasInput) return
+        currentHasInput = hasInput
+        if (pendingNikoRowKey == null) {
+            lastParamsRef?.get()?.let { params ->
+                val container = createContainer(params)
+                params.onContainerSwapRequested?.invoke(container)
+            }
+        }
+    }
+
+    override fun updateInputMode(inputMode: InputMode) {
+        val isDark = lastParamsRef?.get()?.isDarkSupplier?.invoke() ?: false
+        activeButtons?.forEach { btn ->
+            btn.updateInputMode(inputMode, isDark)
+        }
+    }
+
+    override fun updateLanguageMode(isEnglishMode: Boolean) {
+        val isDark = lastParamsRef?.get()?.isDarkSupplier?.invoke() ?: false
+        activeButtons?.forEach { btn ->
+            btn.updateLanguageMode(isEnglishMode, isDark)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Touch State & 2-Stage Key Press Handlers
+    // ---------------------------------------------------------------------------------------------
+
+    fun onNikoKeyClick(keyIdx: Int) {
+        lastParamsRef?.get()?.let { params ->
+            onNikoKeyClick(keyIdx, params)
+        }
+    }
+
+    fun onNikoKeyClick(keyIdx: Int, params: KeyboardCreateParams) {
+        val mode = params.currentInputModeSupplier()
+        if (mode == InputMode.NUMERIC) {
+            val charVal = keyIdx.toString()
+            params.listener.onNikoTouchInput(charVal)
+            return
+        }
+
+        val pending = pendingNikoRowKey
+        if (pending == null) {
+            // 1打目選択
+            pendingNikoRowKey = keyIdx
+            val guideList = getRowGuideChars(keyIdx)
+            if (guideList != null) {
+                for (i in 0..9) {
+                    val guideChar = guideList.getOrElse(i) { "" }
+                    nikoKeyButtons[i]?.setGuideText(guideChar)
+                }
+            }
+            val secondStageContainer = createSecondStageContainer(keyIdx, params)
+            params.onContainerSwapRequested?.invoke(secondStageContainer)
+        } else {
+            // 2打目確定
+            pendingNikoRowKey = null
+            nikoKeyButtons.values.forEach { it.clearGuideText() }
+            val firstStageContainer = createTouchContainer(params)
+            params.onContainerSwapRequested?.invoke(firstStageContainer)
+
+            val guideList = getRowGuideChars(pending)
+            val indexInList = if (keyIdx == 0) 9 else keyIdx - 1
+            val resultChar = guideList?.getOrNull(indexInList) ?: ""
+            if (resultChar.isNotEmpty()) {
+                params.listener.onNikoTouchInput(resultChar)
+            }
+        }
+    }
+
+    private fun buildNikoContainer(
+        layoutSpec: List<List<KeySpec>>,
+        params: KeyboardCreateParams,
+        onButtonCreated: ((KeySpec, KeyButton) -> Unit)? = null
+    ): LinearLayout {
+        val context = params.context
+
+        val keyboardContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val allButtons = mutableListOf<KeyButton>()
+
+        for (rowSpec in layoutSpec) {
+            val rowLayout = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                setPadding(0, 0, 0, 0)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            for (keySpec in rowSpec) {
+                val btn = params.createKeyButton(keySpec)
+                rowLayout.addView(btn)
+                allButtons.add(btn)
+                onButtonCreated?.invoke(keySpec, btn)
+            }
+            keyboardContainer.addView(rowLayout)
+        }
+
+        activeButtons = allButtons
+
+        fun dispatchKeyAction(btn: KeyButton) {
+            val type = btn.currentType
+            if (type.isNikoKey) {
+                type.nikoKeyIndex?.let { onNikoKeyClick(it, params) }
+                return
+            }
+            when (type) {
+                KeyType.BACKSPACE -> params.listener.onBackspace()
+                KeyType.NIKO_BACKSPACE -> {
+                    pendingNikoRowKey = null
+                    val firstStageContainer = createTouchContainer(params)
+                    params.onContainerSwapRequested?.invoke(firstStageContainer)
+                    params.listener.onBackspace()
+                }
+                KeyType.DELETE -> params.listener.onDelete()
+                KeyType.SPACE -> params.listener.onSpaceOrConvert()
+                KeyType.ENTER -> params.listener.onCommit()
+                KeyType.LANG -> params.listener.onToggleLanguageMode()
+                KeyType.NIKO_LANG -> params.listener.onNikoToggleLanguageMode()
+                KeyType.CHUNK_FIX -> params.listener.onFixChunk()
+                KeyType.EMOJI -> params.listener.onToggleEmojiPalette()
+                KeyType.DPAD_LEFT -> params.listener.onDpadLeft()
+                KeyType.DPAD_RIGHT -> params.listener.onDpadRight()
+                KeyType.DPAD_UP -> params.listener.onDpadUp()
+                KeyType.DPAD_DOWN -> params.listener.onDpadDown()
+                KeyType.TAB -> params.listener.onTab()
+                KeyType.KATAKANA -> params.listener.onKatakana()
+                KeyType.ESC -> params.listener.onEsc()
+                KeyType.NIKO_CANCEL -> {
+                    pendingNikoRowKey = null
+                    val firstStageContainer = createTouchContainer(params)
+                    params.onContainerSwapRequested?.invoke(firstStageContainer)
+                }
+                KeyType.NIKO_GUIDE_CHAR -> {
+                    val char = btn.text.toString()
+                    if (char.isNotEmpty()) {
+                        pendingNikoRowKey = null
+                        val firstStageContainer = createTouchContainer(params)
+                        params.onContainerSwapRequested?.invoke(firstStageContainer)
+                        params.listener.onNikoTouchInput(char)
+                    }
+                }
+                KeyType.NIKO_TOGGLE -> params.listener.onNikoTouchToggle()
+                KeyType.NIKO_INPUT_STAR -> params.listener.onNikoTouchInput("*")
+                KeyType.NIKO_INPUT_POUND -> params.listener.onNikoTouchInput("#")
+                KeyType.NIKO_SYMBOL_PALETTE -> params.listener.onToggleSymbolPalette()
+                else -> {}
+            }
+        }
+
+        for (btn in allButtons) {
+            if (btn.currentType == KeyType.GAP) {
+                btn.isClickable = false
+                btn.isFocusable = false
+                btn.isEnabled = false
+                continue
+            }
+            btn.setOnClickListener {
+                params.listener.onKeyFeedback()
+                dispatchKeyAction(btn)
+            }
+        }
+
+        return keyboardContainer
+    }
+
+    private fun createTouchContainer(params: KeyboardCreateParams): LinearLayout {
+        pendingNikoRowKey = null
+        nikoKeyButtons.clear()
+        val isHiragana = params.currentInputModeSupplier() == InputMode.HIRAGANA
+        return buildNikoContainer(
+            layoutSpec = getLayoutSpec(currentHasInput, isHiragana),
+            params = params
+        ) { keySpec, btn ->
+            keySpec.normalType.nikoKeyIndex?.let { index ->
+                nikoKeyButtons[index] = btn
+            }
+        }
+    }
+
+    private fun createSecondStageContainer(rowKey: Int, params: KeyboardCreateParams): LinearLayout {
+        nikoKeyButtons.clear()
+        val isHiragana = params.currentInputModeSupplier() == InputMode.HIRAGANA
+        return buildNikoContainer(
+            layoutSpec = getSecondStageLayoutSpec(rowKey, isHiragana),
+            params = params
+        ) { keySpec, btn ->
+            keySpec.normalType.nikoKeyIndex?.let { index ->
+                nikoKeyButtons[index] = btn
+            }
+        }
+    }
+
+    private fun createNumericContainer(params: KeyboardCreateParams): LinearLayout {
+        pendingNikoRowKey = null
+        nikoKeyButtons.clear()
+        return buildNikoContainer(
+            layoutSpec = getNumericLayoutSpec(currentHasInput),
+            params = params
+        ) { keySpec, btn ->
+            keySpec.normalType.nikoKeyIndex?.let { index ->
+                nikoKeyButtons[index] = btn
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Niko Touch Tables & Character Toggling
+    // ---------------------------------------------------------------------------------------------
+
     private val NIKO_TOUCH_TABLE: Map<Int, List<String>> = mapOf(
         1 to listOf("あ", "い", "う", "え", "お", ".", "-", "@", "_", "1"),
         2 to listOf("か", "き", "く", "け", "こ", "[", "a", "b", "c", "2"),
@@ -25,9 +266,6 @@ object NikoKeyboardLayout {
         0 to listOf("わ", "を", "ん", "、", "。", "ー", "・", "！", "？", "0")
     )
 
-    /**
-     * 清音 ↔ 濁音 ↔ 半濁音 ↔ 小文字 のトグル変換マッピング定義
-     */
     private val TOGGLE_MAP: Map<String, String> = mapOf(
         "あ" to "ぁ", "ぁ" to "あ",
         "い" to "ぃ", "ぃ" to "い",
@@ -65,23 +303,8 @@ object NikoKeyboardLayout {
         "わ" to "ゎ", "ゎ" to "わ"
     )
 
-    /**
-     * 指定した1打目キー（`rowKey`: 1〜9, 0）に対応する、
-     * 2打目の全10文字のリストを取得します。
-     * （2打目入力待ち時のキーボードガイド表示に利用されます）
-     *
-     * @param rowKey 1打目のキーインデックス (1〜9, 0)
-     * @return 対応する10文字のリスト（存在しない場合は null）
-     */
     fun getRowGuideChars(rowKey: Int): List<String>? = NIKO_TOUCH_TABLE[rowKey]
 
-    /**
-     * Android の物理キーボード等における KeyEvent の KeyCode (`KEYCODE_0`〜`KEYCODE_9`) を、
-     * ニコタッチキーインデックス (`0`〜`9`) に変換します。
-     *
-     * @param keyCode Android の KeyEvent キーコード
-     * @return 対応するニコタッチキーインデックス (0〜9)、対象外の場合は null
-     */
     fun keyCodeToNikoKeyIndex(keyCode: Int): Int? = when (keyCode) {
         android.view.KeyEvent.KEYCODE_0 -> 0
         android.view.KeyEvent.KEYCODE_1 -> 1
@@ -96,12 +319,6 @@ object NikoKeyboardLayout {
         else -> null
     }
 
-    /**
-     * 指定された文字文字列が「直接入力コミット対象（英数字・記号・スペース）」かどうかを判定します。
-     *
-     * @param charText 判定対象の文字文字列
-     * @return 直接コミット対象であれば true、それ以外は false
-     */
     fun isDirectCommit(charText: String): Boolean {
         if (charText == " ") return true
         val c = charText.firstOrNull() ?: return false
@@ -110,24 +327,12 @@ object NikoKeyboardLayout {
                 (c in "、。・？！")
     }
 
-    /**
-     * 入力された文字の濁音・半濁音・小文字へのトグル変換を行います。
-     * 変換定義が存在しない場合は元の文字をそのまま返します。
-     *
-     * @param input 変換対象の文字
-     * @return トグル変換後の文字
-     */
     fun toggleChar(input: String): String = TOGGLE_MAP[input] ?: input
 
-    /**
-     * かな/英数モード用のニコタッチ12キーレイアウト仕様（1打目 / メイン画面）を構築して返します。
-     * 未入力時 (`hasInput = false`) は「区切」キーの位置に絵文字パレット呼び出しキー (`😊`) を配置します。
-     * ひらがなモード時は STAR キーにサブテキストで 2段表示用 (`subText = "゛゜"`, `subText2 = "大⇔小"`) を設定します。
-     *
-     * @param hasInput テキストが入力中（未確定文字列あり）かどうか
-     * @param isHiragana ひらがなモードかどうか
-     * @return キーレイアウトの仕様（行ごとの KeySpec リスト）
-     */
+    // ---------------------------------------------------------------------------------------------
+    // Region: Layout Specifications (1st Stage, 2nd Stage, Numeric)
+    // ---------------------------------------------------------------------------------------------
+
     fun getLayoutSpec(hasInput: Boolean = true, isHiragana: Boolean = true): List<List<KeySpec>> {
         val chunkOrEmoji = if (hasInput) {
             KeySpec("区切", KeyType.CHUNK_FIX)
@@ -176,15 +381,6 @@ object NikoKeyboardLayout {
         )
     }
 
-    /**
-     * 1打目キー選択後の2打目入力待ち状態（セカンドステージ）のキーレイアウト仕様を構築して返します。
-     * 選択された行 (`rowKey`) に応じたガイド文字が各キーに割り当てられます。
-     * ひらがなモード時は STAR キーにサブテキストで 2段表示用 (`subText = "゛゜"`, `subText2 = "大⇔小"`) を設定します。
-     *
-     * @param rowKey 選択された1打目の行キーインデックス (0〜9)
-     * @param isHiragana ひらがなモードかどうか
-     * @return セカンドステージキーレイアウトの仕様（行ごとの KeySpec リスト）
-     */
     fun getSecondStageLayoutSpec(rowKey: Int, isHiragana: Boolean = true): List<List<KeySpec>> {
         val guideChars = getRowGuideChars(rowKey) ?: listOf("", "", "", "", "", "", "", "", "", "")
         val starKey = if (isHiragana) {
@@ -229,13 +425,6 @@ object NikoKeyboardLayout {
         )
     }
 
-    /**
-     * 数字専用モード用のニコタッチ12キーレイアウト仕様を構築して返します。
-     * 未入力時 (`hasInput = false`) は「区切」キーの位置に絵文字パレット呼び出しキー (`😊`) を配置します。
-     *
-     * @param hasInput テキストが入力中（未確定文字列あり）かどうか
-     * @return 数字専用キーレイアウトの仕様（行ごとの KeySpec リスト）
-     */
     fun getNumericLayoutSpec(hasInput: Boolean = true): List<List<KeySpec>> {
         val chunkOrEmoji = if (hasInput) {
             KeySpec("区切", KeyType.CHUNK_FIX)

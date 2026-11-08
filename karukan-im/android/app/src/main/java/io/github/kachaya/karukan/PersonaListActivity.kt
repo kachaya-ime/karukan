@@ -28,6 +28,10 @@ import androidx.recyclerview.widget.RecyclerView
  */
 class PersonaListActivity : AppCompatActivity() {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Activity Lifecycle & Views
+    // ---------------------------------------------------------------------------------------------
+
     private lateinit var adapter: PersonaAdapter
     private lateinit var btnAddPersona: Button
     private lateinit var tvPersonaCount: TextView
@@ -86,6 +90,10 @@ class PersonaListActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Preference Storage & Data Sync
+    // ---------------------------------------------------------------------------------------------
+
     private fun loadData() {
         val items = getPersonaItemsFromPrefs()
         adapter.submitList(items)
@@ -127,6 +135,10 @@ class PersonaListActivity : AppCompatActivity() {
         savePersonaItemsToPrefs(updatedItems)
         loadData()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Dialog Handlers (Add, Edit, Delete)
+    // ---------------------------------------------------------------------------------------------
 
     private fun showAddPersonaDialog() {
         val input = EditText(this).apply {
@@ -196,6 +208,10 @@ class PersonaListActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: RecyclerView Adapter & ViewHolder
+    // ---------------------------------------------------------------------------------------------
 
     private class PersonaAdapter(
         private val onItemClick: (PersonaItem) -> Unit,

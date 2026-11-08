@@ -28,6 +28,10 @@ import com.google.android.material.switchmaterial.SwitchMaterial
  */
 class PresetDictActivity : AppCompatActivity() {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Activity Lifecycle & Views
+    // ---------------------------------------------------------------------------------------------
+
     private lateinit var engine: KarukanEngine
     private lateinit var adapter: PresetDictAdapter
 
@@ -110,6 +114,10 @@ class PresetDictActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: File Import & Data Loading
+    // ---------------------------------------------------------------------------------------------
+
     private fun loadData() {
         val items = engine.getPresetDictItems()
         adapter.submitList(items)
@@ -142,6 +150,10 @@ class PresetDictActivity : AppCompatActivity() {
         })
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Progress Execution & Dialog Handlers
+    // ---------------------------------------------------------------------------------------------
+
     private fun showDeleteConfirmDialog(item: PresetDictItem) {
         AlertDialog.Builder(this)
             .setTitle("辞書ファイルの削除")
@@ -163,6 +175,10 @@ class PresetDictActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: RecyclerView Adapter & ViewHolder
+    // ---------------------------------------------------------------------------------------------
 
     private class PresetDictAdapter(
         private val onItemClick: (PresetDictItem) -> Unit,

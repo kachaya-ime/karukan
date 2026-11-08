@@ -14,6 +14,10 @@ class CandidateFlowLayout @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : ViewGroup(context, attrs, defStyleAttr) {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Properties & Measurements
+    // ---------------------------------------------------------------------------------------------
+
     private val density = context.resources.displayMetrics.density
     var horizontalGapPx: Int = (6 * density).toInt()
     var verticalGapPx: Int = (6 * density).toInt()
@@ -55,6 +59,10 @@ class CandidateFlowLayout @JvmOverloads constructor(
         val measuredHeight = resolveSize(totalHeight, heightMeasureSpec)
         setMeasuredDimension(measuredWidth, maxOf(measuredHeight, paddingTop + paddingBottom))
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Child Layout
+    // ---------------------------------------------------------------------------------------------
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         val widthSize = r - l - paddingLeft - paddingRight

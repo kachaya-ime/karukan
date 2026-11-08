@@ -16,6 +16,10 @@ use karukan_engine::{
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+// -------------------------------------------------------------------------------------------------
+// Region: JNI Progress Reporting
+// -------------------------------------------------------------------------------------------------
+
 fn report_progress(env: &mut JNIEnv, listener: &JObject, message: &str, percent: i32) {
     if listener.is_null() {
         return;
@@ -30,6 +34,10 @@ fn report_progress(env: &mut JNIEnv, listener: &JObject, message: &str, percent:
         let _ = env.delete_local_ref(JObject::from(msg_jstring));
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Native Initialization & Dict Loading
+// -------------------------------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeInit<'a>(
@@ -176,6 +184,10 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadUs
 
     1
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Native Engine Config & Conversion
+// -------------------------------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeCancelQuery<'a>(
@@ -347,6 +359,10 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         .unwrap_or_else(|_| env.new_string("").unwrap())
 }
 
+// -------------------------------------------------------------------------------------------------
+// Region: Native Learning Operations
+// -------------------------------------------------------------------------------------------------
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRecordLearning<'a>(
     mut env: JNIEnv<'a>,
@@ -434,6 +450,10 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeClearL
 ) {
     clear_learning();
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Native Romaji Conversion & ProcessKey
+// -------------------------------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomajiToHiragana<'a>(

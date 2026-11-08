@@ -9,6 +9,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Karukan">
 
+        <!-- メイン設定画面アクティビティ (ランチャーアイコン) -->
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
@@ -21,6 +22,7 @@
             </intent-filter>
         </activity>
 
+        <!-- 各種管理画面アクティビティ -->
         <activity
             android:name=".LearningListActivity"
             android:exported="false"
@@ -46,11 +48,17 @@
             android:theme="@style/Theme.Karukan" />
 
         <activity
+            android:name=".KeyShortcutListActivity"
+            android:exported="false"
+            android:label="キーショートカットの設定"
+            android:theme="@style/Theme.Karukan" />
+
+        <activity
             android:name=".UserDictContentActivity"
             android:exported="false"
             android:theme="@style/Theme.Karukan" />
 
-        <!-- Karukan IME Service -->
+        <!-- Karukan IME 入力方式サービス (InputMethodService) -->
         <service
             android:name=".KarukanInputMethodService"
             android:exported="true"

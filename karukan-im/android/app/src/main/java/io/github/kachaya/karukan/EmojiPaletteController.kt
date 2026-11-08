@@ -28,6 +28,11 @@ class EmojiPaletteController(
     private val onEmojiSelected: (String) -> Unit,
     private val onCloseRequested: () -> Unit
 ) {
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Properties & State
+    // ---------------------------------------------------------------------------------------------
+
     lateinit var container: LinearLayout
         private set
 
@@ -44,10 +49,29 @@ class EmojiPaletteController(
     private val categoryButtons: MutableList<Button> = mutableListOf()
     private var isSymbolMode: Boolean = false
 
-    // 全カテゴリページの RecyclerView で共有する ViewHolder プール
     private val sharedRecycledViewPool = RecyclerView.RecycledViewPool().apply {
         setMaxRecycledViews(0, 40)
     }
+
+    companion object {
+        private fun calculateSingleRowHeight(context: Context): Int {
+            val tv = TextView(context).apply {
+                textSize = 20f
+                gravity = Gravity.CENTER
+                setPadding(0, 10, 0, 10)
+                text = "😊"
+            }
+            tv.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            return tv.measuredHeight
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Layout Construction
+    // ---------------------------------------------------------------------------------------------
 
     fun createView(): LinearLayout {
         val isDark = isDarkThemeSupplier()
@@ -59,13 +83,13 @@ class EmojiPaletteController(
         container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bgColor)
+            visibility = View.GONE
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 keyboardHeightPxSupplier()
             )
         }
 
-        // --- ヘッダー行 (カテゴリタブ + 閉じるボタン) ---
         val headerLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(candidateBgColor)
@@ -103,7 +127,6 @@ class EmojiPaletteController(
         headerLayout.addView(btnClose)
         container.addView(headerLayout)
 
-        // --- 絵文字 ViewPager2 (各ページがカテゴリごとの RecyclerView) ---
         pagerAdapter = EmojiPagerAdapter(sharedRecycledViewPool) { emoji ->
             onEmojiSelected(emoji)
         }
@@ -130,21 +153,9 @@ class EmojiPaletteController(
         return container
     }
 
-    companion object {
-        private fun calculateSingleRowHeight(context: Context): Int {
-            val tv = TextView(context).apply {
-                textSize = 20f
-                gravity = Gravity.CENTER
-                setPadding(0, 10, 0, 10)
-                text = "😊"
-            }
-            tv.measure(
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            )
-            return tv.measuredHeight
-        }
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Region: Visibility & Toggle Controls
+    // ---------------------------------------------------------------------------------------------
 
     fun show(targetKeyboardContainer: View, isHardKeyboard: Boolean = false, symbolMode: Boolean = false) {
         if (this.isSymbolMode != symbolMode) {
@@ -156,7 +167,6 @@ class EmojiPaletteController(
         isVisible = true
 
         if (isHardKeyboard) {
-            // 物理キーボード接続時: 1行分アイテムの計測高さ * 4行分 + ヘッダー (WRAP_CONTENT)
             val singleRowHeight = calculateSingleRowHeight(context)
             val fourRowsGridHeight = singleRowHeight * 4
 
@@ -173,7 +183,6 @@ class EmojiPaletteController(
                 container.layoutParams = containerLp
             }
         } else {
-            // 画面キーボード時: 画面キーボードの高さに追従
             val vpLp = viewPager.layoutParams as? LinearLayout.LayoutParams
             if (vpLp != null) {
                 vpLp.height = 0
@@ -217,6 +226,10 @@ class EmojiPaletteController(
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Content Rendering & Tab Highlights
+    // ---------------------------------------------------------------------------------------------
+
     fun renderContent() {
         if (!::emojiCategoryLayout.isInitialized || !::viewPager.isInitialized) return
 
@@ -245,7 +258,6 @@ class EmojiPaletteController(
         val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
         val activeTextColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
 
-        // 1. カテゴリタブの構築 (全消去を避け作成済みでない場合のみ追加)
         if (categoryButtons.size != emojiCategoriesList.size) {
             emojiCategoryLayout.removeAllViews()
             categoryButtons.clear()
@@ -273,7 +285,6 @@ class EmojiPaletteController(
             updateTabHighlightAndScroll()
         }
 
-        // 2. ViewPager2 へのデータ設定
         pagerAdapter.submitCategories(emojiCategoriesList)
         if (selectedCategoryIndex in emojiCategoriesList.indices) {
             viewPager.setCurrentItem(selectedCategoryIndex, false)
@@ -299,9 +310,10 @@ class EmojiPaletteController(
         }
     }
 
-    /**
-     * 各カテゴリページ (RecyclerView) を ViewPager2 内で表示する PagerAdapter
-     */
+    // ---------------------------------------------------------------------------------------------
+    // Region: ViewPager & RecyclerView Adapters
+    // ---------------------------------------------------------------------------------------------
+
     private class EmojiPagerAdapter(
         private val sharedViewPool: RecyclerView.RecycledViewPool,
         private val onEmojiSelected: (String) -> Unit
@@ -358,9 +370,6 @@ class EmojiPaletteController(
         }
     }
 
-    /**
-     * 各カテゴリ内の絵文字 8列グリッド Adapter
-     */
     private class EmojiGridAdapter(
         private var emojis: List<String> = emptyList(),
         private val onClick: (String) -> Unit

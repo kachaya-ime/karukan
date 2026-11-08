@@ -2,14 +2,17 @@ package io.github.kachaya.karukan
 
 import android.content.Context
 import android.graphics.Paint
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.Executors
-import java.util.zip.GZIPInputStream
+
+// -------------------------------------------------------------------------------------------------
+// Region: Data Structures & Callbacks
+// -------------------------------------------------------------------------------------------------
 
 data class LearningItem(
     val reading: String,
@@ -60,15 +63,20 @@ class KarukanEngine(private val context: Context) {
     private val learningLock = Any()
 
     private var currentLoadedModelName: String? = null
+    private val userDictFileManager = UserDictFileManager(context)
 
     companion object {
         private const val TAG = "KarukanEngine"
         private const val DEFAULT_MODEL_NAME = "jinen-v2-xsmall-Q5_K_M.gguf"
         private const val TOKENIZER_NAME = "tokenizer.json"
-        private const val SYSTEM_DICT_TGZ_NAME = "dict.tgz"
         private const val SYSTEM_DICT_FILE_NAME = "dict.bin"
-        private const val USER_DICTS_DIR = "user_dicts"
         private const val LEARNING_HISTORY_FILE = "learning_history.txt"
+
+        private val globalModelLock = Any()
+
+        // -----------------------------------------------------------------------------------------
+        // Region: Asset & Dictionary File Preparation Delegation
+        // -----------------------------------------------------------------------------------------
 
         @JvmStatic
         @JvmOverloads
@@ -76,46 +84,15 @@ class KarukanEngine(private val context: Context) {
             context: Context,
             forceOverwrite: Boolean = false,
             onProgress: ((progressText: String, percent: Int) -> Unit)? = null
-        ): String? {
-            val targetFile = File(context.filesDir, SYSTEM_DICT_FILE_NAME)
-            if (!forceOverwrite && targetFile.exists() && targetFile.length() > 0) {
-                return targetFile.absolutePath
-            }
-
-            return try {
-                val assetList = context.assets.list("") ?: emptyArray()
-                if (assetList.contains(SYSTEM_DICT_TGZ_NAME)) {
-                    extractTarGzAsset(context, SYSTEM_DICT_TGZ_NAME, context.filesDir, onProgress)
-                } else if (assetList.contains(SYSTEM_DICT_FILE_NAME)) {
-                    prepareAssetFile(context, SYSTEM_DICT_FILE_NAME)
-                }
-                if (targetFile.exists() && targetFile.length() > 0) targetFile.absolutePath else null
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to prepare system dict asset", e)
-                null
-            }
-        }
+        ): String? = EngineAssetPreparer.prepareSystemDictAsset(context, forceOverwrite, onProgress)
 
         @JvmStatic
-        fun prepareAssetFile(context: Context, fileName: String): String? {
-            val targetFile = File(context.filesDir, fileName)
-            if (targetFile.exists() && targetFile.length() > 0) {
-                return targetFile.absolutePath
-            }
-
-            return try {
-                context.assets.open(fileName).use { input ->
-                    FileOutputStream(targetFile).use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                targetFile.absolutePath
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to prepare asset file: $fileName", e)
-                if (targetFile.exists()) targetFile.delete()
-                null
-            }
-        }
+        @JvmOverloads
+        fun prepareAssetFile(
+            context: Context,
+            fileName: String,
+            onProgress: ((progressText: String, percent: Int) -> Unit)? = null
+        ): String? = EngineAssetPreparer.prepareAssetFile(context, fileName, onProgress)
 
         @JvmStatic
         @JvmOverloads
@@ -123,127 +100,7 @@ class KarukanEngine(private val context: Context) {
             context: Context,
             forceOverwrite: Boolean = false,
             onProgress: ((progressText: String, percent: Int) -> Unit)? = null
-        ) {
-            val userDictDir = File(context.filesDir, USER_DICTS_DIR)
-            if (!userDictDir.exists()) {
-                userDictDir.mkdirs()
-            }
-
-            try {
-                val list = context.assets.list(USER_DICTS_DIR) ?: emptyArray()
-                for (fileName in list) {
-                    val assetPath = "$USER_DICTS_DIR/$fileName"
-                    val isTgz = fileName.endsWith(".tgz") || fileName.endsWith(".tar.gz")
-                    val isGzip = fileName.endsWith(".gz") && !isTgz
-
-                    if (isTgz) {
-                        val targetFileName = "dict.bin"
-                        val targetFile = File(userDictDir, targetFileName)
-                        val disabledFile = File(userDictDir, "$targetFileName.disabled")
-
-                        if (!forceOverwrite && ((targetFile.exists() && targetFile.length() > 0) || disabledFile.exists())) {
-                            continue
-                        }
-
-                        try {
-                            extractTarGzAsset(context, assetPath, userDictDir, onProgress)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to extract tgz user dict asset $fileName", e)
-                        }
-                    } else {
-                        val targetFileName = if (isGzip) fileName.removeSuffix(".gz") else fileName
-                        val targetFile = File(userDictDir, targetFileName)
-                        val disabledFile = File(userDictDir, "$targetFileName.disabled")
-
-                        if (!forceOverwrite && ((targetFile.exists() && targetFile.length() > 0) || disabledFile.exists())) {
-                            continue
-                        }
-
-                        try {
-                            context.assets.open(assetPath).use { rawInput ->
-                                val input = if (isGzip) GZIPInputStream(rawInput) else rawInput
-                                FileOutputStream(targetFile).use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to copy user dict asset $fileName", e)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "No user_dicts in assets or error listing user dict assets: ${e.message}")
-            }
-        }
-
-        @JvmStatic
-        private fun extractTarGzAsset(
-            context: Context,
-            assetPath: String,
-            targetDir: File,
-            onProgress: ((progressText: String, percent: Int) -> Unit)? = null
-        ) {
-            context.assets.open(assetPath).use { rawIn ->
-                GZIPInputStream(rawIn).use { gzipIn ->
-                    TarArchiveInputStream(gzipIn).use { tarIn ->
-                        var entry = tarIn.nextEntry
-                        while (entry != null) {
-                            if (!entry.isDirectory) {
-                                val fileName = File(entry.name).name
-                                if (fileName == "dict.bin") {
-                                    val outputFile = File(targetDir, fileName)
-                                    val tempFile = File(targetDir, "$fileName.tmp")
-                                    try {
-                                        val totalSize = entry.size
-                                        FileOutputStream(tempFile).use { output ->
-                                            copyStreamWithProgress(tarIn, output, totalSize, onProgress)
-                                        }
-                                        if (outputFile.exists()) outputFile.delete()
-                                        tempFile.renameTo(outputFile)
-                                    } catch (e: Exception) {
-                                        if (tempFile.exists()) tempFile.delete()
-                                        throw e
-                                    }
-                                }
-                            }
-                            entry = tarIn.nextEntry
-                        }
-                    }
-                }
-            }
-        }
-
-        private fun copyStreamWithProgress(
-            input: InputStream,
-            output: FileOutputStream,
-            totalBytes: Long,
-            onProgress: ((progressText: String, percent: Int) -> Unit)? = null
-        ) {
-            val buffer = ByteArray(65536)
-            var written = 0L
-            var lastReportTime = 0L
-
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                output.write(buffer, 0, read)
-                written += read
-
-                val now = System.currentTimeMillis()
-                if (now - lastReportTime > 100 || (totalBytes > 0 && written == totalBytes)) {
-                    lastReportTime = now
-                    if (totalBytes > 0) {
-                        val percent = ((written * 100) / totalBytes).toInt().coerceIn(0, 95)
-                        val text = "展開中: ${formatFileSize(written)} / ${formatFileSize(totalBytes)} (${percent}%)"
-                        onProgress?.invoke(text, percent)
-                    }
-                }
-            }
-        }
-
-        private fun formatFileSize(size: Long): String {
-            return DictUtils.formatFileSize(size)
-        }
+        ) = EngineAssetPreparer.prepareUserDictAssets(context, forceOverwrite, onProgress)
 
         private var isLibraryLoaded = false
 
@@ -264,10 +121,40 @@ class KarukanEngine(private val context: Context) {
         fun calculateOptimalNThreads(): Int {
             val processors = Runtime.getRuntime().availableProcessors()
             return when {
-                processors >= 8 -> 4 // big.LITTLE構成の高性能コア群を想定
+                processors >= 8 -> 4
                 processors >= 4 -> 3
                 else -> maxOf(1, processors - 1)
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Model Switching & Progress
+    // ---------------------------------------------------------------------------------------------
+
+    fun interface OnEngineLoadProgressListener {
+        fun onProgress(message: String, percent: Int)
+    }
+
+    @Volatile
+    var loadProgressListener: OnEngineLoadProgressListener? = null
+    @Volatile
+    var currentLoadStatus: String = ""
+        private set
+    @Volatile
+    var currentLoadPercent: Int = 100
+        private set
+    @Volatile
+    var isPreparing: Boolean = false
+        private set
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun reportLoadProgress(msg: String, percent: Int) {
+        currentLoadStatus = msg
+        currentLoadPercent = percent
+        mainHandler.post {
+            loadProgressListener?.onProgress(msg, percent)
         }
     }
 
@@ -276,38 +163,82 @@ class KarukanEngine(private val context: Context) {
         switchModel(initialModel)
     }
 
-    fun switchModel(modelName: String) {
+    @JvmOverloads
+    fun switchModel(modelName: String, onProgress: ((message: String, percent: Int) -> Unit)? = null) {
         val targetModelName = modelName.ifEmpty { DEFAULT_MODEL_NAME }
-        if (currentLoadedModelName == targetModelName && isLoaded) return
+        if (currentLoadedModelName == targetModelName && isLoaded) {
+            reportLoadProgress("準備完了", 100)
+            onProgress?.invoke("準備完了", 100)
+            return
+        }
 
+        isPreparing = true
         executor.execute {
-            try {
-                if (!isLibraryLoaded) {
-                    Log.e(TAG, "Cannot initialize native model: libkarukan_android.so is not loaded")
-                    return@execute
+            synchronized(globalModelLock) {
+                fun report(msg: String, percent: Int) {
+                    reportLoadProgress(msg, percent)
+                    onProgress?.invoke(msg, percent)
                 }
 
-                prepareAssetFile(context, TOKENIZER_NAME)
-                val modelPath = prepareAssetFile(context, targetModelName)
-
-                if (modelPath != null) {
-                    val success = nativeInit(modelPath)
-                    isLoaded = success
-                    if (isLoaded) {
-                        currentLoadedModelName = targetModelName
-                        loadSystemDict()
-                        loadUserDicts()
-                    } else {
-                        Log.e(TAG, "KarukanEngine nativeInit failed for $targetModelName")
+                try {
+                    if (!isLibraryLoaded) {
+                        Log.e(TAG, "Cannot initialize native model: libkarukan_android.so is not loaded")
+                        isPreparing = false
+                        return@execute
                     }
-                } else {
-                    Log.e(TAG, "Model file preparation failed ($targetModelName)")
+
+                    report("Tokenizer 準備中...", 5)
+                    prepareAssetFile(context, TOKENIZER_NAME) { text, subPercent ->
+                        val overall = 5 + (subPercent * 5 / 100)
+                        report(text, overall)
+                    }
+
+                    report("モデルファイル準備中...", 10)
+                    val modelPath = prepareAssetFile(context, targetModelName) { text, subPercent ->
+                        val overall = 10 + (subPercent * 60 / 100)
+                        report(text, overall)
+                    }
+
+                    if (modelPath != null) {
+                        report("モデル初期化中...", 70)
+                        val success = nativeInit(modelPath)
+                        isLoaded = success
+                        if (isLoaded) {
+                            currentLoadedModelName = targetModelName
+                            report("システム辞書ロード中...", 80)
+                            loadSystemDict { progressText, subPercent ->
+                                val overall = 80 + (subPercent * 10 / 100)
+                                report(progressText, overall)
+                            }
+                            report("ユーザー辞書ロード中...", 90)
+                            loadUserDicts { progressText, subPercent ->
+                                val overall = 90 + (subPercent * 10 / 100)
+                                report(progressText, overall)
+                            }
+                            isPreparing = false
+                            report("準備完了", 100)
+                        } else {
+                            Log.e(TAG, "KarukanEngine nativeInit failed for $targetModelName")
+                            isPreparing = false
+                            report("モデル初期化失敗", 100)
+                        }
+                    } else {
+                        Log.e(TAG, "Model file preparation failed ($targetModelName)")
+                        isPreparing = false
+                        report("モデルファイル準備失敗", 100)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error switching model to $targetModelName", e)
+                    isPreparing = false
+                    report("モデル設定エラー", 100)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error switching model to $targetModelName", e)
             }
         }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: System & User Dictionary Management Delegation
+    // ---------------------------------------------------------------------------------------------
 
     fun getSystemDictFile(): File {
         return File(context.filesDir, SYSTEM_DICT_FILE_NAME)
@@ -335,11 +266,7 @@ class KarukanEngine(private val context: Context) {
     }
 
     fun getUserDictDir(): File {
-        val dir = File(context.filesDir, USER_DICTS_DIR)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-        return dir
+        return userDictFileManager.getUserDictDir()
     }
 
     fun getLearningHistoryFile(): File {
@@ -359,7 +286,6 @@ class KarukanEngine(private val context: Context) {
             }
             nativeLoadUserDicts(dir.absolutePath, nativeListener)
 
-            // メモリ上の学習データキャッシュを復元
             val learningFile = getLearningHistoryFile()
             if (learningFile.exists()) {
                 nativeLoadLearning(learningFile.absolutePath)
@@ -375,32 +301,8 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-
-    fun getEntriesFromDictFile(file: File): List<DictEntryItem> {
-        if (!file.exists()) return emptyList()
-
-        val list = mutableListOf<DictEntryItem>()
-        try {
-            file.forEachLine(Charsets.UTF_8) { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                    val parts = trimmed.split("\t")
-                    if (parts.size >= 2) {
-                        val reading = parts[0].trim()
-                        val surface = parts[1].trim()
-                        val pos = if (parts.size >= 3) parts[2].trim() else ""
-                        val comment = if (parts.size >= 4) parts[3].trim() else ""
-                        if (reading.isNotEmpty() && surface.isNotEmpty()) {
-                            list.add(DictEntryItem(reading, surface, pos, comment))
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error reading dict file: ${file.name}", e)
-        }
-        return list
-    }
+    fun getEntriesFromDictFile(file: File): List<DictEntryItem> =
+        userDictFileManager.getEntriesFromDictFile(file)
 
     fun addEntryToDictFile(
         file: File,
@@ -408,54 +310,14 @@ class KarukanEngine(private val context: Context) {
         surface: String,
         pos: String = "",
         comment: String = ""
-    ): Boolean {
-        val r = reading.trim()
-        val s = surface.trim()
-        if (r.isEmpty() || s.isEmpty()) return false
-
-        return try {
-            val line = if (pos.isNotEmpty() || comment.isNotEmpty()) {
-                "$r\t$s\t$pos\t$comment\n"
-            } else {
-                "$r\t$s\n"
-            }
-            file.appendText(line, Charsets.UTF_8)
-            loadUserDicts()
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error adding entry to dict file: ${file.name}", e)
-            false
-        }
+    ): Boolean = userDictFileManager.addEntryToDictFile(file, reading, surface, pos, comment) {
+        loadUserDicts()
     }
 
-    fun removeEntryFromDictFile(file: File, reading: String, surface: String): Boolean {
-        val r = reading.trim()
-        val s = surface.trim()
-        if (!file.exists()) return false
-
-        return try {
-            val remainingLines = file.readLines(Charsets.UTF_8).filter { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-                    true
-                } else {
-                    val parts = trimmed.split("\t")
-                    if (parts.size >= 2) {
-                        !(parts[0].trim() == r && parts[1].trim() == s)
-                    } else {
-                        true
-                    }
-                }
-            }
-            val content = remainingLines.joinToString("\n") + if (remainingLines.isNotEmpty()) "\n" else ""
-            file.writeText(content, Charsets.UTF_8)
+    fun removeEntryFromDictFile(file: File, reading: String, surface: String): Boolean =
+        userDictFileManager.removeEntryFromDictFile(file, reading, surface) {
             loadUserDicts()
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error removing entry from dict file: ${file.name}", e)
-            false
         }
-    }
 
     fun updateEntryInDictFile(
         file: File,
@@ -463,114 +325,31 @@ class KarukanEngine(private val context: Context) {
         oldSurface: String,
         newReading: String,
         newSurface: String
-    ): Boolean {
-        val oldR = oldReading.trim()
-        val oldS = oldSurface.trim()
-        val newR = newReading.trim()
-        val newS = newSurface.trim()
-        if (!file.exists() || newR.isEmpty() || newS.isEmpty()) return false
-
-        return try {
-            val newLines = file.readLines(Charsets.UTF_8).map { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-                    line
-                } else {
-                    val parts = trimmed.split("\t")
-                    if (parts.size >= 2 && parts[0].trim() == oldR && parts[1].trim() == oldS) {
-                        val pos = if (parts.size >= 3) parts[2].trim() else ""
-                        val comment = if (parts.size >= 4) parts[3].trim() else ""
-                        if (pos.isNotEmpty() || comment.isNotEmpty()) {
-                            "$newR\t$newS\t$pos\t$comment"
-                        } else {
-                            "$newR\t$newS"
-                        }
-                    } else {
-                        line
-                    }
-                }
-            }
-            val content = newLines.joinToString("\n") + if (newLines.isNotEmpty()) "\n" else ""
-            file.writeText(content, Charsets.UTF_8)
-            loadUserDicts()
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating entry in dict file: ${file.name}", e)
-            false
-        }
+    ): Boolean = userDictFileManager.updateEntryInDictFile(file, oldReading, oldSurface, newReading, newSurface) {
+        loadUserDicts()
     }
 
-
-    fun importDictFile(inputStream: InputStream, fileName: String, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean {
-        return try {
-            val targetFile = File(getUserDictDir(), fileName)
-            targetFile.outputStream().use { output ->
-                inputStream.copyTo(output)
-            }
+    fun importDictFile(inputStream: InputStream, fileName: String, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean =
+        userDictFileManager.importDictFile(inputStream, fileName) { _, _ ->
             loadUserDicts(onProgress)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error importing dict file: $fileName", e)
-            false
-        }
-    }
-
-    fun getPresetDictItems(): List<PresetDictItem> {
-        val dir = getUserDictDir()
-        val files = dir.listFiles() ?: return emptyList()
-        val list = mutableListOf<PresetDictItem>()
-
-        for (file in files) {
-            if (!file.isFile) continue
-            val fileName = file.name
-            if (fileName == LEARNING_HISTORY_FILE || fileName == SYSTEM_DICT_FILE_NAME || fileName == "$SYSTEM_DICT_FILE_NAME.disabled") {
-                continue
-            }
-
-            val isEnabled = !fileName.endsWith(".disabled")
-            val displayName = if (isEnabled) fileName else fileName.removeSuffix(".disabled")
-            list.add(
-                PresetDictItem(
-                    file = file,
-                    name = displayName,
-                    isEnabled = isEnabled,
-                    sizeBytes = file.length()
-                )
-            )
         }
 
-        return list.sortedBy { it.name.lowercase() }
-    }
+    fun getPresetDictItems(): List<PresetDictItem> =
+        userDictFileManager.getPresetDictItems()
 
-    fun togglePresetDict(item: PresetDictItem, enable: Boolean, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean {
-        return try {
-            if (enable && !item.isEnabled) {
-                val target = File(item.file.parentFile, item.name)
-                item.file.renameTo(target)
-            } else if (!enable && item.isEnabled) {
-                val target = File(item.file.parentFile, "${item.name}.disabled")
-                item.file.renameTo(target)
-            }
+    fun togglePresetDict(item: PresetDictItem, enable: Boolean, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean =
+        userDictFileManager.togglePresetDict(item, enable) { progressText, percent ->
             loadUserDicts(onProgress)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error toggling preset dict: ${item.name}", e)
-            false
         }
-    }
 
-    fun deletePresetDict(item: PresetDictItem, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean {
-        return try {
-            if (item.file.exists()) {
-                item.file.delete()
-            }
+    fun deletePresetDict(item: PresetDictItem, onProgress: ((progressText: String, percent: Int) -> Unit)? = null): Boolean =
+        userDictFileManager.deletePresetDict(item) { progressText, percent ->
             loadUserDicts(onProgress)
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error deleting preset dict: ${item.name}", e)
-            false
         }
-    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Conversion & Processing APIs
+    // ---------------------------------------------------------------------------------------------
 
     fun hiraganaToKatakana(hiragana: String): String {
         if (hiragana.isEmpty()) return hiragana
@@ -608,13 +387,10 @@ class KarukanEngine(private val context: Context) {
     fun convert(query: String, maxCandidates: Int = 9, context: String = "", queryId: Long = 0): List<String> {
         if (query.isBlank() || !isLibraryLoaded || !isLoaded) return listOf(query)
 
-        Log.d(TAG, "convert: query='$query', context='$context', queryId=$queryId")
         return try {
             val joinedCandidates = nativeConvert(query, maxCandidates, context, queryId)
             if (joinedCandidates.isNotEmpty()) {
-                val list = joinedCandidates.split("\t")
-                Log.d(TAG, "convert result for '$query' (context='$context'): count=${list.size}, top='${list.firstOrNull()}'")
-                list
+                joinedCandidates.split("\t")
             } else {
                 listOf(query)
             }
@@ -623,6 +399,34 @@ class KarukanEngine(private val context: Context) {
             listOf(query)
         }
     }
+
+    fun processKey(keysym: Int, modifiers: Int, isRelease: Boolean = false): ProcessKeyResult {
+        if (!isLibraryLoaded) return ProcessKeyResult(consumed = false)
+        return try {
+            nativeProcessKey(keysym, modifiers, isRelease) ?: ProcessKeyResult(consumed = false)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error in processKey: keysym=$keysym, modifiers=$modifiers", e)
+            ProcessKeyResult(consumed = false)
+        }
+    }
+
+    fun processChar(char: Char, modifiers: Int = 0): ProcessKeyResult {
+        val keysym = KeyEventMapper.charToNativeKeysym(char)
+        return processKey(keysym, modifiers)
+    }
+
+    fun cancelQuery(queryId: Long) {
+        if (!isLibraryLoaded || queryId <= 0) return
+        try {
+            nativeCancelQuery(queryId)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error cancelling query: $queryId", e)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Learning History Persistence
+    // ---------------------------------------------------------------------------------------------
 
     fun getLearningEntries(): List<LearningItem> {
         synchronized(learningLock) {
@@ -688,7 +492,6 @@ class KarukanEngine(private val context: Context) {
         val s = surface.trim()
         if (r.isEmpty() || s.isEmpty()) return
 
-        // 1. ネイティブ側のメモリキャッシュ更新 (自動カウントアップ & タイムスタンプ更新)
         if (isLibraryLoaded && isLoaded) {
             try {
                 nativeRecordLearning(r, s)
@@ -697,7 +500,6 @@ class KarukanEngine(private val context: Context) {
             }
         }
 
-        // 2. Kotlin側のメモリキャッシュ更新
         synchronized(learningLock) {
             if (learningCache == null) {
                 learningCache = loadLearningEntriesFromFile().toMutableList()
@@ -712,14 +514,12 @@ class KarukanEngine(private val context: Context) {
             }
         }
 
-        // 3. エンジンの save 機能で非同期保存 (frequency & last_access が保持される)
         fileIoExecutor.execute {
             if (isLibraryLoaded && isLoaded) {
                 nativeSaveLearning(getLearningHistoryFile().absolutePath)
             }
         }
     }
-
 
     fun clearLearning() {
         if (isLibraryLoaded && isLoaded) {
@@ -746,9 +546,6 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    /**
-     * 学習履歴ファイルをOutputStreamへそのまま出力する (バックアップ)
-     */
     fun backupLearningToStream(outputStream: OutputStream) {
         val sourceFile = getLearningHistoryFile()
         if (sourceFile.exists()) {
@@ -760,9 +557,6 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    /**
-     * 入力ストリームから学習履歴ファイルをそのまま読み込んで内部学習辞書ファイルに書き込み、ロードする (復元)
-     */
     fun restoreLearningFromStream(inputStream: InputStream): Boolean {
         try {
             val destFile = getLearningHistoryFile()
@@ -783,6 +577,10 @@ class KarukanEngine(private val context: Context) {
             return false
         }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Emoji Categories & Utilities
+    // ---------------------------------------------------------------------------------------------
 
     @Volatile
     private var cachedEmojiCategories: Map<String, List<String>>? = null
@@ -818,9 +616,6 @@ class KarukanEngine(private val context: Context) {
 
     fun calculateOptimalNThreads(): Int = Companion.calculateOptimalNThreads()
 
-    /**
-     * KarukanSettings のすべての設定値をエンジンおよびネイティブ各コンポーネントへ一括反映します
-     */
     fun updateEngineConfig(settings: KarukanSettings) {
         if (!isLibraryLoaded) return
         if (settings.modelName.isNotEmpty() && settings.modelName != currentLoadedModelName) {
@@ -849,20 +644,16 @@ class KarukanEngine(private val context: Context) {
                 isLearningEnabled = settings.isLearningEnabled,
                 isDateConversionEnabled = settings.isDateConversionEnabled
             )
-            nativeSetDateConfigJson(settings.dateConfigJson)
+            val dateJson = if (settings.dateConfigJson.isNotEmpty()) settings.dateConfigJson else DateConfigData().toJsonString()
+            nativeSetDateConfigJson(dateJson)
         } catch (e: Throwable) {
             Log.e(TAG, "Error updating engine config", e)
         }
     }
 
-    fun cancelQuery(queryId: Long) {
-        if (!isLibraryLoaded || queryId <= 0) return
-        try {
-            nativeCancelQuery(queryId)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error cancelling query: $queryId", e)
-        }
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Region: External Native Function Declarations
+    // ---------------------------------------------------------------------------------------------
 
     @Suppress("JniMissingFunction")
     private external fun nativeInit(modelPath: String): Boolean
@@ -899,16 +690,6 @@ class KarukanEngine(private val context: Context) {
 
     @Suppress("JniMissingFunction")
     private external fun nativeSetDateConfigJson(json: String)
-
-    fun processKey(keysym: Int, modifiers: Int, isRelease: Boolean = false): ProcessKeyResult {
-        if (!isLibraryLoaded) return ProcessKeyResult(consumed = false)
-        return try {
-            nativeProcessKey(keysym, modifiers, isRelease) ?: ProcessKeyResult(consumed = false)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error in processKey: keysym=$keysym, modifiers=$modifiers", e)
-            ProcessKeyResult(consumed = false)
-        }
-    }
 
     @Suppress("JniMissingFunction")
     private external fun nativeProcessKey(keysym: Int, modifiers: Int, isRelease: Boolean): ProcessKeyResult?

@@ -6,7 +6,11 @@ import android.view.KeyEvent
  * Android の KeyEvent を KeyAction に変換するマッパー。
  */
 object KeyEventMapper {
-    // 物理日本語109キーボード等のスキャンコードマップテーブル
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Scancode & JIS Character Maps
+    // ---------------------------------------------------------------------------------------------
+
     private val scancodeToKeyCodeMap = mapOf(
         148 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU, // 半角/全角
         41 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU,  // 半角/全角 (109 keyboard top-left key)
@@ -17,7 +21,6 @@ object KeyEventMapper {
         89 to KeyEvent.KEYCODE_RO                // ろ / バックスラッシュキー
     )
 
-    // JIS 109 キーボードの正式なベース・シフト文字マップ (US配列と異なる記号・コロン/セミコロン等を完全に一致させる)
     private val jisCharacterMap = mapOf(
         KeyEvent.KEYCODE_1 to Pair('1', '!'),
         KeyEvent.KEYCODE_2 to Pair('2', '"'),
@@ -30,29 +33,27 @@ object KeyEventMapper {
         KeyEvent.KEYCODE_9 to Pair('9', ')'),
         KeyEvent.KEYCODE_0 to Pair('0', '0'),
         KeyEvent.KEYCODE_MINUS to Pair('-', '='),
-        KeyEvent.KEYCODE_EQUALS to Pair('^', '~'), // JIS ^ key
-        KeyEvent.KEYCODE_YEN to Pair('\u00A5', '|'), // ￥ / |
-        KeyEvent.KEYCODE_LEFT_BRACKET to Pair('@', '`'), // @ / `
-        KeyEvent.KEYCODE_RIGHT_BRACKET to Pair('[', '{'), // [ / {
-        KeyEvent.KEYCODE_SEMICOLON to Pair(';', '+'), // ; / +
-        KeyEvent.KEYCODE_APOSTROPHE to Pair(':', '*'), // : / *
-        KeyEvent.KEYCODE_BACKSLASH to Pair(']', '}'), // ] / {
+        KeyEvent.KEYCODE_EQUALS to Pair('^', '~'),
+        KeyEvent.KEYCODE_YEN to Pair('\u00A5', '|'),
+        KeyEvent.KEYCODE_LEFT_BRACKET to Pair('@', '`'),
+        KeyEvent.KEYCODE_RIGHT_BRACKET to Pair('[', '{'),
+        KeyEvent.KEYCODE_SEMICOLON to Pair(';', '+'),
+        KeyEvent.KEYCODE_APOSTROPHE to Pair(':', '*'),
+        KeyEvent.KEYCODE_BACKSLASH to Pair(']', '}'),
         KeyEvent.KEYCODE_COMMA to Pair(',', '<'),
         KeyEvent.KEYCODE_PERIOD to Pair('.', '>'),
         KeyEvent.KEYCODE_SLASH to Pair('/', '?'),
-        KeyEvent.KEYCODE_RO to Pair('\\', '_') // \ / _ (Ro key)
+        KeyEvent.KEYCODE_RO to Pair('\\', '_')
     )
 
-    /**
-     * 与えられた [keyCode] および [event] から対応する [KeyAction] を返します。
-     * マッピングできるアクションがない場合は null を返します。
-     */
+    // ---------------------------------------------------------------------------------------------
+    // Region: KeyEvent to KeyAction Mapper
+    // ---------------------------------------------------------------------------------------------
+
     fun fromKeyEvent(keyCode: Int, event: KeyEvent?, physicalKeyboardLayout: String = "jis109"): KeyAction? {
         if (event == null) return null
 
         val isJis109 = physicalKeyboardLayout == "jis109"
-
-        // 1. スキャンコードマップテーブルによる KeyCode 挿げ替え (JIS 109有効時のみ)
         val scanCode = event.scanCode
         val mappedKeyCode = if (isJis109 && scanCode != 0) {
             scancodeToKeyCodeMap[scanCode] ?: keyCode
@@ -60,14 +61,7 @@ object KeyEventMapper {
             keyCode
         }
 
-        // 1. Ctrl ショートカットの優先判定
         if (event.isCtrlPressed) {
-            if (event.isShiftPressed && mappedKeyCode == KeyEvent.KEYCODE_V) {
-                return KeyAction.ToggleDetailDisplay
-            }
-            if (event.isShiftPressed && mappedKeyCode == KeyEvent.KEYCODE_L) {
-                return KeyAction.CtrlShortcut("l")
-            }
             if (mappedKeyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
                 return KeyAction.DeleteSelectedCandidate
             }
@@ -84,7 +78,6 @@ object KeyEventMapper {
             return getCtrlShortcutChar(event)?.let { KeyAction.CtrlShortcut(it) }
         }
 
-        // 2. 特殊操作キーの判定
         when (mappedKeyCode) {
             KeyEvent.KEYCODE_DEL -> return KeyAction.Backspace
             KeyEvent.KEYCODE_FORWARD_DEL -> return KeyAction.DeleteForward
@@ -99,10 +92,11 @@ object KeyEventMapper {
             KeyEvent.KEYCODE_F10 -> return KeyAction.CommitHankakuAlphanumeric
             KeyEvent.KEYCODE_ESCAPE -> return KeyAction.Escape
             KeyEvent.KEYCODE_TAB -> return KeyAction.Tab(event.isShiftPressed)
-            KeyEvent.KEYCODE_HENKAN -> return KeyAction.SpaceOrConvert
+            KeyEvent.KEYCODE_HENKAN -> return KeyAction.Henkan
             KeyEvent.KEYCODE_MUHENKAN -> return KeyAction.CommitKatakana
-            KeyEvent.KEYCODE_KATAKANA_HIRAGANA, KeyEvent.KEYCODE_KANA -> return KeyAction.KatakanaHiraganaToggle
-            KeyEvent.KEYCODE_ZENKAKU_HANKAKU, KeyEvent.KEYCODE_EISU -> return KeyAction.ToggleLanguageMode
+            KeyEvent.KEYCODE_KATAKANA_HIRAGANA, KeyEvent.KEYCODE_KANA -> return KeyAction.KanaMode
+            KeyEvent.KEYCODE_ZENKAKU_HANKAKU -> return KeyAction.ToggleLanguageMode
+            KeyEvent.KEYCODE_EISU -> return KeyAction.EisuMode
             KeyEvent.KEYCODE_STAR -> return KeyAction.NikoTouchToggle
             KeyEvent.KEYCODE_POUND -> return KeyAction.SpaceOrConvert
             KeyEvent.KEYCODE_DPAD_LEFT -> return KeyAction.MoveLeft(event.isShiftPressed)
@@ -116,7 +110,6 @@ object KeyEventMapper {
             KeyEvent.KEYCODE_SYM -> return KeyAction.ToggleEmojiPalette
         }
 
-        // 3. JIS 109キーボードの文字マッピング補正 (JIS 109有効時のみ適用)
         if (isJis109) {
             val jisPair = jisCharacterMap[mappedKeyCode]
             if (jisPair != null) {
@@ -125,8 +118,6 @@ object KeyEventMapper {
             }
         }
 
-        // 4. 印刷可能文字（通常キータイピング）
-        // Android OS の Physical Keyboard Layout 判定結果 (event.unicodeChar) を最優先にする。
         val unicode = event.unicodeChar
         if (unicode in 32..126) {
             val charStr = unicode.toChar().toString()
@@ -136,9 +127,72 @@ object KeyEventMapper {
         return null
     }
 
-    /**
-     * Ctrl ショートカット用の文字を取得します。
-     */
+    // ---------------------------------------------------------------------------------------------
+    // Region: KeyEvent to Native Keysym/Modifiers
+    // ---------------------------------------------------------------------------------------------
+
+    fun toNativeKeysymAndModifiers(keyCode: Int, event: KeyEvent?, physicalKeyboardLayout: String = "jis109"): Pair<Int, Int>? {
+        if (event == null) return null
+
+        val isJis109 = physicalKeyboardLayout == "jis109"
+        val scanCode = event.scanCode
+        val mappedKeyCode = if (isJis109 && scanCode != 0) {
+            scancodeToKeyCodeMap[scanCode] ?: keyCode
+        } else {
+            keyCode
+        }
+
+        var modifiers = 0
+        if (event.isShiftPressed) modifiers = modifiers or 1
+        if (event.isCtrlPressed) modifiers = modifiers or 4
+        if (event.isAltPressed) modifiers = modifiers or 8
+
+        val keysym = when (mappedKeyCode) {
+            KeyEvent.KEYCODE_DEL -> 0xff08
+            KeyEvent.KEYCODE_FORWARD_DEL -> 0xffff
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> 0xff0d
+            KeyEvent.KEYCODE_ESCAPE -> 0xff1b
+            KeyEvent.KEYCODE_TAB -> if (event.isShiftPressed) 0xfe20 else 0xff09
+            KeyEvent.KEYCODE_SPACE -> 0x0020
+            KeyEvent.KEYCODE_DPAD_LEFT -> 0xff51
+            KeyEvent.KEYCODE_DPAD_UP -> 0xff52
+            KeyEvent.KEYCODE_DPAD_RIGHT -> 0xff53
+            KeyEvent.KEYCODE_DPAD_DOWN -> 0xff54
+            KeyEvent.KEYCODE_MOVE_HOME -> 0xff50
+            KeyEvent.KEYCODE_MOVE_END -> 0xff57
+            KeyEvent.KEYCODE_PAGE_UP -> 0xff55
+            KeyEvent.KEYCODE_PAGE_DOWN -> 0xff56
+            KeyEvent.KEYCODE_HENKAN -> 0xff23
+            KeyEvent.KEYCODE_MUHENKAN -> 0xff22
+            KeyEvent.KEYCODE_KATAKANA_HIRAGANA, KeyEvent.KEYCODE_KANA -> 0xff27
+            KeyEvent.KEYCODE_ZENKAKU_HANKAKU -> 0xff29
+            else -> {
+                if (isJis109) {
+                    val jisPair = jisCharacterMap[mappedKeyCode]
+                    if (jisPair != null) {
+                        val charToInput = if (event.isShiftPressed) jisPair.second else jisPair.first
+                        charToInput.code
+                    } else null
+                } else null
+            }
+        }
+
+        if (keysym != null) {
+            return Pair(keysym, modifiers)
+        }
+
+        val unicode = event.unicodeChar
+        if (unicode in 32..126) {
+            return Pair(unicode, modifiers)
+        }
+
+        return null
+    }
+
+    fun charToNativeKeysym(char: Char): Int {
+        return char.code
+    }
+
     private fun getCtrlShortcutChar(event: KeyEvent): String? {
         val unmod = event.getUnicodeChar(0)
         if (unmod in 32..126) {

@@ -12,6 +12,11 @@ data class PersonaItem(
     val text: String,
     val isSelected: Boolean = false
 ) {
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: JSON Serialization & Parsing
+    // ---------------------------------------------------------------------------------------------
+
     companion object {
         fun fromJsonString(jsonStr: String): List<PersonaItem> {
             val list = mutableListOf<PersonaItem>()

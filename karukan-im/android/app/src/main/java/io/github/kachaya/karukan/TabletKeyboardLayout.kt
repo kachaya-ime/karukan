@@ -1,6 +1,10 @@
 package io.github.kachaya.karukan
 
+/**
+ * タブレット端末向けワイドキーボードレイアウトのテーブル駆動仕様定義クラス
+ */
 object TabletKeyboardLayout {
+
     fun getLayoutSpec(): List<List<KeySpec>> {
         return listOf(
             // 1段目 (Row 0): Esc, 1~0, -, =, BS

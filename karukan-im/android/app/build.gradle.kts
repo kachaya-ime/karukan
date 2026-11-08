@@ -4,12 +4,20 @@ import java.net.HttpURLConnection
 import java.net.URI
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// -------------------------------------------------------------------------------------------------
+// Region: Plugins & Variables
+// -------------------------------------------------------------------------------------------------
+
 val appVersion = "1.2.0"
 val appVersionCode = 10200
 
 plugins {
     alias(libs.plugins.android.application)
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Android Configuration
+// -------------------------------------------------------------------------------------------------
 
 android {
     namespace = "io.github.kachaya.karukan"
@@ -38,7 +46,6 @@ android {
                 keyAlias = project.findProperty("KEY_ALIAS")?.toString() ?: System.getenv("KEY_ALIAS") ?: ""
                 keyPassword = project.findProperty("KEY_PASSWORD")?.toString() ?: System.getenv("KEY_PASSWORD") ?: ""
             } else {
-                // keystore未指定時はdebug署名をフォールバックとして使用（releaseビルド時もテスト可能にするため）
                 initWith(getByName("debug"))
             }
         }
@@ -66,6 +73,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 androidComponents {
@@ -83,6 +94,10 @@ kotlin {
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Helper Network Functions
+// -------------------------------------------------------------------------------------------------
 
 fun downloadFileWithRedirects(urlString: String, targetFile: File) {
     val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
@@ -138,7 +153,10 @@ fun downloadFileWithRedirects(urlString: String, targetFile: File) {
     }
 }
 
-// ビルド前に HuggingFace からモデルおよび tokenizer を自動ダウンロードするタスク
+// -------------------------------------------------------------------------------------------------
+// Region: Gradle PreBuild Tasks (Assets, Dicts, Emoji, Rust)
+// -------------------------------------------------------------------------------------------------
+
 val downloadAssetsTask = tasks.register("downloadAssets") {
     description = "Download GGUF model and tokenizer assets from HuggingFace"
     val assetsDir = file("${projectDir}/src/main/assets")
@@ -174,7 +192,6 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
     }
 }
 
-// ビルド前にローカルのライセンス情報・権利表記ファイルを assets/legal/ へ自動コピーするタスク
 val copyLegalInfoTask = tasks.register<Copy>("copyLegalInfo") {
     description = "Copy legal and license files to assets/legal"
     from(file("${project.rootDir}/legal/THIRD_PARTY_LICENSES"))
@@ -183,7 +200,6 @@ val copyLegalInfoTask = tasks.register<Copy>("copyLegalInfo") {
     into(file("${projectDir}/src/main/assets/legal"))
 }
 
-// ビルド前にリポジトリ等からユーザー辞書ファイルを assets/user_dicts/ へ自動コピーするタスク
 val copyUserDictsTask = tasks.register("copyUserDicts") {
     description = "Copy default user dictionary to assets/user_dicts"
     val assetsUserDictsDir = file("${projectDir}/src/main/assets/user_dicts")
@@ -195,7 +211,6 @@ val copyUserDictsTask = tasks.register("copyUserDicts") {
 
         val repoRootDir = project.rootDir.parentFile.parentFile
 
-        // karukan-im/core/config/default_user_dict.txt をコピー
         val coreConfigDict = file("$repoRootDir/karukan-im/core/config/default_user_dict.txt")
         if (coreConfigDict.exists()) {
             coreConfigDict.copyTo(File(assetsUserDictsDir, "default_user_dict.txt"), overwrite = true)
@@ -220,12 +235,10 @@ val copyUserDictsTask = tasks.register("copyUserDicts") {
     }
 }
 
-// Gradle ビルド前に Rust (.so) を自動ビルド＆同期するタスク
 val buildRustTask = tasks.register<Exec>("buildRust") {
     description = "Build Rust JNI shared library via NDK"
     val ps1Script = file("${project.rootDir}/build.ps1")
 
-    // Android Studio / Gradle が認識している NDK パスを自動取得して渡す
     val appExt = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
     val ndkDir = appExt?.ndkPath ?: System.getenv("ANDROID_NDK_HOME") ?: System.getenv("ANDROID_NDK_ROOT") ?: System.getenv("NDK_ROOT")
     if (!ndkDir.isNullOrEmpty()) {
@@ -235,7 +248,6 @@ val buildRustTask = tasks.register<Exec>("buildRust") {
         environment("ANDROID_NDK", ndkDir)
     }
 
-    // Android Studio が認識している SDK パスも渡す
     val sdkDir = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: ""
     if (sdkDir.isNotEmpty()) {
         environment("ANDROID_HOME", sdkDir)
@@ -245,7 +257,6 @@ val buildRustTask = tasks.register<Exec>("buildRust") {
     commandLine("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", ps1Script.absolutePath)
 }
 
-// ビルド前に公式システム辞書 (dict.tgz) を自動ダウンロードして assets/dict.tgz (システム辞書) へ配置するタスク
 val downloadDictTask = tasks.register("downloadDict") {
     description = "Download official system dictionary archive"
     val assetsDir = file("${projectDir}/src/main/assets")
@@ -262,7 +273,6 @@ val downloadDictTask = tasks.register("downloadDict") {
             assetsDir.mkdirs()
         }
 
-        // ユーザー辞書フォルダに以前の dict.* が残っていればクリーンアップ
         File(assetsUserDictsDir, "dict.tgz").takeIf { it.exists() }?.delete()
         File(assetsUserDictsDir, "dict.bin").takeIf { it.exists() }?.delete()
         File(assetsUserDictsDir, "dict.bin.gz").takeIf { it.exists() }?.delete()
@@ -276,7 +286,6 @@ val downloadDictTask = tasks.register("downloadDict") {
     }
 }
 
-// ビルド前に unicode.org から emoji-test.txt をダウンロードして絵文字をカテゴリ別に抽出・assets/emoji_categories.txtへ配置するタスク
 val generateEmojiListTask = tasks.register("generateEmojiList") {
     description = "Generate emoji category list from Unicode data"
     val assetsDir = file("${projectDir}/src/main/assets")
@@ -299,7 +308,6 @@ val generateEmojiListTask = tasks.register("generateEmojiList") {
 
         val lines = cacheFile.readLines(Charsets.UTF_8)
 
-        // Pass 1: Componentグループのコードポイントを収集（スキンゾーン等を除外するため）
         val componentCodePoints = mutableSetOf<String>()
         var currentGroup = "Smileys & Emotion"
         for (line in lines) {
@@ -326,7 +334,6 @@ val generateEmojiListTask = tasks.register("generateEmojiList") {
             }
         }
 
-        // Pass 2: fully-qualified な絵文字をグループ別に分類
         val groupMap = LinkedHashMap<String, MutableList<String>>()
         currentGroup = "Smileys & Emotion"
         for (line in lines) {
@@ -396,7 +403,6 @@ val generateEmojiListTask = tasks.register("generateEmojiList") {
     }
 }
 
-// preBuild (Android ビルド準備段階) に自動タスクを連携
 tasks.named("preBuild") {
     dependsOn(copyLegalInfoTask)
     dependsOn(downloadAssetsTask)
@@ -406,6 +412,10 @@ tasks.named("preBuild") {
     dependsOn(buildRustTask)
 }
 
+// -------------------------------------------------------------------------------------------------
+// Region: Dependencies
+// -------------------------------------------------------------------------------------------------
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -414,4 +424,5 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
     implementation(libs.commons.compress)
+    testImplementation("junit:junit:4.13.2")
 }

@@ -35,6 +35,7 @@ data class KarukanSettings(
     val isDateConversionEnabled: Boolean = true,
     val dateConfigJson: String = "",
     val isAutoCommitEnabled: Boolean = true,
+    val isMoveCursorInsideBracketEnabled: Boolean = true,
     val bracketStyle: String = "corner",
     val slashStyle: String = "middle_dot",
     val digitWidth: String = "half",
@@ -45,8 +46,14 @@ data class KarukanSettings(
     val keyboardLayout: String = "qwerty",
     val isVibrationEnabled: Boolean = true,
     val isSoundEnabled: Boolean = false,
-    val isForceShowSoftKeyboardEnabled: Boolean = true,
+    val isShowInputStatusBarEnabled: Boolean = false,
+    val isShowFloatingCandidateWindowEnabled: Boolean = true,
+    val isShowFloatingStatusTextEnabled: Boolean = false,
+    val isShowPhysicalKeyboardSuggestCandidatesEnabled: Boolean = true,
     val keyboardHeight: String = "medium",
     val keyboardTheme: String = "dark",
-    val physicalKeyboardLayout: String = "jis109"
+    val physicalKeyboardLayout: String = "jis109",
+
+    // カスタムキーショートカット設定 JSON
+    val keyShortcutsJson: String = ""
 )

@@ -1,28 +1,24 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
-import android.util.Log
-import android.view.Gravity
+import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.appcompat.view.ContextThemeWrapper
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.children
 
 /**
- * Karukan IME の入力ビュー（画面下部キーボード UI & 変換候補パネル & フローティング表示）を管理するカスタムビュークラスです。
+ * IME の全体ビュー階層（ステータスバー、1行候補バー、折り返し表示領域、キーボードコンテナ）を管理するカスタム View
  */
 class KarukanInputView @JvmOverloads constructor(
     context: Context,
@@ -30,64 +26,132 @@ class KarukanInputView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : LinearLayout(context, attrs, defStyleAttr) {
 
-    interface Listener {
+    // ---------------------------------------------------------------------------------------------
+    // Region: Theme & Listener Interoperability
+    // ---------------------------------------------------------------------------------------------
+
+    interface Listener : KeyboardLayoutBuilder.KeyboardEventListener {
         fun isDarkTheme(): Boolean
-        fun isHardKeyboardConnected(): Boolean
         fun getKeyboardHeightPx(): Int
-        fun triggerKeyFeedback()
-        fun onCandidateSelected(hiragana: String, candidate: String, index: Int)
-        fun onEmojiSelected(emoji: String)
-        fun getKeyboardEventListener(): KeyboardLayoutBuilder.KeyboardEventListener
-        fun getSourceFilterLabel(filter: KarukanInputMethodService.SourceFilter): String
-        fun getActiveSourceFilter(): KarukanInputMethodService.SourceFilter
+        fun getSettings(): KarukanSettings
+        fun isHardKeyboardConnected(): Boolean
         fun getEngine(): KarukanEngine
+        fun onCandidateSelected(hiragana: String, candidate: String, index: Int)
+        fun openSettingsActivity()
     }
 
-    private var listener: Listener? = null
-    private var keyboardLayoutSetting: String = "qwerty"
+    var listener: Listener? = null
+    var keyboardLayoutSetting: String = "qwerty"
+
     private var inputModeState: InputMode = InputMode.HIRAGANA
 
-    // 未確定テキスト表示エリア
+    private fun dpToPx(dp: Float): Int {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, resources.displayMetrics).toInt()
+    }
+
+    data class ThemeColors(
+        val bg: Int,
+        val statusText: Int,
+        val candidateBg: Int,
+        val candidateText: Int,
+        val candidateSelectedBg: Int,
+        val candidateSelectedText: Int,
+        val textColor: Int
+    )
+
+    fun getThemeColors(): ThemeColors {
+        val isDark = listener?.isDarkTheme() == true
+        val baseAccentGreen = Color.parseColor("#00897B")
+        val baseDarkBg = Color.parseColor("#202124")
+        val baseLightBg = Color.parseColor("#F8F9FA")
+        val baseTextLight = Color.parseColor("#E8EAED")
+        val baseTextDark = Color.parseColor("#202124")
+
+        val bg = if (isDark) baseDarkBg else baseLightBg
+        val statusText = if (isDark) baseTextLight else baseTextDark
+        val textColor = if (isDark) Color.WHITE else baseTextDark
+
+        // candidateBg: ベース背景に 4% ティント・ブレンド
+        val candidateBg = if (isDark) {
+            ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
+        } else {
+            ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
+        }
+        val candidateText = if (isDark) baseTextLight else baseTextDark
+
+        // candidateSelectedBg: ベース背景にベースグリーンをティント・ブレンド
+        val candidateSelectedBg = if (isDark) {
+            ColorUtils.blendARGB(bg, baseAccentGreen, 0.30f)
+        } else {
+            ColorUtils.blendARGB(bg, baseAccentGreen, 0.15f)
+        }
+
+        // candidateSelectedText: ベースグリーンとブラック/ホワイトのブレンド
+        val candidateSelectedText = if (isDark) {
+            Color.WHITE
+        } else {
+            ColorUtils.blendARGB(baseAccentGreen, Color.BLACK, 0.50f)
+        }
+
+        return ThemeColors(
+            bg = bg,
+            statusText = statusText,
+            candidateBg = candidateBg,
+            candidateText = candidateText,
+            candidateSelectedBg = candidateSelectedBg,
+            candidateSelectedText = candidateSelectedText,
+            textColor = textColor
+        )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Child View Declarations & Layout Construction
+    // ---------------------------------------------------------------------------------------------
+
     lateinit var composingTextView: TextView
         private set
 
-    // 候補表示領域関連 (画面下部)
+    private lateinit var candidateSlotContainer: FrameLayout
+    private lateinit var toolbarContainer: LinearLayout
     private lateinit var candidateBarContainer: LinearLayout
-    private lateinit var candidateScrollContainer: HorizontalScrollView
-    private lateinit var candidateLayout: LinearLayout
+    private lateinit var candidateBarContentLayout: LinearLayout
+    private lateinit var candidateScrollView: HorizontalScrollView
     private lateinit var expandButton: Button
     var isCandidateExpanded: Boolean = false
         private set
 
-    // 現在の候補キャッシュ (Lazyレンダリング・ビュー再利用用)
     private var lastHiragana: String = ""
     private var lastCandidates: List<String> = emptyList()
     private var lastSelectedIndex: Int = -1
 
-    // 複数行候補表示パネル領域
     private lateinit var candidateExpandedContainer: LinearLayout
     private lateinit var candidateFlowLayout: CandidateFlowLayout
     private lateinit var expandedScrollView: ScrollView
 
-    // キーボード & 絵文字パレット
     lateinit var mainKeyboardContainer: View
         private set
     private var keyboardLayoutBuilder: KeyboardLayoutBuilder? = null
     private lateinit var emojiPaletteContainer: LinearLayout
     private lateinit var emojiPaletteController: EmojiPaletteController
 
-    // フローティングオーバーレイ表示関連 (物理キーボード接続時用)
-    private var floatingPopupWindow: PopupWindow? = null
-    private var floatingStatusTextView: TextView? = null
-    private var floatingDividerView: View? = null
-    private var floatingCandidateScrollView: ScrollView? = null
-    private var floatingCandidateFlowLayout: CandidateFlowLayout? = null
-    private var lastFloatingX: Int = Int.MIN_VALUE
-    private var lastFloatingY: Int = Int.MIN_VALUE
-    private var lastFloatingWidth: Int = Int.MIN_VALUE
-    private var lastFloatingHeight: Int = Int.MIN_VALUE
-    private var lastFloatingStatusText: String = ""
-    private var lastFloatingSelecting: Boolean = false
+    // フローティングオーバーレイ (物理キーボード接続時用)
+    private val floatingOverlay by lazy {
+        FloatingCandidateOverlay(
+            context = context,
+            isDarkSupplier = { listener?.isDarkTheme() == true },
+            dpToPx = { dp -> dpToPx(dp) },
+            getThemeColors = { getThemeColors() },
+            getComposingText = { if (::composingTextView.isInitialized) composingTextView.text.toString() else "" },
+            getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
+            isHardKeyboardConnected = { listener?.isHardKeyboardConnected() == true },
+            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true },
+            isShowFloatingStatusEnabled = { listener?.getSettings()?.isShowFloatingStatusTextEnabled == true },
+            onCandidateSelected = { hiragana, cand, index -> listener?.onCandidateSelected(hiragana, cand, index) }
+        )
+    }
+
+    val floatingCandidateFlowLayout: CandidateFlowLayout?
+        get() = floatingOverlay.candidateFlowLayout
 
     var isCursorAnchorValid: Boolean = false
         private set
@@ -98,6 +162,10 @@ class KarukanInputView @JvmOverloads constructor(
     var cursorYTop: Float = Float.NaN
         private set
 
+    companion object {
+        private const val TAG = "KarukanInputView"
+    }
+
     fun updateCursorPosition(isValid: Boolean, x: Float, yBottom: Float, yTop: Float) {
         this.isCursorAnchorValid = isValid
         this.cursorX = x
@@ -105,558 +173,463 @@ class KarukanInputView @JvmOverloads constructor(
         this.cursorYTop = yTop
     }
 
-    companion object {
-        private const val TAG = "KarukanInputView"
-    }
-
-    data class ThemeColors(
-        val keyboardBg: Int,
-        val candidateBg: Int,
-        val textColor: Int,
-        val candidateBtnBg: Int
-    )
-
-    fun getThemeColors(): ThemeColors {
-        val isDark = listener?.isDarkTheme() ?: true
-        return if (isDark) {
-            ThemeColors(
-                keyboardBg = Color.parseColor("#202124"),
-                candidateBg = Color.parseColor("#303134"),
-                textColor = Color.WHITE,
-                candidateBtnBg = Color.parseColor("#3C4043")
-            )
-        } else {
-            ThemeColors(
-                keyboardBg = Color.parseColor("#ECEFF1"),
-                candidateBg = Color.parseColor("#F8F9FA"),
-                textColor = Color.parseColor("#202124"),
-                candidateBtnBg = Color.WHITE
-            )
-        }
-    }
-
-    private fun dpToPx(dp: Float): Int {
-        return (dp * resources.displayMetrics.density).toInt()
-    }
-
-    fun initView(
-        listener: Listener,
-        keyboardLayoutBuilder: KeyboardLayoutBuilder,
-        keyboardLayoutSetting: String,
-        isEnglishMode: Boolean
-    ) {
-        this.listener = listener
-        this.keyboardLayoutBuilder = keyboardLayoutBuilder.apply {
-            onContainerSwapRequested = { newContainer ->
-                val index = indexOfChild(mainKeyboardContainer)
-                if (index != -1) {
-                    removeView(mainKeyboardContainer)
-                    mainKeyboardContainer = newContainer
-                    addView(
-                        mainKeyboardContainer, index, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply {
-                            setMargins(0, 0, 0, 0)
-                        })
-                }
-            }
-        }
-        this.keyboardLayoutSetting = keyboardLayoutSetting
-        val colors = getThemeColors()
-
+    init {
         orientation = VERTICAL
-        setBackgroundColor(colors.keyboardBg)
-
-        val initialPaddingLeft = paddingLeft
-        val initialPaddingTop = paddingTop
-        val initialPaddingRight = paddingRight
-        val initialPaddingBottom = paddingBottom
-
-        val applyInsets: (View, WindowInsetsCompat) -> Unit = { view, insets ->
-            val navInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            view.setPadding(
-                initialPaddingLeft,
-                initialPaddingTop,
-                initialPaddingRight,
-                initialPaddingBottom + navInsets.bottom
-            )
-        }
-
-        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-            applyInsets(view, insets)
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        setPadding(0, 0, 0, 0)
+        ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            v.setPadding(0, 0, 0, navBars.bottom)
             insets
         }
+        buildViewHierarchy()
+    }
 
-        addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) {
-                v.removeOnAttachStateChangeListener(this)
-                ViewCompat.getRootWindowInsets(v)?.let { rootInsets ->
-                    applyInsets(v, rootInsets)
-                }
-            }
+    private fun buildViewHierarchy() {
+        val colors = getThemeColors()
+        setBackgroundColor(colors.bg)
 
-            override fun onViewDetachedFromWindow(v: View) {}
-        })
-        requestApplyInsets()
-
-        // 1. 未確定テキスト表示エリア
+        // 1. ステータス領域 (モード・未確定文字列表示)
         composingTextView = TextView(context).apply {
-            text = if (isEnglishMode) "英数モード" else "かな: (なし)"
             textSize = 14f
-            setPadding(dpToPx(16f), dpToPx(8f), dpToPx(16f), dpToPx(8f))
-            setTextColor(colors.textColor)
-            setBackgroundColor(colors.keyboardBg)
+            setPadding(dpToPx(12f), dpToPx(4f), dpToPx(12f), dpToPx(4f))
+            setTextColor(colors.statusText)
+            setBackgroundColor(colors.bg)
+            visibility = GONE
         }
-        addView(composingTextView)
 
-        // 2. 変換候補バー (横スクロール可能) + 展開ボタン (▼)
+        // 2. ツールバー / 1行変換候補バー 重ね合わせスロット容器
+        val slotHeight = getKeyHeight()
+        candidateSlotContainer = FrameLayout(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, slotHeight)
+        }
+
+        // 2a. ツールバー領域 (未入力・非変換時に表示)
+        toolbarContainer = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(4f), 0, dpToPx(4f), 0)
+            setBackgroundColor(colors.bg)
+            visibility = VISIBLE
+        }
+
+        val btnSettings = TextView(context).apply {
+            text = "⚙️ 設定"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(colors.candidateText)
+            setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                listener?.openSettingsActivity()
+            }
+        }
+        toolbarContainer.addView(btnSettings)
+
+        // 2b. 1行変換候補バー領域 (文字入力中・変換候補存在時に表示)
         candidateBarContainer = LinearLayout(context).apply {
             orientation = HORIZONTAL
-            setBackgroundColor(colors.candidateBg)
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(4f), 0, dpToPx(4f), 0)
+            setBackgroundColor(colors.bg)
+            visibility = GONE
         }
 
-        candidateScrollContainer = HorizontalScrollView(context).apply {
-            setBackgroundColor(colors.candidateBg)
-            setPadding(dpToPx(4f), dpToPx(2f), dpToPx(4f), dpToPx(2f))
+        candidateScrollView = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = OVER_SCROLL_NEVER
         }
-        candidateLayout = LinearLayout(context).apply {
+
+        candidateBarContentLayout = LinearLayout(context).apply {
             orientation = HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
         }
-        val defaultCandidateView = createDefaultCandidateView(isEnglishMode)
-        candidateLayout.addView(defaultCandidateView)
-        candidateScrollContainer.addView(candidateLayout)
-
-        candidateBarContainer.addView(
-            candidateScrollContainer,
-            LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+        candidateScrollView.addView(
+            candidateBarContentLayout,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
         )
 
-        expandButton = Button(ContextThemeWrapper(context, R.style.Theme_Karukan)).apply {
+        expandButton = Button(context, null, android.R.attr.borderlessButtonStyle).apply {
             text = "▼"
-            textSize = 14f
-            isAllCaps = false
-            minHeight = dpToPx(32f)
-            minimumHeight = dpToPx(32f)
-            minWidth = 0
-            minimumWidth = 0
-            setPadding(dpToPx(12f), dpToPx(4f), dpToPx(12f), dpToPx(4f))
-            backgroundTintList = ColorStateList.valueOf(colors.candidateBtnBg)
-            setTextColor(colors.textColor)
+            textSize = 12f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(colors.candidateText)
+            setPadding(dpToPx(8f), 0, dpToPx(8f), 0)
             visibility = GONE
             setOnClickListener {
-                listener.triggerKeyFeedback()
                 toggleCandidateExpand()
             }
         }
-        val expandBtnParams = LayoutParams(
-            LayoutParams.WRAP_CONTENT,
-            LayoutParams.WRAP_CONTENT
-        ).apply {
-            setMargins(dpToPx(4f), dpToPx(4f), dpToPx(8f), dpToPx(4f))
-        }
-        candidateBarContainer.addView(expandButton, expandBtnParams)
 
-        addView(candidateBarContainer)
+        candidateBarContainer.addView(
+            candidateScrollView,
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1.0f)
+        )
+        candidateBarContainer.addView(
+            expandButton,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
+        )
 
-        // 3. 画面キーボードの構築
-        mainKeyboardContainer = when (keyboardLayoutSetting) {
-            "builtin" -> keyboardLayoutBuilder.createBuiltinKeyboardContainer()
-            "niko" -> keyboardLayoutBuilder.createNikoKeyboardContainer()
-            "tablet" -> keyboardLayoutBuilder.createTabletKeyboardContainer()
-            else -> keyboardLayoutBuilder.createQwertyKeyboardContainer()
-        }
-        addView(
-            mainKeyboardContainer, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 0, 0, 0)
-            })
+        candidateSlotContainer.addView(
+            toolbarContainer,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        )
+        candidateSlotContainer.addView(
+            candidateBarContainer,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        )
 
-        // 4. 複数行変換候補表示エリア
+        // 3. 複数行候補展開領域
         candidateExpandedContainer = LinearLayout(context).apply {
             orientation = VERTICAL
-            setBackgroundColor(colors.keyboardBg)
             visibility = GONE
+            setBackgroundColor(colors.bg)
         }
 
         expandedScrollView = ScrollView(context).apply {
             isFillViewport = true
-            setPadding(dpToPx(4f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
+            overScrollMode = OVER_SCROLL_NEVER
         }
 
         candidateFlowLayout = CandidateFlowLayout(context).apply {
-            setPadding(dpToPx(4f), dpToPx(4f), dpToPx(4f), dpToPx(4f))
+            horizontalGapPx = dpToPx(6f)
+            verticalGapPx = dpToPx(6f)
+            setPadding(dpToPx(8f), dpToPx(8f), dpToPx(8f), dpToPx(8f))
         }
 
         expandedScrollView.addView(
             candidateFlowLayout,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
         )
-
         candidateExpandedContainer.addView(
             expandedScrollView,
-            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         )
 
-        val initialKbHeight = listener.getKeyboardHeightPx()
-        addView(
-            candidateExpandedContainer,
-            LayoutParams(
-                LayoutParams.MATCH_PARENT,
-                if (initialKbHeight > 0) initialKbHeight else LayoutParams.WRAP_CONTENT
-            )
-        )
-
-        // 5. 絵文字パレット領域の構築
+        // 4. 絵文字・記号パレットコンテナ
+        val activeEngine = listener?.getEngine() ?: KarukanEngine(context)
         emojiPaletteController = EmojiPaletteController(
             context = context,
-            engine = listener.getEngine(),
-            isDarkThemeSupplier = { listener.isDarkTheme() },
-            keyboardHeightPxSupplier = { listener.getKeyboardHeightPx() },
-            onEmojiSelected = { emoji ->
-                listener.triggerKeyFeedback()
-                listener.onEmojiSelected(emoji)
-            },
-            onCloseRequested = {
-                listener.triggerKeyFeedback()
-                emojiPaletteController.hide(mainKeyboardContainer)
-                updateKeyboardLayoutVisibility()
-            }
+            engine = activeEngine,
+            isDarkThemeSupplier = { listener?.isDarkTheme() == true },
+            keyboardHeightPxSupplier = { listener?.getKeyboardHeightPx() ?: dpToPx(240f) },
+            onEmojiSelected = { emoji -> listener?.onKeyPress(emoji) },
+            onCloseRequested = { hideEmojiPalette() }
         )
         emojiPaletteContainer = emojiPaletteController.createView()
-        emojiPaletteContainer.visibility = GONE
-        addView(emojiPaletteContainer)
 
-        updateKeyboardLayoutVisibility()
+        addView(composingTextView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(candidateSlotContainer, LayoutParams(LayoutParams.MATCH_PARENT, getKeyHeight()))
+        addView(candidateExpandedContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(emojiPaletteContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+
+        showToolbar()
     }
 
-    private fun createDefaultCandidateView(isEnglishMode: Boolean): View {
-        val density = resources.displayMetrics.density
-        val padH = (14 * density).toInt()
-        val padV = (8 * density).toInt()
-        val minHeightPx = (36 * density).toInt()
+    // ---------------------------------------------------------------------------------------------
+    // Region: Keyboard Container & Layout Swapping
+    // ---------------------------------------------------------------------------------------------
+
+    fun getKeyHeight(): Int {
+        val activeListener = listener ?: return dpToPx(52f)
+        val totalH = activeListener.getKeyboardHeightPx()
+        val provider = KeyboardLayoutRegistry.getProvider(keyboardLayoutSetting)
+        return totalH / provider.rowCount
+    }
+
+    private fun updateCandidateSlotHeight() {
+        if (!::candidateSlotContainer.isInitialized) return
+        val kh = getKeyHeight()
+        val lp = candidateSlotContainer.layoutParams
+        if (lp != null && lp.height != kh) {
+            lp.height = kh
+            candidateSlotContainer.layoutParams = lp
+        }
+    }
+
+    private fun showToolbar() {
+        updateCandidateSlotHeight()
+        if (::toolbarContainer.isInitialized) {
+            toolbarContainer.visibility = VISIBLE
+        }
+        if (::candidateBarContainer.isInitialized) {
+            candidateBarContainer.visibility = GONE
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.visibility = GONE
+        }
+    }
+
+    private fun showCandidateBar() {
+        updateCandidateSlotHeight()
+        if (::toolbarContainer.isInitialized) {
+            toolbarContainer.visibility = GONE
+        }
+        if (::candidateBarContainer.isInitialized) {
+            candidateBarContainer.visibility = VISIBLE
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.visibility = VISIBLE
+        }
+    }
+
+    fun setupKeyboardLayout(layoutName: String) {
+        this.keyboardLayoutSetting = layoutName
         val colors = getThemeColors()
-        val isDark = listener?.isDarkTheme() ?: true
+        setBackgroundColor(colors.bg)
 
-        return Button(ContextThemeWrapper(context, R.style.Theme_Karukan)).apply {
-            text = if (isEnglishMode) "英数字直接入力" else "Karukan IME 準備完了"
-            textSize = 15f
-            isAllCaps = false
-            minHeight = minHeightPx
-            minimumHeight = minHeightPx
-            minWidth = 0
-            minimumWidth = 0
-            setPadding(padH, padV, padH, padV)
-            setTextColor(colors.textColor)
-            background = getCandidateButtonDrawable(false, isDark, 8f)
-            isClickable = false
-            isFocusable = false
-            val btnMarginPx = dpToPx(3f)
-            layoutParams = LayoutParams(
-                LayoutParams.WRAP_CONTENT,
-                LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(btnMarginPx, btnMarginPx, btnMarginPx, btnMarginPx)
-            }
-        }
-    }
-
-    private fun createNewCandidateButton(
-        parent: ViewGroup,
-        index: Int,
-        padH: Int,
-        padV: Int,
-        minHeightPx: Int
-    ): Button {
-        val btn = Button(ContextThemeWrapper(context, R.style.Theme_Karukan)).apply {
-            textSize = 15f
-            isAllCaps = false
-            minHeight = minHeightPx
-            minimumHeight = minHeightPx
-            minWidth = 0
-            minimumWidth = 0
-            setPadding(padH, padV, padH, padV)
-        }
-        val btnMarginPx = dpToPx(3f)
-        val params = LayoutParams(
-            LayoutParams.WRAP_CONTENT,
-            LayoutParams.WRAP_CONTENT
-        ).apply {
-            setMargins(btnMarginPx, btnMarginPx, btnMarginPx, btnMarginPx)
-        }
-        if (index < parent.childCount) {
-            parent.addView(btn, index, params)
-        } else {
-            parent.addView(btn, params)
-        }
-        return btn
-    }
-
-    private fun getCandidateButtonDrawable(isSelected: Boolean, isDark: Boolean, cornerRadiusDp: Float): Drawable {
-        val palette = KeyboardColors.get(isDark)
-        val colors = if (isDark) {
-            ThemeColors(
-                keyboardBg = Color.parseColor("#202124"),
-                candidateBg = Color.parseColor("#303134"),
-                textColor = Color.WHITE,
-                candidateBtnBg = Color.parseColor("#3C4043")
-            )
-        } else {
-            ThemeColors(
-                keyboardBg = Color.parseColor("#ECEFF1"),
-                candidateBg = Color.parseColor("#F8F9FA"),
-                textColor = Color.parseColor("#202124"),
-                candidateBtnBg = Color.WHITE
-            )
-        }
-        val normalColor = if (isSelected) palette.activeKeyBg else colors.candidateBtnBg
-        val pressedColor = if (isSelected) palette.activeKeyPressedBg else if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
-        return createKeyButtonDrawable(
+        val activeListener = listener ?: return
+        val builder = KeyboardLayoutBuilder(
             context = context,
-            normalColor = normalColor,
-            pressedColor = pressedColor,
-            disabledColor = palette.disabledBg,
-            cornerRadiusDp = cornerRadiusDp,
-            insetDp = 0f
-        )
-    }
-
-    private fun bindCandidateButton(
-        parent: ViewGroup,
-        index: Int,
-        cand: String,
-        isSelected: Boolean,
-        onClick: () -> Unit
-    ): Button {
-        val density = resources.displayMetrics.density
-        val padH = (14 * density).toInt()
-        val padV = (8 * density).toInt()
-        val colors = getThemeColors()
-        val isDark = listener?.isDarkTheme() ?: true
-        val palette = KeyboardColors.get(isDark)
-
-        val textColor = if (isSelected) palette.activeKeyText else colors.textColor
-
-        val btn = if (index < parent.childCount) {
-            val child = parent.getChildAt(index)
-            if (child is Button) {
-                child.apply { visibility = VISIBLE }
-            } else {
-                parent.removeViewAt(index)
-                createNewCandidateButton(parent, index, padH, padV, (36 * density).toInt())
-            }
-        } else {
-            createNewCandidateButton(parent, index, padH, padV, (36 * density).toInt())
-        }
-
-        if (btn.text != cand) {
-            btn.text = cand
-        }
-
-        val btnTag = Triple(cand, isSelected, isDark)
-        if (btn.tag != btnTag) {
-            btn.tag = btnTag
-            btn.background = getCandidateButtonDrawable(isSelected, isDark, 8f)
-            btn.setTextColor(textColor)
-            btn.setOnClickListener {
-                listener?.triggerKeyFeedback()
-                onClick()
+            isDarkThemeSupplier = { activeListener.isDarkTheme() },
+            keyButtonHeightSupplier = {
+                val totalH = activeListener.getKeyboardHeightPx()
+                val provider = KeyboardLayoutRegistry.getProvider(layoutName)
+                totalH / provider.rowCount
+            },
+            keyboardHeightPxSupplier = { activeListener.getKeyboardHeightPx() },
+            isEnglishModeSupplier = { inputModeState == InputMode.ALPHANUMERIC },
+            inputModeSupplier = { inputModeState },
+            listener = activeListener
+        ).apply {
+            onContainerSwapRequested = { newContainer ->
+                swapKeyboardContainer(newContainer)
             }
         }
+        this.keyboardLayoutBuilder = builder
 
-        return btn
+        val keyboardView = builder.createContainerForLayout(layoutName)
+        swapKeyboardContainer(keyboardView)
+        updateCandidateSlotHeight()
+        requestLayout()
+        invalidate()
     }
 
-    private fun updateCandidateLayoutContainer(
-        container: ViewGroup?,
-        hiragana: String,
-        allCandidates: List<String>,
-        selectedIndex: Int,
-        isFloating: Boolean = false
-    ) {
-        if (container == null) return
-
-        for ((index, cand) in allCandidates.withIndex()) {
-            val isSelected = (index == selectedIndex)
-            val displayText = if (isFloating && index < 9) "${index + 1}. $cand" else cand
-            bindCandidateButton(container, index, displayText, isSelected) {
-                listener?.onCandidateSelected(hiragana, cand, index)
-            }
+    private fun swapKeyboardContainer(newContainer: View) {
+        if (::mainKeyboardContainer.isInitialized) {
+            removeView(mainKeyboardContainer)
         }
-
-        if (container.childCount > allCandidates.size) {
-            container.removeViews(allCandidates.size, container.childCount - allCandidates.size)
-        }
+        mainKeyboardContainer = newContainer
+        addView(newContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        updateKeyboardLayoutVisibility()
+        requestLayout()
+        invalidate()
     }
 
-    private fun scrollToSelectedCandidateHorizontal(
-        scrollView: HorizontalScrollView,
-        container: ViewGroup,
-        selectedIndex: Int
-    ) {
-        if (selectedIndex < 0) {
-            scrollView.post { scrollView.scrollTo(0, 0) }
-            return
-        }
-        if (selectedIndex >= container.childCount) return
-        val selectedView = container.getChildAt(selectedIndex) ?: return
+    // ---------------------------------------------------------------------------------------------
+    // Region: Candidate View Rendering & Binding
+    // ---------------------------------------------------------------------------------------------
 
-        scrollView.post {
-            val left = selectedView.left
-            val right = selectedView.right
-            val scrollX = scrollView.scrollX
-            val width = scrollView.width
-            val padLeft = scrollView.paddingLeft
-            val padRight = scrollView.paddingRight
-
-            if (width <= 0) return@post
-
-            val margin = dpToPx(8f)
-            if (left - margin < scrollX + padLeft) {
-                val targetX = maxOf(0, left - padLeft - margin)
-                scrollView.smoothScrollTo(targetX, 0)
-            } else if (right + margin > scrollX + width - padRight) {
-                val targetX = right + padRight + margin - width
-                scrollView.smoothScrollTo(targetX, 0)
-            }
-        }
-    }
-
-    private fun scrollToSelectedCandidateVertical(
-        scrollView: ScrollView,
-        container: ViewGroup,
-        selectedIndex: Int
-    ) {
-        if (selectedIndex < 0) {
-            scrollView.post { scrollView.scrollTo(0, 0) }
-            return
-        }
-        if (selectedIndex >= container.childCount) return
-        val selectedView = container.getChildAt(selectedIndex) ?: return
-
-        scrollView.post {
-            val top = selectedView.top
-            val bottom = selectedView.bottom
-            val scrollY = scrollView.scrollY
-            val height = scrollView.height
-            val padTop = scrollView.paddingTop
-            val padBottom = scrollView.paddingBottom
-
-            if (height <= 0) return@post
-
-            val margin = dpToPx(4f)
-            if (top - margin < scrollY + padTop) {
-                val targetY = maxOf(0, top - padTop - margin)
-                scrollView.smoothScrollTo(0, targetY)
-            } else if (bottom + margin > scrollY + height - padBottom) {
-                val targetY = bottom + padBottom + margin - height
-                scrollView.smoothScrollTo(0, targetY)
-            }
-        }
-    }
-
-    fun renderCandidates(
-        hiragana: String,
-        allCandidates: List<String>,
-        selectedIndex: Int
-    ) {
+    fun updateCandidates(hiragana: String, candidates: List<String>, selectedIndex: Int = -1) {
         lastHiragana = hiragana
-        lastCandidates = allCandidates
+        lastCandidates = candidates
         lastSelectedIndex = selectedIndex
 
-        val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        val colors = getThemeColors()
+        val showAnnotations = listener?.getSettings()?.isShowCandidateAnnotationsEnabled ?: true
 
-        if (allCandidates.isNotEmpty() && !isHardKb) {
-            if (::expandButton.isInitialized) {
-                expandButton.visibility = VISIBLE
+        if (hiragana.isEmpty() || candidates.isEmpty()) {
+            collapseCandidates()
+            showToolbar()
+            candidateBarContentLayout.removeAllViews()
+            if (::candidateFlowLayout.isInitialized) {
+                candidateFlowLayout.removeAllViews()
             }
-        } else {
-            if (::expandButton.isInitialized) {
-                expandButton.visibility = GONE
+            if (floatingOverlay.candidateFlowLayout != null) {
+                floatingOverlay.candidateFlowLayout?.removeAllViews()
             }
+            updateFloatingOverlay(selectedIndex)
+            return
         }
 
-        if (::candidateBarContainer.isInitialized) {
-            candidateBarContainer.visibility = if (isHardKb) GONE else VISIBLE
-        }
+        showCandidateBar()
 
-        // 1. メインの1行候補バー (非ハードキーボード時のみ更新)
-        if (!isHardKb) {
-            updateCandidateLayoutContainer(candidateLayout, hiragana, allCandidates, selectedIndex)
-            if (::candidateScrollContainer.isInitialized) {
-                scrollToSelectedCandidateHorizontal(candidateScrollContainer, candidateLayout, selectedIndex)
-            }
-        }
+        renderCandidateList(
+            container = candidateBarContentLayout,
+            candidates = candidates,
+            selectedIndex = selectedIndex,
+            colors = colors,
+            showAnnotations = showAnnotations,
+            isSingleRowBar = true,
+            hiragana = hiragana
+        )
 
-        // 2. フローティング候補 (ハードキーボード接続時かつ表示対象の時のみ更新)
-        if (isHardKb && floatingCandidateFlowLayout != null) {
-            updateCandidateLayoutContainer(floatingCandidateFlowLayout, hiragana, allCandidates, selectedIndex, isFloating = true)
-            floatingCandidateScrollView?.let { sv ->
-                floatingCandidateFlowLayout?.let { fl ->
-                    scrollToSelectedCandidateVertical(sv, fl, selectedIndex)
-                }
-            }
-        } else {
-            floatingCandidateFlowLayout?.removeAllViews()
-        }
-
-        // 3. 複数行展開パネル候補 (isCandidateExpanded == true の時のみLazy描画)
-        if (isCandidateExpanded && ::candidateFlowLayout.isInitialized) {
-            updateCandidateLayoutContainer(candidateFlowLayout, hiragana, allCandidates, selectedIndex)
-            if (::expandedScrollView.isInitialized) {
+        if (::candidateFlowLayout.isInitialized) {
+            renderCandidateList(
+                container = candidateFlowLayout,
+                candidates = candidates,
+                selectedIndex = selectedIndex,
+                colors = colors,
+                showAnnotations = showAnnotations,
+                isSingleRowBar = false,
+                hiragana = hiragana
+            )
+            if (isCandidateExpanded && ::expandedScrollView.isInitialized) {
                 scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, selectedIndex)
             }
+        }
+
+        val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        if (isHardKb) {
+            val floatingFlow = floatingOverlay.getOrCreateCandidateFlowLayout()
+            renderCandidateList(
+                container = floatingFlow,
+                candidates = candidates,
+                selectedIndex = selectedIndex,
+                colors = colors,
+                showAnnotations = showAnnotations,
+                isSingleRowBar = false,
+                hiragana = hiragana
+            )
+        }
+
+        if (!isCandidateExpanded && selectedIndex >= 0) {
+            scrollToSelectedCandidate(selectedIndex)
         }
 
         updateFloatingOverlay(selectedIndex)
     }
 
-    fun clearCandidateBar(isEnglishMode: Boolean) {
-        lastHiragana = ""
-        lastCandidates = emptyList()
-        lastSelectedIndex = -1
+    private fun renderCandidateList(
+        container: ViewGroup,
+        candidates: List<String>,
+        selectedIndex: Int,
+        colors: ThemeColors,
+        showAnnotations: Boolean,
+        isSingleRowBar: Boolean,
+        hiragana: String
+    ) {
+        val existingCount = container.childCount
+        val targetCount = candidates.size
 
-        candidateLayout.removeAllViews()
-        floatingCandidateFlowLayout?.removeAllViews()
-        dismissFloatingCandidates()
+        if (existingCount > targetCount) {
+            container.removeViews(targetCount, existingCount - targetCount)
+        }
+
+        val paddingH = dpToPx(10f)
+        val paddingV = dpToPx(6f)
+
+        for (i in 0 until targetCount) {
+            val rawCandidate = candidates[i]
+            val isSelected = (i == selectedIndex)
+
+            val displayCandidate = if (showAnnotations) {
+                rawCandidate
+            } else {
+                stripCandidateAnnotations(rawCandidate)
+            }
+
+            val child = if (i < container.childCount) {
+                container.getChildAt(i) as TextView
+            } else {
+                TextView(context).apply {
+                    textSize = 16f
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(paddingH, paddingV, paddingH, paddingV)
+                    isClickable = true
+                    isFocusable = true
+                    container.addView(this)
+                }
+            }
+
+            child.text = displayCandidate
+
+            if (isSelected) {
+                child.setBackgroundColor(colors.candidateSelectedBg)
+                child.setTextColor(colors.candidateSelectedText)
+            } else {
+                child.setBackgroundColor(colors.candidateBg)
+                child.setTextColor(colors.candidateText)
+            }
+
+            child.setOnClickListener {
+                collapseCandidates()
+                val cleanCand = stripCandidateAnnotations(rawCandidate)
+                listener?.onCandidateSelected(hiragana, cleanCand, i)
+            }
+        }
+    }
+
+    private fun stripCandidateAnnotations(raw: String): String {
+        val idx = raw.indexOf(" (")
+        return if (idx > 0) raw.substring(0, idx) else raw
+    }
+
+    private fun updateCandidateLayoutContainer(
+        container: ViewGroup,
+        hiragana: String,
+        candidates: List<String>,
+        selectedIndex: Int
+    ) {
+        val colors = getThemeColors()
+        val showAnnotations = listener?.getSettings()?.isShowCandidateAnnotationsEnabled ?: true
+        renderCandidateList(
+            container = container,
+            candidates = candidates,
+            selectedIndex = selectedIndex,
+            colors = colors,
+            showAnnotations = showAnnotations,
+            isSingleRowBar = false,
+            hiragana = hiragana
+        )
+    }
+
+    private fun scrollToSelectedCandidate(index: Int) {
+        if (index < 0 || index >= candidateBarContentLayout.childCount) return
+        val selectedView = candidateBarContentLayout.getChildAt(index) ?: return
+        candidateScrollView.post {
+            val scrollTo = selectedView.left - (candidateScrollView.width / 2) + (selectedView.width / 2)
+            candidateScrollView.smoothScrollTo(maxOf(0, scrollTo), 0)
+        }
+    }
+
+    private fun scrollToSelectedCandidateVertical(scrollView: ScrollView, flowLayout: CandidateFlowLayout, index: Int) {
+        if (index < 0 || index >= flowLayout.childCount) return
+        val selectedView = flowLayout.getChildAt(index) ?: return
+        scrollView.post {
+            val scrollTo = selectedView.top - (scrollView.height / 2) + (selectedView.height / 2)
+            scrollView.smoothScrollTo(0, maxOf(0, scrollTo))
+        }
+    }
+
+    fun clearCandidateBar(clearCacheText: Boolean = true) {
+        collapseCandidates()
+        if (clearCacheText) {
+            lastHiragana = ""
+            lastCandidates = emptyList()
+            lastSelectedIndex = -1
+        }
+        showToolbar()
+        candidateBarContentLayout.removeAllViews()
         if (::candidateFlowLayout.isInitialized) {
             candidateFlowLayout.removeAllViews()
         }
-        if (::candidateScrollContainer.isInitialized) {
-            candidateScrollContainer.scrollTo(0, 0)
-        }
-        if (::expandedScrollView.isInitialized) {
-            expandedScrollView.scrollTo(0, 0)
-        }
-        if (::expandButton.isInitialized) {
-            expandButton.visibility = GONE
-        }
-        if (isCandidateExpanded) {
-            collapseCandidates()
-        }
-        val defaultCandidateView = createDefaultCandidateView(isEnglishMode)
-        candidateLayout.addView(defaultCandidateView)
+        floatingOverlay.candidateFlowLayout?.removeAllViews()
+        dismissFloatingCandidates()
     }
 
-    fun updateInputMode(inputMode: InputMode) {
+    // ---------------------------------------------------------------------------------------------
+    // Region: Mode Management & Panel Expand
+    // ---------------------------------------------------------------------------------------------
+
+    fun setInputMode(inputMode: InputMode) {
         this.inputModeState = inputMode
         keyboardLayoutBuilder?.updateInputMode(inputMode)
-        if (keyboardLayoutSetting == "niko") {
-            val builder = keyboardLayoutBuilder ?: return
-            val index = indexOfChild(mainKeyboardContainer)
-            if (index != -1) {
-                removeView(mainKeyboardContainer)
-                mainKeyboardContainer = builder.createNikoKeyboardContainer()
-                addView(
-                    mainKeyboardContainer, index, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        setMargins(0, 0, 0, 0)
-                    })
+
+        if (::mainKeyboardContainer.isInitialized && mainKeyboardContainer is ViewGroup) {
+            val isDark = listener?.isDarkTheme() == true
+            (mainKeyboardContainer as ViewGroup).children.forEach { row ->
+                if (row is ViewGroup) {
+                    row.children.forEach { btn ->
+                        if (btn is KeyButton) {
+                            btn.updateInputMode(inputMode, isDark)
+                        }
+                    }
+                }
             }
         }
         val modeText = when (inputMode) {
@@ -676,10 +649,6 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
-    fun updateLanguageMode(isEnglishMode: Boolean) {
-        updateInputMode(if (isEnglishMode) InputMode.ALPHANUMERIC else InputMode.HIRAGANA)
-    }
-
     fun toggleCandidateExpand() {
         if (isCandidateExpanded) {
             collapseCandidates()
@@ -689,7 +658,7 @@ class KarukanInputView @JvmOverloads constructor(
     }
 
     fun expandCandidates() {
-        if (isCandidateExpanded) return
+        if (isCandidateExpanded || lastCandidates.isEmpty()) return
         isCandidateExpanded = true
 
         if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
@@ -716,7 +685,6 @@ class KarukanInputView @JvmOverloads constructor(
             expandedScrollView.scrollTo(0, 0)
         }
 
-        // 展開パネルが開いたタイミングで最新候補を描画
         if (::candidateFlowLayout.isInitialized) {
             updateCandidateLayoutContainer(candidateFlowLayout, lastHiragana, lastCandidates, lastSelectedIndex)
             if (::expandedScrollView.isInitialized) {
@@ -791,13 +759,17 @@ class KarukanInputView @JvmOverloads constructor(
         mainKeyboardContainer.visibility = VISIBLE
 
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
-        val barVisibility = if (isHardKb) GONE else VISIBLE
+        val isStatusBarEnabled = listener?.getSettings()?.isShowInputStatusBarEnabled ?: true
+        val statusVisibility = if (isHardKb || !isStatusBarEnabled) GONE else VISIBLE
 
         if (::composingTextView.isInitialized) {
-            composingTextView.visibility = barVisibility
+            composingTextView.visibility = statusVisibility
         }
-        if (::candidateBarContainer.isInitialized) {
-            candidateBarContainer.visibility = barVisibility
+
+        if (lastCandidates.isEmpty()) {
+            showToolbar()
+        } else {
+            showCandidateBar()
         }
 
         if (!isHardKb) {
@@ -805,275 +777,21 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
-    // --- フローティングオーバーレイウィンドウ関係 ---
-
-    private fun createFloatingPopupWindow(): PopupWindow {
-        val colors = getThemeColors()
-        val density = resources.displayMetrics.density
-        val isDark = listener?.isDarkTheme() == true
-
-        val container = LinearLayout(context).apply {
-            orientation = VERTICAL
-            setPadding(dpToPx(10f), dpToPx(8f), dpToPx(10f), dpToPx(10f))
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(colors.candidateBg)
-                cornerRadius = 8 * density
-                setStroke(dpToPx(1f), if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0"))
-            }
-            elevation = dpToPx(8f).toFloat()
-        }
-
-        val statusTextView = TextView(context).apply {
-            textSize = 15f
-            setPadding(dpToPx(4f), dpToPx(2f), dpToPx(4f), dpToPx(4f))
-            setTextColor(colors.textColor)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            visibility = GONE
-        }
-
-        val dividerView = View(context).apply {
-            setBackgroundColor(if (isDark) Color.parseColor("#4A4D51") else Color.parseColor("#E0E0E0"))
-            visibility = GONE
-        }
-
-        val scrollView = ScrollView(context).apply {
-            isFillViewport = true
-            overScrollMode = OVER_SCROLL_NEVER
-            visibility = GONE
-        }
-
-        val flowLayout = CandidateFlowLayout(context).apply {
-            horizontalGapPx = dpToPx(6f)
-            verticalGapPx = dpToPx(6f)
-            setPadding(0, 0, 0, dpToPx(6f))
-        }
-
-        scrollView.addView(
-            flowLayout,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
-        )
-
-        container.addView(statusTextView, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        container.addView(dividerView, LayoutParams(LayoutParams.MATCH_PARENT, dpToPx(1f)).apply {
-            setMargins(0, dpToPx(4f), 0, dpToPx(4f))
-        })
-        container.addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-
-        floatingStatusTextView = statusTextView
-        floatingDividerView = dividerView
-        floatingCandidateScrollView = scrollView
-        floatingCandidateFlowLayout = flowLayout
-
-        return PopupWindow(
-            container,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            false
-        ).apply {
-            isOutsideTouchable = false
-            isFocusable = false
-            isClippingEnabled = false
-            elevation = dpToPx(8f).toFloat()
-        }
-    }
-
-    private fun showPopupAtScreenLocationWithSize(
-        popup: PopupWindow,
-        screenX: Int,
-        screenY: Int,
-        width: Int,
-        height: Int
-    ) {
-        val anchor = if (::composingTextView.isInitialized && composingTextView.isShown) {
-            composingTextView
-        } else {
-            rootView ?: return
-        }
-
-        if (anchor.windowToken == null || !anchor.isAttachedToWindow) {
-            if (popup.isShowing) {
-                try {
-                    popup.dismiss()
-                } catch (e: Exception) {
-                }
-            }
-            return
-        }
-
-        val loc = IntArray(2)
-        anchor.getLocationOnScreen(loc)
-
-        val x = screenX - loc[0]
-        val y = screenY - loc[1]
-
-        try {
-            popup.isClippingEnabled = false
-            if (popup.isShowing) {
-                popup.update(x, y, width, height)
-            } else {
-                popup.showAtLocation(anchor, Gravity.NO_GRAVITY, x, y)
-                popup.update(x, y, width, height)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to show floating popup", e)
-            if (::candidateBarContainer.isInitialized && !(listener?.isHardKeyboardConnected() ?: false)) {
-                candidateBarContainer.visibility = VISIBLE
-            }
-        }
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Region: Floating Overlay Popup Delegation
+    // ---------------------------------------------------------------------------------------------
 
     fun updateFloatingOverlay(selectedIndex: Int = -1) {
-        val isHardKb = listener?.isHardKeyboardConnected() ?: false
-        if (!isHardKb) {
-            dismissFloatingCandidates()
-            return
-        }
-
-        val rawStatusText = if (::composingTextView.isInitialized) composingTextView.text.toString() else ""
-
-        // "かな: " プレフィックスの削除と fcitx5 スタイルの Preedit テキスト整形
-        var formattedStatusText = rawStatusText
-        if (formattedStatusText.startsWith("かな: ")) {
-            formattedStatusText = formattedStatusText.substring("かな: ".length)
-        }
-        formattedStatusText = formattedStatusText.trim()
-
-        val isDefaultEmptyStatus = formattedStatusText.isEmpty() ||
-                formattedStatusText == "(なし)" ||
-                formattedStatusText.startsWith("(なし)") ||
-                formattedStatusText == "英数モード"
-
-        val hasComposing = !isDefaultEmptyStatus
-
-        if (!hasComposing && selectedIndex < 0) {
-            dismissFloatingCandidates()
-            return
-        }
-
-        if (floatingPopupWindow == null) {
-            floatingPopupWindow = createFloatingPopupWindow()
-        }
-
-        val statusView = floatingStatusTextView ?: return
-        val scrollView = floatingCandidateScrollView ?: return
-
-        statusView.text = formattedStatusText
-        statusView.visibility = if (hasComposing) VISIBLE else GONE
-
-        val hasCandidates = (floatingCandidateFlowLayout?.childCount ?: 0) > 0
-        val isSelectingCandidates = (selectedIndex >= 0) && hasCandidates
-        scrollView.visibility = if (isSelectingCandidates) VISIBLE else GONE
-        floatingDividerView?.visibility = if (hasComposing && isSelectingCandidates) VISIBLE else GONE
-
-        showFloatingOverlayInternal(isSelectingCandidates)
-    }
-
-    private fun showFloatingOverlayInternal(
-        isSelectingCandidates: Boolean,
-        isCursorAnchorValid: Boolean = this.isCursorAnchorValid,
-        cursorX: Float = this.cursorX,
-        cursorYBottom: Float = this.cursorYBottom,
-        cursorYTop: Float = this.cursorYTop
-    ) {
-        val popup = floatingPopupWindow ?: return
-        val contentView = popup.contentView ?: return
-
-        val displayMetrics = resources.displayMetrics
-        val screenWidth = displayMetrics.widthPixels
-        val screenHeight = displayMetrics.heightPixels
-
-        val maxPopupHeight = (screenHeight * 0.45f).toInt()
-
-        val targetWidth = if (isSelectingCandidates) {
-            screenWidth - dpToPx(32f)
-        } else {
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        }
-
-        val statusText = floatingStatusTextView?.text?.toString() ?: ""
-
-        if (targetWidth == ViewGroup.LayoutParams.WRAP_CONTENT) {
-            contentView.measure(
-                MeasureSpec.makeMeasureSpec(screenWidth - dpToPx(32f), MeasureSpec.AT_MOST),
-                MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
-            )
-        } else {
-            contentView.measure(
-                MeasureSpec.makeMeasureSpec(targetWidth, MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(maxPopupHeight, MeasureSpec.AT_MOST)
-            )
-        }
-        lastFloatingStatusText = statusText
-        lastFloatingSelecting = isSelectingCandidates
-
-        val popupWidth = contentView.measuredWidth
-        val popupHeight = minOf(contentView.measuredHeight, maxPopupHeight)
-
-        var screenX: Int
-        var screenY: Int
-
-        if (isCursorAnchorValid && !cursorYBottom.isNaN()) {
-            if (isSelectingCandidates || cursorX.isNaN()) {
-                screenX = dpToPx(16f)
-            } else {
-                screenX = cursorX.toInt()
-                screenX = screenX.coerceIn(dpToPx(16f), maxOf(dpToPx(16f), screenWidth - popupWidth - dpToPx(16f)))
-            }
-
-            screenY = cursorYBottom.toInt() + dpToPx(4f)
-            if (screenY + popupHeight > screenHeight - dpToPx(8f)) {
-                screenY = if (!cursorYTop.isNaN()) {
-                    cursorYTop.toInt() - popupHeight - dpToPx(4f)
-                } else {
-                    screenHeight - popupHeight - dpToPx(8f)
-                }
-            }
-        } else {
-            screenX = dpToPx(16f)
-            val loc = IntArray(2)
-            if (::composingTextView.isInitialized && composingTextView.isShown) {
-                composingTextView.getLocationOnScreen(loc)
-                screenY = loc[1] - popupHeight - dpToPx(8f)
-            } else {
-                screenY = screenHeight - popupHeight - dpToPx(100f)
-            }
-        }
-
-        screenY = maxOf(0, screenY)
-
-        if (popup.isShowing &&
-            lastFloatingX == screenX &&
-            lastFloatingY == screenY &&
-            lastFloatingWidth == popupWidth &&
-            lastFloatingHeight == popupHeight
-        ) {
-            return
-        }
-
-        lastFloatingX = screenX
-        lastFloatingY = screenY
-        lastFloatingWidth = popupWidth
-        lastFloatingHeight = popupHeight
-
-        showPopupAtScreenLocationWithSize(popup, screenX, screenY, popupWidth, popupHeight)
-    }
-
-    fun showFloatingCandidates() {
-        updateFloatingOverlay(-1)
-    }
-
-    fun updateFloatingCandidatePosition() {
-        updateFloatingOverlay(-1)
+        floatingOverlay.updateOverlay(
+            selectedIndex = selectedIndex,
+            isCursorAnchorValid = isCursorAnchorValid,
+            cursorX = cursorX,
+            cursorYBottom = cursorYBottom,
+            cursorYTop = cursorYTop
+        )
     }
 
     fun dismissFloatingCandidates() {
-        floatingPopupWindow?.dismiss()
-        lastFloatingX = Int.MIN_VALUE
-        lastFloatingY = Int.MIN_VALUE
-        lastFloatingWidth = Int.MIN_VALUE
-        lastFloatingHeight = Int.MIN_VALUE
-        lastFloatingStatusText = ""
-        lastFloatingSelecting = false
+        floatingOverlay.dismiss()
     }
 }

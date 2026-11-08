@@ -13,18 +13,18 @@ import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.StaticLayout
 import android.text.TextPaint
-import android.text.style.AlignmentSpan
-import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
-import android.text.style.RelativeSizeSpan
 import android.util.StateSet
-import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import androidx.appcompat.view.ContextThemeWrapper
-import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.view.ViewCompat
+
+// -------------------------------------------------------------------------------------------------
+// Region: Enums & Types
+// ---------------------------------------------------------------------------------------------
 
 enum class QwertyMode {
     NORMAL,
@@ -97,6 +97,22 @@ enum class KeyType {
         }
 }
 
+enum class InputMode {
+    HIRAGANA,      // あ (日本語かな)
+    ALPHANUMERIC,  // a (英数)
+    NUMERIC        // 1 (数字専用)
+}
+
+enum class KeyBackgroundType {
+    NORMAL,
+    ACTION,
+    ACTIVE
+}
+
+// -------------------------------------------------------------------------------------------------
+// Region: Color Palettes
+// -------------------------------------------------------------------------------------------------
+
 /**
  * テーマごとのカラーパレットを保持するデータクラス
  */
@@ -116,32 +132,40 @@ data class KeyboardPalette(
  * キーボードの色（カラーコード）を一元管理するオブジェクト
  */
 object KeyboardColors {
+    private val baseDarkBg = "#202124".toColorInt()
+    private val baseLightBg = "#F8F9FA".toColorInt()
+    private val baseAccentBlue = "#1A73E8".toColorInt()
+
     val Dark = KeyboardPalette(
-        keyBg = "#3C4043".toColorInt(),
-        actionKeyBg = "#5F6368".toColorInt(),
+        keyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.11f),
+        actionKeyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
         keyText = Color.WHITE,
-        keyPressedBg = "#5F6368".toColorInt(),
-        actionKeyPressedBg = "#70757A".toColorInt(),
-        activeKeyBg = "#8AB4F8".toColorInt(),
-        activeKeyPressedBg = "#669DF6".toColorInt(),
+        keyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
+        actionKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.32f),
+        activeKeyBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.70f),
+        activeKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.85f),
         activeKeyText = "#202124".toColorInt(),
-        disabledBg = "#202124".toColorInt()
+        disabledBg = baseDarkBg
     )
 
     val Light = KeyboardPalette(
         keyBg = Color.WHITE,
-        actionKeyBg = "#DADCE0".toColorInt(),
+        actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),
         keyText = "#202124".toColorInt(),
-        keyPressedBg = "#E8EAED".toColorInt(),
-        actionKeyPressedBg = "#BEC1C5".toColorInt(),
-        activeKeyBg = "#1A73E8".toColorInt(),
-        activeKeyPressedBg = "#174EA6".toColorInt(),
+        keyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
+        actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.22f),
+        activeKeyBg = baseAccentBlue,
+        activeKeyPressedBg = ColorUtils.blendARGB(baseAccentBlue, Color.BLACK, 0.20f),
         activeKeyText = Color.WHITE,
-        disabledBg = "#F1F3F4".toColorInt()
+        disabledBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
     )
 
     fun get(isDark: Boolean): KeyboardPalette = if (isDark) Dark else Light
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Key Specifications (KeySpec)
+// -------------------------------------------------------------------------------------------------
 
 /**
  * 1つのキーの仕様を表すデータクラス (テーブル駆動レイアウト用)
@@ -184,6 +208,7 @@ data class KeySpec(
         repeatable = repeatable,
         drawableResId = drawableResId
     )
+
     // 文字用コンストラクタ
     constructor(
         text: String,
@@ -258,21 +283,15 @@ data class KeySpec(
                 shiftText
             }
         }
-
         QwertyMode.SYMBOL -> symbolText
         QwertyMode.CTRL -> ctrlText
     }
 }
 
-enum class KeyBackgroundType {
-    NORMAL,
-    ACTION,
-    ACTIVE
-}
+// -------------------------------------------------------------------------------------------------
+// Region: Key Background & Drawable Factory
+// -------------------------------------------------------------------------------------------------
 
-/**
- * KeyDrawable を一貫した設定 (4dp 角丸, 2dp インセット) で生成するヘルパー関数
- */
 fun createKeyDrawableByType(
     context: Context,
     isDark: Boolean,
@@ -297,9 +316,6 @@ fun createKeyDrawableByType(
     )
 }
 
-/**
- * inset と selector (StateListDrawable) を組み合わせたボタン背景 Drawable を生成
- */
 fun createKeyButtonDrawable(
     context: Context,
     normalColor: Int,
@@ -354,19 +370,14 @@ fun createKeyButtonDrawable(
     }
 }
 
-enum class InputMode {
-    HIRAGANA,      // あ (日本語かな)
-    ALPHANUMERIC,  // a (英数)
-    NUMERIC        // 1 (数字専用)
-}
+// -------------------------------------------------------------------------------------------------
+// Region: Spannable Label Builders
+// -------------------------------------------------------------------------------------------------
 
-/**
- * ニコキーボード用の入力モード切り替えキーの表示テキスト (Spannable) を生成 (あ1)
- */
 fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
     val mainColor = if (isDark) Color.WHITE else "#202124".toColorInt()
     val subColor = if (isDark) "#9AA0A6".toColorInt() else "#70757A".toColorInt()
-    
+
     val hColor = if (inputMode == InputMode.HIRAGANA) mainColor else subColor
     val nColor = if (inputMode == InputMode.NUMERIC) mainColor else subColor
 
@@ -374,20 +385,17 @@ fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
         val hStart = length
         append("あ")
         setSpan(ForegroundColorSpan(hColor), hStart, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        
+
         val nStart = length
         append("1")
         setSpan(ForegroundColorSpan(nColor), nStart, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
 
-/**
- * 日英切り替えキーの表示テキスト (Spannable) を生成 (あa)
- */
 fun buildLangKeyText(isEnglishMode: Boolean, isDark: Boolean): CharSequence {
     val mainColor = if (isDark) Color.WHITE else "#202124".toColorInt()
     val subColor = if (isDark) "#9AA0A6".toColorInt() else "#70757A".toColorInt()
-    
+
     val hColor = if (!isEnglishMode) mainColor else subColor
     val aColor = if (isEnglishMode) mainColor else subColor
 
@@ -395,21 +403,23 @@ fun buildLangKeyText(isEnglishMode: Boolean, isDark: Boolean): CharSequence {
         val hStart = length
         append("あ")
         setSpan(ForegroundColorSpan(hColor), hStart, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        
+
         val aStart = length
         append("a")
         setSpan(ForegroundColorSpan(aColor), aStart, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
 
-/**
- * キーボード用の拡張 View クラス (ラベル、機能、ウェイト等をカプセル化)
- */
+// -------------------------------------------------------------------------------------------------
+// Region: Custom KeyButton View
+// -------------------------------------------------------------------------------------------------
+
 class KeyButton(
     context: Context,
     val spec: KeySpec,
     keyHeight: Int,
     val keyTextColor: Int,
+    val isDark: Boolean = false,
     onFeedback: () -> Unit
 ) : View(ContextThemeWrapper(context, R.style.Theme_Karukan)) {
 
@@ -443,7 +453,7 @@ class KeyButton(
         }
 
     private var lastBgType: KeyBackgroundType? = null
-    private var lastIsDark: Boolean? = null
+    private var lastIsDark: Boolean = isDark
     private var lastInputMode: InputMode = InputMode.HIRAGANA
     private var lastIsEnglishMode: Boolean = false
 
@@ -457,7 +467,7 @@ class KeyButton(
         textAlign = Paint.Align.LEFT
     }
 
-
+    private var isGuideMode: Boolean = false
 
     init {
         isClickable = true
@@ -477,9 +487,9 @@ class KeyButton(
             isEnabled = false
         } else {
             if (spec.normalType == KeyType.LANG) {
-                text = buildLangKeyText(lastIsEnglishMode, isDark = false)
+                text = buildLangKeyText(lastIsEnglishMode, isDark = lastIsDark)
             } else if (spec.normalType == KeyType.NIKO_LANG) {
-                text = buildInputModeKeyText(InputMode.HIRAGANA, isDark = false)
+                text = buildInputModeKeyText(InputMode.HIRAGANA, isDark = lastIsDark)
             } else {
                 setMainAndSubText(spec.normalText, spec.subText, spec.subText2)
             }
@@ -490,8 +500,6 @@ class KeyButton(
             }
         }
     }
-
-    private var isGuideMode: Boolean = false
 
     fun setGuideText(guideText: String) {
         text = guideText
@@ -548,7 +556,7 @@ class KeyButton(
         if (subT.isEmpty() || subT2.isEmpty()) return
 
         val density = context.resources.displayMetrics.density
-        mainPaint.textSize = 11f * density // 通常フォントサイズの半分
+        mainPaint.textSize = 11f * density
         mainPaint.color = currentTextColor
 
         val combinedText = "$subT\n$subT2"
@@ -620,10 +628,8 @@ class KeyButton(
         val centerX = width / 2f
         val gap = 3f * density
 
-        // ひらがなを中央より左側に右寄せで描画
         canvas.drawText(mainT, centerX - gap, mainY, mainPaint)
 
-        // サブテキストを中央より右側に左寄せで描画
         val rightX = centerX + gap
         canvas.drawText(subT, rightX, sub1Y, subPaint)
         canvas.drawText(subT2, rightX, sub2Y, subPaint)
@@ -638,9 +644,10 @@ class KeyButton(
         }
     }
 
-    fun updateInputMode(inputMode: InputMode, isDark: Boolean = lastIsDark ?: false) {
+    fun updateInputMode(inputMode: InputMode, isDark: Boolean = lastIsDark) {
         lastInputMode = inputMode
         currentInputMode = inputMode
+        lastIsDark = isDark
         if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
             text = buildInputModeKeyText(inputMode, isDark)
         } else if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
@@ -652,8 +659,9 @@ class KeyButton(
         }
     }
 
-    fun updateLanguageMode(isEnglishMode: Boolean, isDark: Boolean = lastIsDark ?: false) {
+    fun updateLanguageMode(isEnglishMode: Boolean, isDark: Boolean = lastIsDark) {
         lastIsEnglishMode = isEnglishMode
+        lastIsDark = isDark
         if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
             text = buildLangKeyText(isEnglishMode, isDark)
         } else if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
@@ -665,6 +673,7 @@ class KeyButton(
     }
 
     fun updateMode(mode: QwertyMode, isDark: Boolean) {
+        lastIsDark = isDark
         currentType = spec.getType(mode)
         if (currentType == KeyType.GAP) {
             text = ""
@@ -725,20 +734,25 @@ class KeyButton(
         }
     }
 
-    private fun resetStyle() {
+    private fun resetStyle(isDark: Boolean = lastIsDark) {
+        lastIsDark = isDark
         val targetBgType = if (isActionKey) KeyBackgroundType.ACTION else KeyBackgroundType.NORMAL
         ViewCompat.setBackgroundTintList(this, null)
-        background = createKeyDrawableByType(context, isDark = false, targetBgType)
+        background = createKeyDrawableByType(context, isDark, targetBgType)
         if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
-            text = buildInputModeKeyText(lastInputMode, isDark = false)
+            text = buildInputModeKeyText(lastInputMode, isDark)
         } else if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
-            text = buildLangKeyText(lastIsEnglishMode, isDark = false)
+            text = buildLangKeyText(lastIsEnglishMode, isDark)
         } else {
             setMainAndSubText(spec.normalText, spec.subText, spec.subText2)
         }
         currentTextColor = keyTextColor
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Event Listener Interface
+// -------------------------------------------------------------------------------------------------
 
 interface KeyboardEventListener {
     fun onKeyFeedback()

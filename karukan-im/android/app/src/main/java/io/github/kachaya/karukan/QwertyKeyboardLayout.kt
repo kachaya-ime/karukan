@@ -1,6 +1,10 @@
 package io.github.kachaya.karukan
 
+/**
+ * 標準 QWERTY キーボードレイアウトのテーブル駆動仕様定義クラス
+ */
 object QwertyKeyboardLayout {
+
     fun getLayoutSpec(): List<List<KeySpec>> {
         return listOf(
             // 1段目 (Row 0): 数字行 (10キー)
@@ -54,7 +58,7 @@ object QwertyKeyboardLayout {
                 KeySpec(".", shiftText = ",", symbolText = "?"),
                 KeySpec("⌫", normalType = KeyType.BACKSPACE, repeatable = true)
             ),
-            // 5段目 (Row 4): アクション行 (Ctrl, @!?/ABCトグル, あa/Tab, 幅広Space, 絵文字, 左右矢印, Enter / 文字キーなし・10スロット構成)
+            // 5段目 (Row 4): アクション行 (Ctrl, @!?/ABCトグル, あa/Tab, 幅広Space, 絵文字, 左右矢印, Enter)
             listOf(
                 KeySpec("ctrl", KeyType.CTRL),
                 KeySpec(

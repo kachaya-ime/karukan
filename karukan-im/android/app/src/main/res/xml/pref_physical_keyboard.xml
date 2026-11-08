@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:iconSpaceReserved="false"
+    >
+
+    <PreferenceCategory
+        android:title="物理キーボード・ハードウェア設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <ListPreference
+            android:defaultValue="jis109"
+            android:entries="@array/pref_physical_keyboard_layout_entries"
+            android:entryValues="@array/pref_physical_keyboard_layout_values"
+            android:key="pref_physical_keyboard_layout"
+            android:title="物理キーボード配列"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_floating_candidate_window"
+            android:summary="物理キーボード使用時にカーソル位置の近くにフローティング候補を表示します"
+            android:title="物理キーボード時のフローティング候補表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_physical_keyboard_suggest_candidates"
+            android:summary="物理キーボード使用時にスペースキー変換開始前（入力中）のサジェスト候補一覧を表示します"
+            android:title="物理キーボード時のサジェスト候補表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_show_floating_status_text"
+            android:summary="物理キーボード使用時にカーソル位置の近くに入力ステータスを表示します"
+            android:title="物理キーボード時のステータス表示"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

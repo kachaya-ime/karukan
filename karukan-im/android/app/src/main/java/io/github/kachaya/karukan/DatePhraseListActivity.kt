@@ -26,6 +26,10 @@ import androidx.recyclerview.widget.RecyclerView
  */
 class DatePhraseListActivity : AppCompatActivity() {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Activity Lifecycle & Views
+    // ---------------------------------------------------------------------------------------------
+
     private lateinit var prefs: SharedPreferences
     private lateinit var adapter: DatePhraseAdapter
     private lateinit var btnAddPhrase: Button
@@ -73,6 +77,10 @@ class DatePhraseListActivity : AppCompatActivity() {
         return true
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Data Persistence & Configuration Loading
+    // ---------------------------------------------------------------------------------------------
+
     private fun loadData() {
         val json = prefs.getString("pref_date_config_json", null)
         currentConfigData = DateConfigData.fromJsonString(json)
@@ -95,6 +103,10 @@ class DatePhraseListActivity : AppCompatActivity() {
         prefs.edit().putString("pref_date_config_json", config.toJsonString()).apply()
         loadData()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Dialog Handlers (Add/Edit Phrase, Formats, Reset)
+    // ---------------------------------------------------------------------------------------------
 
     private fun showAddPhraseDialog() {
         showPhraseEditDialog(null)
@@ -222,6 +234,10 @@ class DatePhraseListActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: RecyclerView Adapter & ViewHolder
+    // ---------------------------------------------------------------------------------------------
 
     private class DatePhraseAdapter(
         private val onEdit: (DatePhraseItem) -> Unit,

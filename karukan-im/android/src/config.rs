@@ -2,6 +2,10 @@ use karukan_engine::LearningConfig;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+// -------------------------------------------------------------------------------------------------
+// Region: Global Path & Engine State Variables
+// -------------------------------------------------------------------------------------------------
+
 pub static MODEL_PATH: Mutex<Option<String>> = Mutex::new(None);
 pub static SYSTEM_DICT_PATH: Mutex<Option<String>> = Mutex::new(None);
 pub static USER_DICT_DIR: Mutex<Option<String>> = Mutex::new(None);
@@ -14,6 +18,10 @@ pub static CURRENT_MAX_LEARNING_SURFACE_CHARS: AtomicUsize =
 pub static IS_DATE_CONVERSION_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static IS_LEARNING_ENABLED: AtomicBool = AtomicBool::new(true);
 pub static ADAPTIVE_USE_GREEDY: AtomicBool = AtomicBool::new(false);
+
+// -------------------------------------------------------------------------------------------------
+// Region: Engine Configuration Struct & Helpers
+// -------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct AndroidEngineConfig {

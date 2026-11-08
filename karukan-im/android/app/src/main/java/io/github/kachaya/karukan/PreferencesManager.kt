@@ -13,6 +13,10 @@ class PreferencesManager(
     private val onSettingsChanged: (KarukanSettings) -> Unit
 ) : SharedPreferences.OnSharedPreferenceChangeListener {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Properties & Lifecycle
+    // ---------------------------------------------------------------------------------------------
+
     private val prefs: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
     private val defaultOptimalThreads: Int = KarukanEngine.calculateOptimalNThreads()
 
@@ -34,6 +38,10 @@ class PreferencesManager(
     fun setLiveConversionEnabled(enabled: Boolean) {
         prefs.edit { putBoolean("pref_live_conversion", enabled) }
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Settings Persistence & Preference Change Listener
+    // ---------------------------------------------------------------------------------------------
 
     fun loadSettings(): KarukanSettings {
         val personaJson = prefs.getString("pref_persona_list", null)
@@ -71,6 +79,7 @@ class PreferencesManager(
 
             isDateConversionEnabled = prefs.getBoolean("pref_date_conversion", true),
             dateConfigJson = prefs.getStringNonNull("pref_date_config_json", ""),
+            isMoveCursorInsideBracketEnabled = prefs.getBoolean("pref_bracket_cursor_inside", true),
             bracketStyle = prefs.getStringNonNull("pref_bracket", "corner"),
             slashStyle = prefs.getStringNonNull("pref_slash", "middle_dot"),
             digitWidth = prefs.getStringNonNull("pref_width_digit", "half"),
@@ -80,11 +89,15 @@ class PreferencesManager(
             keyboardLayout = prefs.getStringNonNull("pref_keyboard_layout", "qwerty"),
             isVibrationEnabled = prefs.getBoolean("pref_vibration_enabled", true),
             isSoundEnabled = prefs.getBoolean("pref_sound_enabled", false),
-            isForceShowSoftKeyboardEnabled = prefs.getBoolean("pref_force_show_soft_keyboard", true),
+            isShowInputStatusBarEnabled = prefs.getBoolean("pref_show_input_status_bar", false),
+            isShowFloatingCandidateWindowEnabled = prefs.getBoolean("pref_show_floating_candidate_window", true),
+            isShowFloatingStatusTextEnabled = prefs.getBoolean("pref_show_floating_status_text", false),
+            isShowPhysicalKeyboardSuggestCandidatesEnabled = prefs.getBoolean("pref_show_physical_keyboard_suggest_candidates", true),
             isAutoCommitEnabled = prefs.getBoolean("pref_auto_commit", true),
             keyboardHeight = prefs.getStringNonNull("pref_keyboard_height", "medium"),
             keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "dark"),
-            physicalKeyboardLayout = prefs.getStringNonNull("pref_physical_keyboard_layout", "jis109")
+            physicalKeyboardLayout = prefs.getStringNonNull("pref_physical_keyboard_layout", "jis109"),
+            keyShortcutsJson = prefs.getStringNonNull("pref_key_shortcuts_json", "")
         )
         currentSettings = settings
         return settings

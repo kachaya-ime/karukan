@@ -239,12 +239,14 @@
         <item>QWERTY 入力 (デフォルト)</item>
         <item>タブレット入力 (US配列)</item>
         <item>ニコタッチ入力 (12キー)</item>
+        <item>Graffiti 風入力 (Palm unistroke)</item>
         <item>内蔵キーボード (Titan / Clicks 等)</item>
     </string-array>
     <string-array name="pref_keyboard_layout_values">
         <item>qwerty</item>
         <item>tablet</item>
         <item>niko</item>
+        <item>graffiti</item>
         <item>builtin</item>
     </string-array>
 

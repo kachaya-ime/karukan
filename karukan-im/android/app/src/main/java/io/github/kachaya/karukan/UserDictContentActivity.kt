@@ -29,6 +29,10 @@ import java.io.File
  */
 class UserDictContentActivity : AppCompatActivity() {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Activity Lifecycle & Views
+    // ---------------------------------------------------------------------------------------------
+
     private lateinit var engine: KarukanEngine
     private lateinit var adapter: DictEntryAdapter
     private lateinit var targetFile: File
@@ -111,6 +115,10 @@ class UserDictContentActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Data Filtering & Loading
+    // ---------------------------------------------------------------------------------------------
+
     private fun loadData() {
         allEntries = engine.getEntriesFromDictFile(targetFile)
         filterList(etSearchQuery.text.toString())
@@ -132,6 +140,10 @@ class UserDictContentActivity : AppCompatActivity() {
         tvEmptyMessage.isVisible = filtered.isEmpty()
         rvEntryList.isVisible = filtered.isNotEmpty()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Dialog Handlers (Add, Edit, Delete)
+    // ---------------------------------------------------------------------------------------------
 
     private fun showAddEntryDialog() {
         val layout = LinearLayout(this).apply {
@@ -253,6 +265,10 @@ class UserDictContentActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: RecyclerView Adapter & ViewHolder
+    // ---------------------------------------------------------------------------------------------
 
     private class DictEntryAdapter(
         private val onEdit: (DictEntryItem) -> Unit,

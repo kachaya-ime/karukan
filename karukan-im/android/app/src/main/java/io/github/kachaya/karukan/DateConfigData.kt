@@ -6,6 +6,11 @@ import org.json.JSONObject
 /**
  * 他のフロントエンド（fcitx5 / macOS）と互換性のある日付・時刻変換ルールデータ構造
  */
+
+// -------------------------------------------------------------------------------------------------
+// Region: DatePhraseItem Data Model
+// -------------------------------------------------------------------------------------------------
+
 data class DatePhraseItem(
     val reading: String,
     val offsetDays: Long = 0,
@@ -39,6 +44,10 @@ data class DatePhraseItem(
         }
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: DateConfigData Data Model & Defaults
+// -------------------------------------------------------------------------------------------------
 
 data class DateConfigData(
     val formats: List<String> = DEFAULT_FORMATS,
@@ -105,7 +114,7 @@ data class DateConfigData(
                 } else DEFAULT_PHRASES
 
                 DateConfigData(formatsList, phrasesList)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 DateConfigData()
             }
         }

@@ -6,6 +6,7 @@ package io.github.kachaya.karukan
  * 画面上で素早く入力できるように配置しています。
  */
 object BuiltinKeyboardLayout {
+
     fun getLayoutSpec(): List<List<KeySpec>> {
         return listOf(
             // 1段目 (Row 0): 内蔵物理キーボードで入力が困難な記号
@@ -19,7 +20,7 @@ object BuiltinKeyboardLayout {
                 KeySpec("="),
                 KeySpec("|"),
                 KeySpec("\\"),
-                KeySpec("."),
+                KeySpec(".")
             ),
             // 2段目 (Row 1): 内蔵物理キーボードで入力が困難な記号
             listOf(
@@ -32,8 +33,8 @@ object BuiltinKeyboardLayout {
                 KeySpec("]"),
                 KeySpec("{"),
                 KeySpec("}"),
-                KeySpec("-"),
-            ),
+                KeySpec("-")
+            )
         )
     }
 }

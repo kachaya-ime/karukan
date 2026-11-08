@@ -24,6 +24,10 @@ import kotlinx.coroutines.withContext
  */
 class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPreferenceStartFragmentCallback {
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Main Activity & Fragment Container
+    // ---------------------------------------------------------------------------------------------
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -56,6 +60,9 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             @Suppress("DEPRECATION")
             setTargetFragment(caller, 0)
         }
+        if (pref.title != null) {
+            supportActionBar?.title = pref.title
+        }
         supportFragmentManager.beginTransaction()
             .replace(R.id.settingsContainer, fragment)
             .addToBackStack(null)
@@ -75,6 +82,10 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
         return super.onOptionsItemSelected(item)
     }
 }
+
+// -------------------------------------------------------------------------------------------------
+// Region: Settings Fragment & Preference Handlers
+// -------------------------------------------------------------------------------------------------
 
 class SettingsFragment : PreferenceFragmentCompat() {
 
@@ -143,12 +154,34 @@ class SettingsFragment : PreferenceFragmentCompat() {
             startActivity(intent)
             true
         }
+
+        findPreference<Preference>("pref_key_shortcut_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), KeyShortcutListActivity::class.java)
+            startActivity(intent)
+            true
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.setTitle(R.string.settings_title)
         updatePersonaSummary()
         updateDatePhraseSummary()
+        updateKeyShortcutSummary()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Preference Summaries & Backup/Restore
+    // ---------------------------------------------------------------------------------------------
+
+    private fun updateKeyShortcutSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_key_shortcuts_json", null)
+        val items = KeyShortcutItem.fromJsonString(json)
+        val customCount = items.count { !it.isReserved && it.actionId != "none" }
+        val summary = "アクティブカスタムショートカット: ${customCount}件"
+        findPreference<Preference>("pref_key_shortcut_management")?.summary = summary
     }
 
     private fun updateDatePhraseSummary() {
@@ -253,8 +286,39 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 }
 
+// -------------------------------------------------------------------------------------------------
+// Region: Sub-Fragment Definitions (Engine, Soft, Physical)
+// -------------------------------------------------------------------------------------------------
+
 class EngineSettingsFragment : PreferenceFragmentCompat() {
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.pref_karukan_engine, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "karukan-engine 内部動作設定"
+    }
+}
+
+class SoftKeyboardSettingsFragment : PreferenceFragmentCompat() {
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_soft_keyboard, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "画面キーボード設定"
+    }
+}
+
+class PhysicalKeyboardSettingsFragment : PreferenceFragmentCompat() {
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_physical_keyboard, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "物理キーボード設定"
     }
 }
