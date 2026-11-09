@@ -43,6 +43,8 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
 
     private fun createContainerInternal(params: KeyboardCreateParams): LinearLayout {
         val context = params.context
+        GraffitiStrokeRecognizer.loadTemplatesFromContext(context)
+
         val isDarkSupplier = params.isDarkSupplier
         val keyButtonHeightSupplier = params.keyButtonHeightSupplier
         val listener = params.listener

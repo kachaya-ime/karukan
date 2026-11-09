@@ -50,11 +50,24 @@ object GraffitiStrokeRecognizer {
         data object None : RecognitionResult
     }
 
+    enum class GridRegion(val displayName: String) {
+        TOP_LEFT("左上"),
+        TOP_CENTER("中央上"),
+        TOP_RIGHT("右上"),
+        CENTER_LEFT("左中央"),
+        CENTER("中央"),
+        CENTER_RIGHT("右中央"),
+        BOTTOM_LEFT("左下"),
+        BOTTOM_CENTER("中央下"),
+        BOTTOM_RIGHT("右下")
+    }
+
     data class DetailedRecognitionResult(
         val result: RecognitionResult,
         val matchedTemplatePoints: List<Point>? = null,
         val matchedTemplateName: String? = null,
-        val hasSelfIntersection: Boolean = false
+        val startRegion: GridRegion = GridRegion.CENTER,
+        val endRegion: GridRegion = GridRegion.CENTER
     )
 
     private const val TAG = "GraffitiStrokeRecognizer"
@@ -69,16 +82,20 @@ object GraffitiStrokeRecognizer {
         val punctuationResult: RecognitionResult,
         val totalDx: Float = 0f,
         val totalDy: Float = 0f,
-        val hasIntersection: Boolean = false
+        val startRegion: GridRegion = GridRegion.CENTER,
+        val endRegion: GridRegion = GridRegion.CENTER
     )
 
-    private val templates = mutableListOf<Template>()
+    private val alphaTemplates = mutableListOf<Template>()
+    private val numericTemplates = mutableListOf<Template>()
+    private val punctuationTemplates = mutableListOf<Template>()
+    private var isTemplatesLoaded = false
 
     /** Punctuation Shift (記号入力) モードの状態 */
     var isPunctuationMode: Boolean = false
 
     // ---------------------------------------------------------------------------------------------
-    // Region: Path Movement & Intersection Utilities
+    // Region: Path Movement Utilities
     // ---------------------------------------------------------------------------------------------
 
     /**
@@ -95,39 +112,32 @@ object GraffitiStrokeRecognizer {
     }
 
     /**
-     * ストロークの各線分同士がクロスしているかを判定します。
+     * 正規化後の座標 (0..squareSize, 0..squareSize) における点の 3x3 グリッド領域を取得します。
+     * 分割比率は 3:4:3 (端 30%, 中央 40%, 端 30%) です。
+     * （左上, 中央上, 右上, 左中央, 中央, 右中央, 左下, 中央下, 右下）
      */
-    fun hasSelfIntersection(points: List<Point>): Boolean {
-        if (points.size < 4) return false
-
-        for (i in 0 until points.size - 2) {
-            val p1 = points[i]
-            val p2 = points[i + 1]
-
-            for (j in i + 2 until points.size - 1) {
-                val p3 = points[j]
-                val p4 = points[j + 1]
-
-                if (isSegmentIntersecting(p1, p2, p3, p4)) {
-                    return true
-                }
-            }
+    fun getGridRegion(p: Point, squareSize: Float = SQUARE_SIZE): GridRegion {
+        val col = when {
+            p.x < squareSize * 0.3f -> 0
+            p.x < squareSize * 0.7f -> 1
+            else -> 2
         }
-        return false
-    }
-
-    private fun ccw(a: Point, b: Point, c: Point): Float {
-        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-    }
-
-    private fun isSegmentIntersecting(p1: Point, p2: Point, p3: Point, p4: Point): Boolean {
-        val ccw1 = ccw(p1, p2, p3)
-        val ccw2 = ccw(p1, p2, p4)
-        val ccw3 = ccw(p3, p4, p1)
-        val ccw4 = ccw(p3, p4, p2)
-
-        return ((ccw1 > 0f && ccw2 < 0f) || (ccw1 < 0f && ccw2 > 0f)) &&
-                ((ccw3 > 0f && ccw4 < 0f) || (ccw3 < 0f && ccw4 > 0f))
+        val row = when {
+            p.y < squareSize * 0.3f -> 0
+            p.y < squareSize * 0.7f -> 1
+            else -> 2
+        }
+        return when (row * 3 + col) {
+            0 -> GridRegion.TOP_LEFT
+            1 -> GridRegion.TOP_CENTER
+            2 -> GridRegion.TOP_RIGHT
+            3 -> GridRegion.CENTER_LEFT
+            4 -> GridRegion.CENTER
+            5 -> GridRegion.CENTER_RIGHT
+            6 -> GridRegion.BOTTOM_LEFT
+            7 -> GridRegion.BOTTOM_CENTER
+            else -> GridRegion.BOTTOM_RIGHT
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -148,102 +158,80 @@ object GraffitiStrokeRecognizer {
         val totalDy: Float = 0f,
         val rawTotalDx: Float = 0f,
         val rawTotalDy: Float = 0f,
-        val hasSelfIntersection: Boolean = false,
+        val startRegion: GridRegion = GridRegion.CENTER,
+        val endRegion: GridRegion = GridRegion.CENTER
     )
 
-    fun findMinBoundingBoxByRotation(points: Collection<Point>): MinBoundingBoxResult? {
+    fun findBoundingBox(points: Collection<Point>): MinBoundingBoxResult? {
         if (points.isEmpty()) return null
 
         val start = points.first()
 
-        var minScaledArea = Float.MAX_VALUE
-        var bestScaledWidth = 0f
-        var bestScaledHeight = 0f
-        var bestAngleDeg = 0
-        var bestScaledRotatedPoints = emptyList<Point>()
-        var bestRawRotatedPoints = emptyList<Point>()
-        var bestRawWidth = 0f
-        var bestRawHeight = 0f
-        var bestRawArea = 0f
+        var minX = Double.MAX_VALUE
+        var maxX = -Double.MAX_VALUE
+        var minY = Double.MAX_VALUE
+        var maxY = -Double.MAX_VALUE
 
-        for (angleDeg in 0 until 360 step 90) {
-            val rad = Math.toRadians(angleDeg.toDouble())
-            val cos = kotlin.math.cos(rad)
-            val sin = kotlin.math.sin(rad)
+        val rawRotatedPoints = ArrayList<Point>(points.size)
 
-            var minX = Double.MAX_VALUE
-            var maxX = -Double.MAX_VALUE
-            var minY = Double.MAX_VALUE
-            var maxY = -Double.MAX_VALUE
+        for (p in points) {
+            val dx = (p.x - start.x).toDouble()
+            val dy = (p.y - start.y).toDouble()
+            rawRotatedPoints.add(Point(dx.toFloat(), dy.toFloat()))
 
-            val rawRotatedPoints = ArrayList<Point>(points.size)
-
-            for (p in points) {
-                val dx = p.x - start.x
-                val dy = p.y - start.y
-                val rx = (dx * cos - dy * sin).toFloat()
-                val ry = (dx * sin + dy * cos).toFloat()
-                rawRotatedPoints.add(Point(rx, ry))
-
-                if (rx < minX) minX = rx.toDouble()
-                if (rx > maxX) maxX = rx.toDouble()
-                if (ry < minY) minY = ry.toDouble()
-                if (ry > maxY) maxY = ry.toDouble()
-            }
-
-            val w = (maxX - minX).toFloat()
-            val h = (maxY - minY).toFloat()
-            val rawArea = w * h
-
-            val maxAbs = max(
-                max(abs(minX), abs(maxX)),
-                max(abs(minY), abs(maxY))
-            ).toFloat()
-
-            val scale = if (maxAbs > 0f) 100f / maxAbs else 1f
-            val scaledWidth = w * scale
-            val scaledHeight = h * scale
-            val scaledArea = scaledWidth * scaledHeight
-
-            if (scaledArea < minScaledArea) {
-                minScaledArea = scaledArea
-                bestScaledWidth = scaledWidth
-                bestScaledHeight = scaledHeight
-                bestAngleDeg = angleDeg
-                bestRawWidth = w
-                bestRawHeight = h
-                bestRawArea = rawArea
-                bestRawRotatedPoints = rawRotatedPoints
-
-                bestScaledRotatedPoints = rawRotatedPoints.map {
-                    Point(
-                        x = it.x * scale,
-                        y = it.y * scale
-                    )
-                }
-            }
+            if (dx < minX) minX = dx
+            if (dx > maxX) maxX = dx
+            if (dy < minY) minY = dy
+            if (dy > maxY) maxY = dy
         }
 
-        val (scaledDx, scaledDy) = computeTotalMovement(bestScaledRotatedPoints)
-        val (rawDx, rawDy) = computeTotalMovement(bestRawRotatedPoints)
-        val hasIntersection = hasSelfIntersection(bestScaledRotatedPoints)
+        val w = (maxX - minX).toFloat()
+        val h = (maxY - minY).toFloat()
+        val rawArea = w * h
+
+        val maxAbs = max(
+            max(abs(minX), abs(maxX)),
+            max(abs(minY), abs(maxY))
+        ).toFloat()
+
+        val scale = if (maxAbs > 0f) 100f / maxAbs else 1f
+        val scaledWidth = w * scale
+        val scaledHeight = h * scale
+        val scaledArea = scaledWidth * scaledHeight
+
+        val scaledRotatedPoints = rawRotatedPoints.map {
+            Point(
+                x = it.x * scale,
+                y = it.y * scale
+            )
+        }
+
+        val (scaledDx, scaledDy) = computeTotalMovement(scaledRotatedPoints)
+        val (rawDx, rawDy) = computeTotalMovement(rawRotatedPoints)
+        val startRegion = if (scaledRotatedPoints.isNotEmpty()) getGridRegion(scaledRotatedPoints.first()) else GridRegion.CENTER
+        val endRegion = if (scaledRotatedPoints.isNotEmpty()) getGridRegion(scaledRotatedPoints.last()) else GridRegion.CENTER
 
         return MinBoundingBoxResult(
-            width = bestScaledWidth,
-            height = bestScaledHeight,
-            area = minScaledArea,
-            angleDeg = bestAngleDeg,
-            rotatedPoints = bestScaledRotatedPoints,
-            rawWidth = bestRawWidth,
-            rawHeight = bestRawHeight,
-            rawArea = bestRawArea,
+            width = scaledWidth,
+            height = scaledHeight,
+            area = scaledArea,
+            angleDeg = 0,
+            rotatedPoints = scaledRotatedPoints,
+            rawWidth = w,
+            rawHeight = h,
+            rawArea = rawArea,
             pointCount = points.size,
             totalDx = scaledDx,
             totalDy = scaledDy,
             rawTotalDx = rawDx,
             rawTotalDy = rawDy,
-            hasSelfIntersection = hasIntersection
+            startRegion = startRegion,
+            endRegion = endRegion
         )
+    }
+
+    fun findMinBoundingBoxByRotation(points: Collection<Point>): MinBoundingBoxResult? {
+        return findBoundingBox(points)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -302,8 +290,16 @@ object GraffitiStrokeRecognizer {
         var matchedPoints: List<Point>? = null
         var matchedName: String? = null
 
+        data class MatchResult(
+            val template: Template,
+            val dist: Float,
+            val result: RecognitionResult
+        )
+
+        var top3Matches = emptyList<MatchResult>()
+
         val result = run {
-            val minBoxResult = findMinBoundingBoxByRotation(sampledRaw) ?: return@run RecognitionResult.None
+            val minBoxResult = findBoundingBox(sampledRaw) ?: return@run RecognitionResult.None
             val maxRawDim = max(minBoxResult.rawWidth, minBoxResult.rawHeight)
             if (sampledRaw.size < 3 || maxRawDim < 25f) {
                 return@run if (targetCategory == TargetCategory.PUNCTUATION) {
@@ -315,14 +311,18 @@ object GraffitiStrokeRecognizer {
 
             val scaled = scaleToSquare(sampledRaw, SQUARE_SIZE)
             val translated = translateToOrigin(scaled)
+            val inputEndRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
 
-            data class MatchResult(
-                val template: Template,
-                val dist: Float,
-                val result: RecognitionResult
-            )
+            val targetTemplates = when (targetCategory) {
+                TargetCategory.ALPHA -> alphaTemplates
+                TargetCategory.NUMERIC -> numericTemplates
+                TargetCategory.PUNCTUATION -> punctuationTemplates
+            }
 
-            val allMatches = templates.map { template ->
+            // endRegionが一致しないテンプレートは解析候補から完全に除外する
+            val candidateTemplates = targetTemplates.filter { it.endRegion == inputEndRegion }
+
+            val validMatches = candidateTemplates.map { template ->
                 val res = when (targetCategory) {
                     TargetCategory.ALPHA -> template.alphaResult
                     TargetCategory.NUMERIC -> template.numericResult
@@ -332,7 +332,8 @@ object GraffitiStrokeRecognizer {
                 MatchResult(template, dist, res)
             }.sortedBy { it.dist }
 
-            val validMatches = allMatches.filter { it.result != RecognitionResult.None }
+            top3Matches = validMatches.take(3)
+
             val bestMatch = validMatches.firstOrNull()
             if (bestMatch != null) {
                 matchedPoints = bestMatch.template.points
@@ -343,7 +344,31 @@ object GraffitiStrokeRecognizer {
             RecognitionResult.None
         }
 
-        val inputHasIntersection = hasSelfIntersection(sampledRaw)
+        val scaledInput = scaleToSquare(sampledRaw, SQUARE_SIZE)
+        val (scaledDx, scaledDy) = computeTotalMovement(scaledInput)
+        val minBoxResult = findBoundingBox(sampledRaw)
+        val inputStartRegion = if (scaledInput.isNotEmpty()) getGridRegion(scaledInput.first()) else GridRegion.CENTER
+        val inputEndRegion = if (scaledInput.isNotEmpty()) getGridRegion(scaledInput.last()) else GridRegion.CENTER
+
+        logI(
+            TAG,
+            "Input Stroke Features -> Category: $targetCategory, PointCount: ${rawPoints.size} (Sampled: ${sampledRaw.size}), " +
+            "Movement: (dx=${"%.1f".format(scaledDx)}, dy=${"%.1f".format(scaledDy)}), RawBounds: (w=${"%.1f".format(minBoxResult?.rawWidth ?: 0f)}, h=${"%.1f".format(minBoxResult?.rawHeight ?: 0f)}), " +
+            "StartRegion: ${inputStartRegion.displayName}, EndRegion: ${inputEndRegion.displayName}, " +
+            "MatchedTemplate: ${matchedName ?: "None"}, Result: $result"
+        )
+
+        if (top3Matches.isNotEmpty()) {
+            logI(TAG, "Top 3 Similar Templates:")
+            top3Matches.forEachIndexed { idx, m ->
+                logI(
+                    TAG,
+                    "  #${idx + 1}: ${m.template.name} -> result=${m.result}, dist=${"%.2f".format(m.dist)}, " +
+                    "dx=${"%.1f".format(m.template.totalDx)}, dy=${"%.1f".format(m.template.totalDy)}, " +
+                    "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}"
+                )
+            }
+        }
 
         if (result is RecognitionResult.PunctuationShift) {
             this.isPunctuationMode = !this.isPunctuationMode
@@ -355,7 +380,8 @@ object GraffitiStrokeRecognizer {
             result = result,
             matchedTemplatePoints = matchedPoints,
             matchedTemplateName = matchedName,
-            hasSelfIntersection = inputHasIntersection
+            startRegion = inputStartRegion,
+            endRegion = inputEndRegion
         )
     }
 
@@ -523,19 +549,30 @@ object GraffitiStrokeRecognizer {
         val scaled = scaleToSquare(sampled, SQUARE_SIZE)
         val translated = translateToOrigin(scaled)
         val (totalDx, totalDy) = computeTotalMovement(scaled)
-        val hasIntersection = hasSelfIntersection(sampled)
-        templates.add(
-            Template(
-                name = name,
-                points = translated,
-                alphaResult = alphaRes,
-                numericResult = numericRes,
-                punctuationResult = punctuationRes,
-                totalDx = totalDx,
-                totalDy = totalDy,
-                hasIntersection = hasIntersection
-            )
+        val startRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.first()) else GridRegion.CENTER
+        val endRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
+
+        val template = Template(
+            name = name,
+            points = translated,
+            alphaResult = alphaRes,
+            numericResult = numericRes,
+            punctuationResult = punctuationRes,
+            totalDx = totalDx,
+            totalDy = totalDy,
+            startRegion = startRegion,
+            endRegion = endRegion
         )
+
+        if (alphaRes != RecognitionResult.None) {
+            alphaTemplates.add(template)
+        }
+        if (numericRes != RecognitionResult.None) {
+            numericTemplates.add(template)
+        }
+        if (punctuationRes != RecognitionResult.None) {
+            punctuationTemplates.add(template)
+        }
     }
 
     data class RotationResultSpec(
@@ -580,134 +617,14 @@ object GraffitiStrokeRecognizer {
         }
     }
 
-    internal fun clearTemplates() {
-        templates.clear()
-    }
 
-    fun parseSvgPathToPoints(pathData: String): List<Point> {
-        val points = mutableListOf<Point>()
-        var currentX = 0f
-        var currentY = 0f
-
-        val regex = Regex("([a-zA-Z])|([-+]?[0-9]*\\.?[0-9]+)")
-        val matches = regex.findAll(pathData).map { it.value }.toList()
-
-        var idx = 0
-        var cmd = ' '
-        while (idx < matches.size) {
-            val token = matches[idx]
-            if (token.length == 1 && token[0].isLetter()) {
-                cmd = token[0]
-                idx++
-            }
-
-            when (cmd) {
-                'm', 'M' -> {
-                    if (idx + 1 < matches.size) {
-                        val x = matches[idx].toFloatOrNull() ?: 0f
-                        val y = matches[idx + 1].toFloatOrNull() ?: 0f
-                        idx += 2
-                        if (cmd == 'm' && points.isNotEmpty()) {
-                            currentX += x
-                            currentY += y
-                        } else {
-                            currentX = x
-                            currentY = y
-                        }
-                        points.add(Point(currentX, currentY))
-                        cmd = if (cmd == 'm') 'l' else 'L'
-                    } else {
-                        idx++
-                    }
-                }
-                'l', 'L' -> {
-                    if (idx + 1 < matches.size) {
-                        val x = matches[idx].toFloatOrNull() ?: 0f
-                        val y = matches[idx + 1].toFloatOrNull() ?: 0f
-                        idx += 2
-                        if (cmd == 'l') {
-                            currentX += x
-                            currentY += y
-                        } else {
-                            currentX = x
-                            currentY = y
-                        }
-                        points.add(Point(currentX, currentY))
-                    } else {
-                        idx++
-                    }
-                }
-                'h', 'H' -> {
-                    if (idx < matches.size) {
-                        val x = matches[idx].toFloatOrNull() ?: 0f
-                        idx++
-                        if (cmd == 'h') {
-                            currentX += x
-                        } else {
-                            currentX = x
-                        }
-                        points.add(Point(currentX, currentY))
-                    } else {
-                        idx++
-                    }
-                }
-                'v', 'V' -> {
-                    if (idx < matches.size) {
-                        val y = matches[idx].toFloatOrNull() ?: 0f
-                        idx++
-                        if (cmd == 'v') {
-                            currentY += y
-                        } else {
-                            currentY = y
-                        }
-                        points.add(Point(currentX, currentY))
-                    } else {
-                        idx++
-                    }
-                }
-                'c', 'C' -> {
-                    if (idx + 5 < matches.size) {
-                        val x1 = matches[idx].toFloatOrNull() ?: 0f
-                        val y1 = matches[idx + 1].toFloatOrNull() ?: 0f
-                        val x2 = matches[idx + 2].toFloatOrNull() ?: 0f
-                        val y2 = matches[idx + 3].toFloatOrNull() ?: 0f
-                        val x = matches[idx + 4].toFloatOrNull() ?: 0f
-                        val y = matches[idx + 5].toFloatOrNull() ?: 0f
-                        idx += 6
-
-                        val startX = currentX
-                        val startY = currentY
-                        val endX = if (cmd == 'c') currentX + x else x
-                        val endY = if (cmd == 'c') currentY + y else y
-                        val ctrl1X = if (cmd == 'c') currentX + x1 else x1
-                        val ctrl1Y = if (cmd == 'c') currentY + y1 else y1
-                        val ctrl2X = if (cmd == 'c') currentX + x2 else x2
-                        val ctrl2Y = if (cmd == 'c') currentY + y2 else y2
-
-                        for (step in 1..5) {
-                            val t = step / 5f
-                            val mt = 1f - t
-                            val bx = mt * mt * mt * startX + 3 * mt * mt * t * ctrl1X + 3 * mt * t * t * ctrl2X + t * t * t * endX
-                            val by = mt * mt * mt * startY + 3 * mt * mt * t * ctrl1Y + 3 * mt * t * t * ctrl2Y + t * t * t * endY
-                            points.add(Point(bx, by))
-                        }
-                        currentX = endX
-                        currentY = endY
-                    } else {
-                        idx++
-                    }
-                }
-                else -> idx++
-            }
-        }
-        return points
-    }
 
     fun parseSvgPath(pathData: String): Path {
         return PathParser.createPathFromPathData(pathData)
     }
 
     fun loadTemplatesFromContext(context: Context) {
+        if (isTemplatesLoaded) return
         try {
             val jsonString = context.assets.open("graffiti_templates.json")
                 .bufferedReader().use { it.readText() }
@@ -718,7 +635,10 @@ object GraffitiStrokeRecognizer {
     }
 
     fun loadTemplatesFromJsonString(jsonString: String) {
-        templates.clear()
+        alphaTemplates.clear()
+        numericTemplates.clear()
+        punctuationTemplates.clear()
+        isTemplatesLoaded = false
         val rootArray = JSONArray(jsonString)
         for (i in 0 until rootArray.length()) {
             val obj = rootArray.getJSONObject(i)
@@ -727,7 +647,8 @@ object GraffitiStrokeRecognizer {
             val points = mutableListOf<Point>()
             val pathData = obj.optString("path", obj.optString("svgPath", ""))
             if (pathData.isNotEmpty()) {
-                points.addAll(parseSvgPathToPoints(pathData))
+                val path = parseSvgPath(pathData)
+                points.addAll(PathSampler.sample(path))
             } else if (obj.has("points")) {
                 val pointsArray = obj.getJSONArray("points")
                 for (j in 0 until pointsArray.length()) {
@@ -753,5 +674,59 @@ object GraffitiStrokeRecognizer {
 
             addRotatedTemplates(name, points, specs)
         }
+
+        isTemplatesLoaded = true
+        logRotatedTemplates()
+    }
+
+    fun logRotatedTemplates() {
+        val totalCount = alphaTemplates.size + numericTemplates.size + punctuationTemplates.size
+        logI(TAG, "Categorized Rotated Templates List (Total Entries: $totalCount):")
+        logI(TAG, "  ALPHA templates: ${alphaTemplates.size} entries")
+        logI(TAG, "  NUMERIC templates: ${numericTemplates.size} entries")
+        logI(TAG, "  PUNCTUATION templates: ${punctuationTemplates.size} entries")
+
+        fun getSortKey(res: RecognitionResult): String {
+            return when (res) {
+                is RecognitionResult.CharResult -> res.char
+                RecognitionResult.Space -> " "
+                RecognitionResult.Backspace -> "\b"
+                RecognitionResult.Return -> "\n"
+                RecognitionResult.Tab -> "\t"
+                RecognitionResult.Shift -> "[Shift]"
+                RecognitionResult.Caps -> "[Caps]"
+                RecognitionResult.Ctrl -> "[Ctrl]"
+                RecognitionResult.PunctuationShift -> "[PuncShift]"
+                RecognitionResult.DpadLeft -> "[DpadLeft]"
+                RecognitionResult.DpadRight -> "[DpadRight]"
+                RecognitionResult.DpadUp -> "[DpadUp]"
+                RecognitionResult.DpadDown -> "[DpadDown]"
+                RecognitionResult.Cancel -> "[Cancel]"
+                RecognitionResult.Menu -> "[Menu]"
+                RecognitionResult.Ext -> "[Ext]"
+                RecognitionResult.None -> "[None]"
+            }
+        }
+
+        fun logCategory(categoryName: String, list: List<Template>, getResult: (Template) -> RecognitionResult) {
+            val sortedList = list.sortedWith(compareBy({ getSortKey(getResult(it)) }, { it.name }))
+            logI(TAG, "--- $categoryName (${sortedList.size}) ---")
+            sortedList.forEachIndexed { idx, t ->
+                val res = getResult(t)
+                val charCodeStr = if (res is RecognitionResult.CharResult && res.char.isNotEmpty()) {
+                    " (code=${res.char[0].code})"
+                } else ""
+                logI(
+                    TAG,
+                    "[$categoryName #${idx + 1}] ${t.name} -> result=$res$charCodeStr, " +
+                    "dx=${"%.1f".format(t.totalDx)}, dy=${"%.1f".format(t.totalDy)}, " +
+                    "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}"
+                )
+            }
+        }
+
+        logCategory("ALPHA", alphaTemplates) { it.alphaResult }
+        logCategory("NUMERIC", numericTemplates) { it.numericResult }
+        logCategory("PUNCTUATION", punctuationTemplates) { it.punctuationResult }
     }
 }

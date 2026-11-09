@@ -75,7 +75,6 @@ class GraffitiAreaView(
     init {
         isClickable = true
         isFocusable = true
-        GraffitiStrokeRecognizer.loadTemplatesFromContext(context)
     }
 
     fun resetMode() {
