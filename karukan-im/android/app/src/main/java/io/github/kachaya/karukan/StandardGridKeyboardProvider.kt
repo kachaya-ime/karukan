@@ -126,15 +126,18 @@ class StandardGridKeyboardProvider(
                             currentMode = QwertyMode.NORMAL
                             updateAllModes()
                         }
+
                         KeyType.BACKSPACE -> {
                             params.listener.onCtrlBackspace()
                             currentMode = QwertyMode.NORMAL
                             updateAllModes()
                         }
+
                         KeyType.CTRL -> {
                             currentMode = QwertyMode.NORMAL
                             updateAllModes()
                         }
+
                         else -> {
                             keyActionTable[btn.currentType]?.invoke(btn)
                             currentMode = QwertyMode.NORMAL

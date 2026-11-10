@@ -52,6 +52,18 @@
             />
 
         <ListPreference
+            android:defaultValue="100"
+            android:dependency="pref_live_conversion"
+            android:entries="@array/pref_live_conversion_debounce_entries"
+            android:entryValues="@array/pref_live_conversion_debounce_values"
+            android:key="pref_live_conversion_debounce_ms"
+            android:summary="キー入力後にライブ変換を開始するまでの待ち時間を設定します"
+            android:title="ライブ変換開始の遅延時間"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
             android:defaultValue="9"
             android:entries="@array/pref_num_candidates_entries"
             android:entryValues="@array/pref_num_candidates_values"

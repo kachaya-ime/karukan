@@ -157,6 +157,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
                     params.onContainerSwapRequested?.invoke(firstStageContainer)
                     params.listener.onBackspace()
                 }
+
                 KeyType.DELETE -> params.listener.onDelete()
                 KeyType.SPACE -> params.listener.onSpaceOrConvert()
                 KeyType.ENTER -> params.listener.onCommit()
@@ -176,6 +177,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
                     val firstStageContainer = createTouchContainer(params)
                     params.onContainerSwapRequested?.invoke(firstStageContainer)
                 }
+
                 KeyType.NIKO_GUIDE_CHAR -> {
                     val char = btn.text.toString()
                     if (char.isNotEmpty()) {
@@ -185,6 +187,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
                         params.listener.onNikoTouchInput(char)
                     }
                 }
+
                 KeyType.NIKO_TOGGLE -> params.listener.onNikoTouchToggle()
                 KeyType.NIKO_INPUT_STAR -> params.listener.onNikoTouchInput("*")
                 KeyType.NIKO_INPUT_POUND -> params.listener.onNikoTouchInput("#")

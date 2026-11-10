@@ -14,6 +14,26 @@
         <item>15</item>
     </string-array>
 
+    <!-- ライブ変換開始の遅延時間 -->
+    <string-array name="pref_live_conversion_debounce_entries">
+        <item>0 ms (即時推論)</item>
+        <item>50 ms</item>
+        <item>100 ms (デフォルト)</item>
+        <item>150 ms</item>
+        <item>200 ms</item>
+        <item>300 ms</item>
+        <item>500 ms</item>
+    </string-array>
+    <string-array name="pref_live_conversion_debounce_values">
+        <item>0</item>
+        <item>50</item>
+        <item>100</item>
+        <item>150</item>
+        <item>200</item>
+        <item>300</item>
+        <item>500</item>
+    </string-array>
+
     <!-- 句読点スタイル -->
     <string-array name="pref_punctuation_entries">
         <item>、。（読点・句点）</item>

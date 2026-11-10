@@ -8,8 +8,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Region: Plugins & Variables
 // -------------------------------------------------------------------------------------------------
 
-val appVersion = "1.2.0"
-val appVersionCode = 10200
+val appVersion = "1.2.1"
+val appVersionCode = 10201
 
 plugins {
     alias(libs.plugins.android.application)

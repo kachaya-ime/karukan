@@ -55,6 +55,7 @@ class PreferencesManager(
         val settings = KarukanSettings(
             modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
+            liveConversionDebounceMs = prefs.getIntFromString("pref_live_conversion_debounce_ms", 100),
             isShowCandidateAnnotationsEnabled = prefs.getBoolean("pref_show_candidate_annotations", true),
             numCandidates = prefs.getIntFromString("pref_num_candidates", 9),
             punctuationStyle = prefs.getStringNonNull("pref_punctuation", "kuten_touten"),

@@ -138,12 +138,15 @@ class KarukanEngine(private val context: Context) {
 
     @Volatile
     var loadProgressListener: OnEngineLoadProgressListener? = null
+
     @Volatile
     var currentLoadStatus: String = ""
         private set
+
     @Volatile
     var currentLoadPercent: Int = 100
         private set
+
     @Volatile
     var isPreparing: Boolean = false
         private set

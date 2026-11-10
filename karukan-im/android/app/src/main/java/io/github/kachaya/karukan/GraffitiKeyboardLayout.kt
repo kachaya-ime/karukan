@@ -71,6 +71,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                         listener.onKeyPress(result.char)
                     }
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Space -> {
                     if (isCtrlMode) {
                         listener.onToggleLanguageMode()
@@ -78,6 +79,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                         listener.onSpaceOrConvert()
                     }
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Backspace -> {
                     if (isCtrlMode) {
                         listener.onCtrlBackspace()
@@ -85,32 +87,41 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                         listener.onBackspace()
                     }
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Return -> {
                     listener.onCommit()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.DpadLeft -> {
                     listener.onDpadLeft()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.DpadRight -> {
                     listener.onDpadRight()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.DpadUp -> {
                     listener.onDpadUp()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.DpadDown -> {
                     listener.onDpadDown()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Ctrl -> {
                     currentMode = if (isCtrlMode) QwertyMode.NORMAL else QwertyMode.CTRL
                     updateSideButtonsMode(currentMode)
                     return
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Tab -> {
                     listener.onTab()
                 }
+
                 is GraffitiStrokeRecognizer.RecognitionResult.Cancel -> {
                     listener.onEsc()
                 }
+
                 else -> {}
             }
 
@@ -237,12 +248,15 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                         KeyType.CHARACTER -> {
                             listener.onCtrlShortcut(btn.spec.normalText)
                         }
+
                         KeyType.BACKSPACE -> {
                             listener.onCtrlBackspace()
                         }
+
                         KeyType.CTRL -> {
                             // Ctrl キー再タップで解除
                         }
+
                         else -> {
                             dispatchKeyAction(btn.currentType)
                         }

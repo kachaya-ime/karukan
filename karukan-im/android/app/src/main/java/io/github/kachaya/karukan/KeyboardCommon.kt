@@ -283,6 +283,7 @@ data class KeySpec(
                 shiftText
             }
         }
+
         QwertyMode.SYMBOL -> symbolText
         QwertyMode.CTRL -> ctrlText
     }

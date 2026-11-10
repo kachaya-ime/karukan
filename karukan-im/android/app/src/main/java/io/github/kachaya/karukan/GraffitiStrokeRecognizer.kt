@@ -353,9 +353,9 @@ object GraffitiStrokeRecognizer {
         logI(
             TAG,
             "Input Stroke Features -> Category: $targetCategory, PointCount: ${rawPoints.size} (Sampled: ${sampledRaw.size}), " +
-            "Movement: (dx=${"%.1f".format(scaledDx)}, dy=${"%.1f".format(scaledDy)}), RawBounds: (w=${"%.1f".format(minBoxResult?.rawWidth ?: 0f)}, h=${"%.1f".format(minBoxResult?.rawHeight ?: 0f)}), " +
-            "StartRegion: ${inputStartRegion.displayName}, EndRegion: ${inputEndRegion.displayName}, " +
-            "MatchedTemplate: ${matchedName ?: "None"}, Result: $result"
+                    "Movement: (dx=${"%.1f".format(scaledDx)}, dy=${"%.1f".format(scaledDy)}), RawBounds: (w=${"%.1f".format(minBoxResult?.rawWidth ?: 0f)}, h=${"%.1f".format(minBoxResult?.rawHeight ?: 0f)}), " +
+                    "StartRegion: ${inputStartRegion.displayName}, EndRegion: ${inputEndRegion.displayName}, " +
+                    "MatchedTemplate: ${matchedName ?: "None"}, Result: $result"
         )
 
         if (top3Matches.isNotEmpty()) {
@@ -364,8 +364,8 @@ object GraffitiStrokeRecognizer {
                 logI(
                     TAG,
                     "  #${idx + 1}: ${m.template.name} -> result=${m.result}, dist=${"%.2f".format(m.dist)}, " +
-                    "dx=${"%.1f".format(m.template.totalDx)}, dy=${"%.1f".format(m.template.totalDy)}, " +
-                    "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}"
+                            "dx=${"%.1f".format(m.template.totalDx)}, dy=${"%.1f".format(m.template.totalDy)}, " +
+                            "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}"
                 )
             }
         }
@@ -618,7 +618,6 @@ object GraffitiStrokeRecognizer {
     }
 
 
-
     fun parseSvgPath(pathData: String): Path {
         return PathParser.createPathFromPathData(pathData)
     }
@@ -719,8 +718,8 @@ object GraffitiStrokeRecognizer {
                 logI(
                     TAG,
                     "[$categoryName #${idx + 1}] ${t.name} -> result=$res$charCodeStr, " +
-                    "dx=${"%.1f".format(t.totalDx)}, dy=${"%.1f".format(t.totalDy)}, " +
-                    "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}"
+                            "dx=${"%.1f".format(t.totalDx)}, dy=${"%.1f".format(t.totalDy)}, " +
+                            "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}"
                 )
             }
         }

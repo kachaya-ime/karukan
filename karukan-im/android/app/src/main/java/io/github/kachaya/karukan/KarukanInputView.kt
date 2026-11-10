@@ -35,6 +35,7 @@ class KarukanInputView @JvmOverloads constructor(
         fun getKeyboardHeightPx(): Int
         fun getSettings(): KarukanSettings
         fun isHardKeyboardConnected(): Boolean
+        fun isIntegratedHardKeyboardConnected(): Boolean
         fun getEngine(): KarukanEngine
         fun onCandidateSelected(hiragana: String, candidate: String, index: Int)
         fun openSettingsActivity()
@@ -188,9 +189,47 @@ class KarukanInputView @JvmOverloads constructor(
         buildViewHierarchy()
     }
 
-    private fun buildViewHierarchy() {
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        ViewCompat.getRootWindowInsets(this)?.let { insets ->
+            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            setPadding(0, 0, 0, navBars.bottom)
+        }
+        ViewCompat.requestApplyInsets(this)
+        post {
+            ViewCompat.requestApplyInsets(this)
+        }
+    }
+
+    private fun updateThemeColors() {
         val colors = getThemeColors()
         setBackgroundColor(colors.bg)
+        if (::composingTextView.isInitialized) {
+            composingTextView.setBackgroundColor(colors.bg)
+            composingTextView.setTextColor(colors.statusText)
+        }
+        if (::toolbarContainer.isInitialized) {
+            toolbarContainer.setBackgroundColor(colors.bg)
+            for (child in toolbarContainer.children) {
+                if (child is TextView) {
+                    child.setTextColor(colors.candidateText)
+                }
+            }
+        }
+        if (::candidateBarContainer.isInitialized) {
+            candidateBarContainer.setBackgroundColor(colors.bg)
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.setTextColor(colors.candidateText)
+        }
+        if (::candidateExpandedContainer.isInitialized) {
+            candidateExpandedContainer.setBackgroundColor(colors.bg)
+        }
+    }
+
+    private fun buildViewHierarchy() {
+        val colors = getThemeColors()
+        updateThemeColors()
 
         // 1. ステータス領域 (モード・未確定文字列表示)
         composingTextView = TextView(context).apply {
@@ -352,6 +391,7 @@ class KarukanInputView @JvmOverloads constructor(
     }
 
     private fun showToolbar() {
+        updateThemeColors()
         updateCandidateSlotHeight()
         if (::toolbarContainer.isInitialized) {
             toolbarContainer.visibility = VISIBLE
@@ -365,6 +405,7 @@ class KarukanInputView @JvmOverloads constructor(
     }
 
     private fun showCandidateBar() {
+        updateThemeColors()
         updateCandidateSlotHeight()
         if (::toolbarContainer.isInitialized) {
             toolbarContainer.visibility = GONE
@@ -379,8 +420,7 @@ class KarukanInputView @JvmOverloads constructor(
 
     fun setupKeyboardLayout(layoutName: String) {
         this.keyboardLayoutSetting = layoutName
-        val colors = getThemeColors()
-        setBackgroundColor(colors.bg)
+        updateThemeColors()
 
         val activeListener = listener ?: return
         val builder = KeyboardLayoutBuilder(
@@ -431,6 +471,7 @@ class KarukanInputView @JvmOverloads constructor(
 
         val colors = getThemeColors()
         val showAnnotations = listener?.getSettings()?.isShowCandidateAnnotationsEnabled ?: true
+        val isHardKb = listener?.isHardKeyboardConnected() ?: false
 
         if (hiragana.isEmpty() || candidates.isEmpty()) {
             collapseCandidates()
@@ -446,35 +487,8 @@ class KarukanInputView @JvmOverloads constructor(
             return
         }
 
-        showCandidateBar()
-
-        renderCandidateList(
-            container = candidateBarContentLayout,
-            candidates = candidates,
-            selectedIndex = selectedIndex,
-            colors = colors,
-            showAnnotations = showAnnotations,
-            isSingleRowBar = true,
-            hiragana = hiragana
-        )
-
-        if (::candidateFlowLayout.isInitialized) {
-            renderCandidateList(
-                container = candidateFlowLayout,
-                candidates = candidates,
-                selectedIndex = selectedIndex,
-                colors = colors,
-                showAnnotations = showAnnotations,
-                isSingleRowBar = false,
-                hiragana = hiragana
-            )
-            if (isCandidateExpanded && ::expandedScrollView.isInitialized) {
-                scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, selectedIndex)
-            }
-        }
-
-        val isHardKb = listener?.isHardKeyboardConnected() ?: false
         if (isHardKb) {
+            showToolbar()
             val floatingFlow = floatingOverlay.getOrCreateCandidateFlowLayout()
             renderCandidateList(
                 container = floatingFlow,
@@ -485,10 +499,37 @@ class KarukanInputView @JvmOverloads constructor(
                 isSingleRowBar = false,
                 hiragana = hiragana
             )
-        }
+        } else {
+            showCandidateBar()
 
-        if (!isCandidateExpanded && selectedIndex >= 0) {
-            scrollToSelectedCandidate(selectedIndex)
+            renderCandidateList(
+                container = candidateBarContentLayout,
+                candidates = candidates,
+                selectedIndex = selectedIndex,
+                colors = colors,
+                showAnnotations = showAnnotations,
+                isSingleRowBar = true,
+                hiragana = hiragana
+            )
+
+            if (::candidateFlowLayout.isInitialized) {
+                renderCandidateList(
+                    container = candidateFlowLayout,
+                    candidates = candidates,
+                    selectedIndex = selectedIndex,
+                    colors = colors,
+                    showAnnotations = showAnnotations,
+                    isSingleRowBar = false,
+                    hiragana = hiragana
+                )
+                if (isCandidateExpanded && ::expandedScrollView.isInitialized) {
+                    scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, selectedIndex)
+                }
+            }
+
+            if (!isCandidateExpanded && selectedIndex >= 0) {
+                scrollToSelectedCandidate(selectedIndex)
+            }
         }
 
         updateFloatingOverlay(selectedIndex)
@@ -756,9 +797,15 @@ class KarukanInputView @JvmOverloads constructor(
             mainKeyboardContainer.visibility = GONE
             return
         }
-        mainKeyboardContainer.visibility = VISIBLE
 
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        val isIntegrated = listener?.isIntegratedHardKeyboardConnected() ?: false
+        if (isHardKb && !isIntegrated) {
+            mainKeyboardContainer.visibility = GONE
+        } else {
+            mainKeyboardContainer.visibility = VISIBLE
+        }
+
         val isStatusBarEnabled = listener?.getSettings()?.isShowInputStatusBarEnabled ?: true
         val statusVisibility = if (isHardKb || !isStatusBarEnabled) GONE else VISIBLE
 
@@ -766,7 +813,7 @@ class KarukanInputView @JvmOverloads constructor(
             composingTextView.visibility = statusVisibility
         }
 
-        if (lastCandidates.isEmpty()) {
+        if (isHardKb || lastCandidates.isEmpty()) {
             showToolbar()
         } else {
             showCandidateBar()

@@ -33,7 +33,8 @@ data class PersonaItem(
                     }
                     list.add(PersonaItem(id, text, isSelected))
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
             return list
         }
 

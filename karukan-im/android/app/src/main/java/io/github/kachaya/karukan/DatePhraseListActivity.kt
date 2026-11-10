@@ -12,8 +12,11 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.DiffUtil
@@ -42,11 +45,19 @@ class DatePhraseListActivity : AppCompatActivity() {
     private var currentConfigData: DateConfigData = DateConfigData()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_date_phrase_list)
 
         title = "日付・時刻変換フレーズの管理"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        val mainView = findViewById<View>(R.id.datePhraseListMainLayout) ?: window.decorView
+        ViewCompat.setOnApplyWindowInsetsListener(mainView) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
 

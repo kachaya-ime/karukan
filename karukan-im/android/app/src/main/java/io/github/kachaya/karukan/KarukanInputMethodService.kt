@@ -34,7 +34,11 @@ class KarukanInputMethodService : InputMethodService() {
     // ---------------------------------------------------------------------------------------------
 
     private lateinit var engine: KarukanEngine
-    private val romajiBuffer = StringBuilder()
+    private var currentPreedit: String = ""
+    private val hasActiveInput: Boolean
+        get() = currentPreedit.isNotEmpty()
+    private val currentActiveQuery: String
+        get() = currentPreedit
 
     // 直前確定記憶 (確定取り消し・再変換用)
     private var lastCommittedSurface: String = ""
@@ -96,7 +100,6 @@ class KarukanInputMethodService : InputMethodService() {
 
     companion object {
         private const val TAG = "KarukanInputService"
-        private const val LIVE_CONVERSION_DEBOUNCE_MS = 100L
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -113,7 +116,7 @@ class KarukanInputMethodService : InputMethodService() {
             loadProgressListener = KarukanEngine.OnEngineLoadProgressListener { message, _ ->
                 if (::composingTextView.isInitialized) {
                     if (isPreparing) {
-                        if (romajiBuffer.isEmpty()) {
+                        if (!hasActiveInput) {
                             composingTextView.text = message
                         }
                     } else {
@@ -133,7 +136,7 @@ class KarukanInputMethodService : InputMethodService() {
                     setInputView(onCreateInputView())
                     pendingInputViewReload = false
                 }
-                if (romajiBuffer.isNotEmpty()) {
+                if (hasActiveInput) {
                     performConversion()
                 }
             }
@@ -210,10 +213,10 @@ class KarukanInputMethodService : InputMethodService() {
         super.onStartInput(attribute, restarting)
         currentEditorInfo = attribute
         requestCursorUpdates()
-        if (settings.isAutoCommitEnabled && romajiBuffer.isNotEmpty()) {
+        if (settings.isAutoCommitEnabled && hasActiveInput) {
             commitCurrentHiragana()
         }
-        romajiBuffer.clear()
+        currentPreedit = ""
         if (::composingTextView.isInitialized) {
             updateComposingText()
             clearCandidateBar()
@@ -248,7 +251,7 @@ class KarukanInputMethodService : InputMethodService() {
     override fun onFinishInput() {
         super.onFinishInput()
         dismissFloatingCandidates()
-        if (settings.isAutoCommitEnabled && romajiBuffer.isNotEmpty()) {
+        if (settings.isAutoCommitEnabled && hasActiveInput) {
             commitCurrentHiragana()
         }
         if (::karukanInputView.isInitialized) {
@@ -266,13 +269,8 @@ class KarukanInputMethodService : InputMethodService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         updateInputViewShown()
-        val effectiveLayout = getEffectiveKeyboardLayout()
-        if (currentEffectiveKeyboardLayout != null && currentEffectiveKeyboardLayout != effectiveLayout) {
-            currentEffectiveKeyboardLayout = effectiveLayout
-            setInputView(onCreateInputView())
-        } else {
-            updateKeyboardLayoutVisibility()
-        }
+        currentEffectiveKeyboardLayout = getEffectiveKeyboardLayout()
+        setInputView(onCreateInputView())
     }
 
     override fun onEvaluateInputViewShown(): Boolean {
@@ -363,11 +361,47 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun isHardKeyboardConnected(): Boolean {
+        // 1. Check configuration (built-in hard keyboard)
         val config = resources.configuration
-        val isPresent = config.keyboard == Configuration.KEYBOARD_QWERTY ||
+        val configHasHardKeyboard = (config.keyboard == Configuration.KEYBOARD_QWERTY ||
                 config.keyboard == Configuration.KEYBOARD_12KEY ||
-                config.keyboard != Configuration.KEYBOARD_NOKEYS
-        return isPresent && config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+                config.keyboard != Configuration.KEYBOARD_NOKEYS) &&
+                config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+
+        if (configHasHardKeyboard) return true
+
+        // 2. Check connected input devices (Bluetooth / USB external keyboards like JP109)
+        val deviceIds = android.view.InputDevice.getDeviceIds()
+        for (id in deviceIds) {
+            val device = android.view.InputDevice.getDevice(id)
+            if (device != null && !device.isVirtual()) {
+                val sources = device.sources
+                if ((sources and android.view.InputDevice.SOURCE_KEYBOARD) == android.view.InputDevice.SOURCE_KEYBOARD) {
+                    if (device.keyboardType == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private fun isIntegratedHardKeyboardConnected(): Boolean {
+        val deviceIds = android.view.InputDevice.getDeviceIds()
+        for (id in deviceIds) {
+            val device = android.view.InputDevice.getDevice(id)
+            if (device != null && !device.isVirtual()) {
+                val sources = device.sources
+                if ((sources and android.view.InputDevice.SOURCE_KEYBOARD) == android.view.InputDevice.SOURCE_KEYBOARD) {
+                    if (device.keyboardType == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                        if (!device.isExternal()) {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private fun updateKeyboardLayoutVisibility() {
@@ -447,6 +481,7 @@ class KarukanInputMethodService : InputMethodService() {
     private val inputViewListener = object : KarukanInputView.Listener {
         override fun isDarkTheme(): Boolean = this@KarukanInputMethodService.isDarkTheme()
         override fun isHardKeyboardConnected(): Boolean = this@KarukanInputMethodService.isHardKeyboardConnected()
+        override fun isIntegratedHardKeyboardConnected(): Boolean = this@KarukanInputMethodService.isIntegratedHardKeyboardConnected()
         override fun getKeyboardHeightPx(): Int = this@KarukanInputMethodService.getKeyboardHeightPx()
         override fun getEngine(): KarukanEngine = engine
         override fun getSettings(): KarukanSettings = settings
@@ -527,7 +562,7 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         override fun onNikoToggleLanguageMode() {
-            if (romajiBuffer.isNotEmpty()) {
+            if (hasActiveInput) {
                 commitCurrentHiragana()
             }
             inputMode = when (inputMode) {
@@ -593,8 +628,9 @@ class KarukanInputMethodService : InputMethodService() {
             KeyAction.FullWidthSpace -> {
                 handleSpecialShortcut("space_shift") { onFullWidthSpace() }
             }
+
             is KeyAction.Commit -> {
-                if (isPhysicalKeyboard && romajiBuffer.isEmpty() && selectedCandidateIndex < 0) {
+                if (isPhysicalKeyboard && !hasActiveInput && selectedCandidateIndex < 0) {
                     return false
                 }
                 onCommitKey()
@@ -603,33 +639,34 @@ class KarukanInputMethodService : InputMethodService() {
             KeyAction.Escape -> onEscape()
             is KeyAction.Tab -> onTabKey(action.isShift)
             KeyAction.CommitHiragana -> {
-                if (romajiBuffer.isEmpty()) return false
+                if (!hasActiveInput) return false
                 convertHiragana()
             }
 
             KeyAction.CommitKatakana -> {
-                if (isPhysicalKeyboard && romajiBuffer.isEmpty()) return false
+                if (isPhysicalKeyboard && !hasActiveInput) return false
                 commitKatakanaOrToggleMode()
             }
 
             KeyAction.CommitHankakuKatakana -> {
-                if (romajiBuffer.isEmpty()) return false
+                if (!hasActiveInput) return false
                 commitHankakuKatakana()
             }
 
             KeyAction.CommitZenkakuAlphanumeric -> {
-                if (romajiBuffer.isEmpty()) return false
+                if (!hasActiveInput) return false
                 commitZenkakuAlphanumeric()
             }
 
             KeyAction.CommitHankakuAlphanumeric -> {
-                if (romajiBuffer.isEmpty()) return false
+                if (!hasActiveInput) return false
                 commitHankakuAlphanumeric()
             }
 
             KeyAction.ToggleLanguageMode -> {
                 handleSpecialShortcut("space_ctrl") { onToggleLanguageMode() }
             }
+
             KeyAction.Henkan -> onHenkanKey()
             KeyAction.KanaMode -> onKanaKey()
             KeyAction.EisuMode -> onEisuKey()
@@ -668,7 +705,7 @@ class KarukanInputMethodService : InputMethodService() {
             is KeyAction.SelectCandidateNumber -> {
                 if (currentCandidates.isNotEmpty() && action.index in currentCandidates.indices) {
                     val cand = currentCandidates[action.index]
-                    val hiragana = engine.romajiToHiraganaFlush(romajiBuffer.toString())
+                    val hiragana = currentActiveQuery
                     onCandidateSelected(hiragana, cand)
                 } else return false
             }
@@ -762,9 +799,11 @@ class KarukanInputMethodService : InputMethodService() {
             KeyAction.ToggleLanguageMode,
             KeyAction.ToggleLiveConversion,
             KeyAction.ToggleDetailDisplay -> true
+
             is KeyAction.CtrlShortcut -> {
                 action.key in setOf("a", "c", "v", "x", "z", "l", "e")
             }
+
             else -> false
         }
     }
@@ -774,34 +813,82 @@ class KarukanInputMethodService : InputMethodService() {
 
         result.commitText?.let { commitStr ->
             if (commitStr.isNotEmpty()) {
-                currentInputConnection?.commitText(commitStr, 1)
-                lastCommittedSurface = commitStr
+                val commitTextValue = (currentLiveCandidate ?: commitStr).extractPureCandidate()
+                val reading = currentActiveQuery.ifEmpty { commitStr }
+                if (settings.isLearningEnabled && commitTextValue != reading) {
+                    engine.recordLearning(reading, commitTextValue)
+                }
+                lastCommittedSurface = commitTextValue
+                lastCommittedReading = reading
+                currentInputConnection?.commitText(commitTextValue, 1)
+                clearComposingState()
             }
         }
 
         if (result.hasPreedit && result.preeditText != null) {
             val preedit = result.preeditText
+            currentLiveCandidate = null
             if (preedit.isNotEmpty()) {
+                currentPreedit = preedit
                 val caretPos = if (result.caret >= preedit.length) 1 else result.caret - preedit.length
                 currentInputConnection?.setComposingText(preedit, caretPos)
                 if (::composingTextView.isInitialized) {
                     composingTextView.text = preedit
                 }
+                if (settings.isLiveConversionEnabled) {
+                    triggerLiveConversion(preedit)
+                }
             } else {
+                currentPreedit = ""
                 currentInputConnection?.finishComposingText()
+                cancelLiveConversion()
             }
         } else if (result.commitText != null && !result.hasPreedit) {
+            currentPreedit = ""
             clearComposingState()
         }
 
         if (result.hasCandidates && result.candidates != null) {
             currentCandidates = result.candidates
-            renderCandidates("", currentCandidates)
+            val activePreedit = if (currentPreedit.isNotEmpty()) currentPreedit else ""
+            renderCandidates(activePreedit, currentCandidates)
         } else if (result.hideCandidates) {
             clearCandidateBar()
         }
 
         return true
+    }
+
+    private fun triggerLiveConversion(preedit: String) {
+        cancelLiveConversion()
+        val queryId = ++currentLiveConversionQueryId
+
+        liveConversionJob = serviceScope.launch {
+            val debounceMs = settings.liveConversionDebounceMs.toLong()
+            if (debounceMs > 0L) {
+                delay(debounceMs)
+            }
+            if (!isActive || queryId != currentLiveConversionQueryId) return@launch
+
+            val (candidates, topCandidate) = withContext(Dispatchers.Default) {
+                if (!coroutineContext.isActive || queryId != currentLiveConversionQueryId) {
+                    return@withContext Pair(emptyList(), "")
+                }
+                val candidates = fetchCandidates(preedit, queryId)
+                val topCandidate = candidates.firstOrNull() ?: preedit
+                Pair(candidates, topCandidate)
+            }
+
+            if (isActive && queryId == currentLiveConversionQueryId && currentPreedit == preedit) {
+                val pureTopCandidate = topCandidate.extractPureCandidate()
+                currentLiveCandidate = pureTopCandidate
+                val detailStr = if (showCandidateDetails) " (推論: Live, 候補数: ${candidates.size})" else ""
+                val displayTopCandidate = if (settings.isShowCandidateAnnotationsEnabled) topCandidate else pureTopCandidate
+                composingTextView.text = "かな: $preedit → $displayTopCandidate${if (isKatakanaMode) " [カタカナ]" else ""}$detailStr"
+                currentInputConnection?.setComposingText(pureTopCandidate, 1)
+                renderCandidates(preedit, candidates)
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -815,7 +902,7 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         if (isShift && key.length == 1 && key[0] in 'A'..'Z') {
-            if (romajiBuffer.isNotEmpty()) {
+            if (currentPreedit.isNotEmpty()) {
                 commitCurrentHiragana()
             }
             inputMode = InputMode.ALPHANUMERIC
@@ -830,20 +917,23 @@ class KarukanInputMethodService : InputMethodService() {
             selectedCandidateIndex = -1
         }
 
-        romajiBuffer.append(key)
-        updateComposingText()
+        val code = key[0].code
+        val modifiers = if (isShift) 1 else 0
+        val res = engine.processKey(code, modifiers)
+        applyProcessKeyResult(res)
     }
 
     private fun onNikoTouchInput(char: String) {
         if (isEnglishMode || NikoKeyboardLayout.isDirectCommit(char)) {
-            if (romajiBuffer.isNotEmpty()) {
+            if (currentPreedit.isNotEmpty()) {
                 commitCurrentHiragana()
             }
             currentInputConnection?.commitText(char, 1)
             return
         }
-        romajiBuffer.append(char)
-        updateComposingText()
+        val code = char[0].code
+        val res = engine.processKey(code, 0)
+        applyProcessKeyResult(res)
     }
 
     private fun onNikoTouchToggle() {
@@ -862,18 +952,13 @@ class KarukanInputMethodService : InputMethodService() {
             }
         }
 
-        if (romajiBuffer.isNotEmpty()) {
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
-            if (hiragana.isNotEmpty()) {
-                val lastChar = hiragana.last().toString()
-                val toggled = NikoKeyboardLayout.toggleChar(lastChar)
-                if (lastChar != toggled) {
-                    val prefix = hiragana.substring(0, hiragana.length - 1)
-                    romajiBuffer.clear()
-                    romajiBuffer.append(prefix).append(toggled)
-                    updateComposingText()
-                }
+        if (currentPreedit.isNotEmpty()) {
+            val lastChar = currentPreedit.last().toString()
+            val toggled = NikoKeyboardLayout.toggleChar(lastChar)
+            if (lastChar != toggled) {
+                engine.processKey(0xff08, 0)
+                val res = engine.processKey(toggled[0].code, 0)
+                applyProcessKeyResult(res)
             }
         }
     }
@@ -885,10 +970,8 @@ class KarukanInputMethodService : InputMethodService() {
             updateComposingText()
             return
         }
-        if (romajiBuffer.isNotEmpty()) {
-            romajiBuffer.deleteCharAt(romajiBuffer.length - 1)
-            updateComposingText()
-        } else {
+        val res = engine.processKey(0xff08, 0)
+        if (!applyProcessKeyResult(res)) {
             val selectedText = currentInputConnection?.getSelectedText(0)
             if (!selectedText.isNullOrEmpty()) {
                 currentInputConnection?.commitText("", 1)
@@ -902,7 +985,7 @@ class KarukanInputMethodService : InputMethodService() {
     private fun onDeleteForward() {
         if (selectedCandidateIndex >= 0) {
             onEscape()
-        } else if (romajiBuffer.isNotEmpty()) {
+        } else if (hasActiveInput) {
             onBackspace()
         } else {
             currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
@@ -917,8 +1000,10 @@ class KarukanInputMethodService : InputMethodService() {
         }
         if (selectedCandidateIndex >= 0) {
             onNextCandidate()
-        } else if (romajiBuffer.isNotEmpty()) {
-            performConversion()
+        } else if (hasActiveInput) {
+            val query = currentActiveQuery
+            val combinedCandidates = fetchCandidates(query)
+            renderCandidates(query, combinedCandidates)
             if (currentCandidates.isNotEmpty()) {
                 selectedCandidateIndex = 0
                 updateSelectionPreview()
@@ -929,7 +1014,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onHenkanKey() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onSpaceKey()
         } else {
             if (!reconvert()) {
@@ -939,7 +1024,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onKanaKey() {
-        if (romajiBuffer.isNotEmpty()) {
+        if (hasActiveInput) {
             convertHiragana()
         } else {
             inputMode = InputMode.HIRAGANA
@@ -952,7 +1037,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onEisuKey() {
-        if (romajiBuffer.isNotEmpty()) {
+        if (hasActiveInput) {
             commitCurrentHiragana()
         }
         inputMode = InputMode.ALPHANUMERIC
@@ -963,7 +1048,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onFullWidthSpace() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onPreviousCandidate()
         } else {
             currentInputConnection?.commitText("　", 1)
@@ -972,10 +1057,9 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun onCommitKey() {
         if (selectedCandidateIndex in currentCandidates.indices) {
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
+            val hiragana = currentActiveQuery
             onCandidateSelected(hiragana, currentCandidates[selectedCandidateIndex])
-        } else if (romajiBuffer.isNotEmpty()) {
+        } else if (hasActiveInput) {
             commitCurrentHiragana()
         } else {
             val inputType = currentEditorInfo?.inputType ?: 0
@@ -1002,7 +1086,7 @@ class KarukanInputMethodService : InputMethodService() {
             isLiveConversionPreviewActive = false
             currentLiveCandidate = null
             updateComposingText()
-        } else if (romajiBuffer.isNotEmpty()) {
+        } else if (hasActiveInput) {
             clearComposingState()
         }
     }
@@ -1010,7 +1094,7 @@ class KarukanInputMethodService : InputMethodService() {
     private fun onTabKey(isShift: Boolean = false) {
         if (selectedCandidateIndex >= 0) {
             if (isShift) onPreviousCandidate() else onNextCandidate()
-        } else if (romajiBuffer.isNotEmpty()) {
+        } else if (hasActiveInput) {
             performConversionNoLearning()
         } else {
             val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
@@ -1021,7 +1105,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onToggleLanguageMode() {
-        if (romajiBuffer.isNotEmpty()) {
+        if (hasActiveInput) {
             commitCurrentHiragana()
         }
         val isEng = inputMode != InputMode.HIRAGANA
@@ -1102,12 +1186,12 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun updateComposingText() {
         requestCursorUpdates()
-        val hasInput = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+        val hasInput = hasActiveInput || selectedCandidateIndex >= 0
         if (::karukanInputView.isInitialized) {
             karukanInputView.updateNikoInputState(hasInput)
         }
         if (isEnglishMode) {
-            if (::engine.isInitialized && engine.isPreparing && romajiBuffer.isEmpty()) {
+            if (::engine.isInitialized && engine.isPreparing && !hasActiveInput) {
                 composingTextView.text = engine.currentLoadStatus
             } else {
                 composingTextView.text = "英数モード"
@@ -1118,8 +1202,7 @@ class KarukanInputMethodService : InputMethodService() {
             return
         }
 
-        val raw = romajiBuffer.toString()
-        if (raw.isEmpty()) {
+        if (!hasActiveInput) {
             if (::engine.isInitialized && engine.isPreparing) {
                 composingTextView.text = engine.currentLoadStatus
             } else {
@@ -1132,74 +1215,12 @@ class KarukanInputMethodService : InputMethodService() {
             clearCandidateBar()
             return
         }
-
-        // 絵文字モード (:smile など)
-        if (raw.startsWith(":")) {
-            val emojiQuery = raw.substring(1)
-            val emojiCandidates = fetchEmojiCandidates(emojiQuery)
-            currentCandidates = emojiCandidates
-            composingTextView.text = "絵文字検索: $raw"
-            currentInputConnection?.setComposingText(raw, 1)
-            renderCandidates(raw, emojiCandidates)
-            return
-        }
-
-        val hiraganaRaw = engine.romajiToHiragana(raw)
-        val hiragana = if (isKatakanaMode) engine.hiraganaToKatakana(hiraganaRaw) else hiraganaRaw
-
-        val katakanaTag = if (isKatakanaMode) " [カタカナ]" else ""
-        if (!settings.isLiveConversionEnabled) {
-            currentLiveCandidate = hiragana
-            composingTextView.text = "かな: $hiragana$katakanaTag"
-            currentInputConnection?.setComposingText(hiragana, 1)
-            if (::karukanInputView.isInitialized) {
-                karukanInputView.updateFloatingOverlay(selectedCandidateIndex)
-            }
-            return
-        }
-
-        // ライブ変換
-        isLiveConversionPreviewActive = true
-        composingTextView.text = "かな: $hiragana$katakanaTag"
-        currentInputConnection?.setComposingText(hiragana, 1)
-        if (::karukanInputView.isInitialized) {
-            karukanInputView.updateFloatingOverlay(selectedCandidateIndex)
-        }
-
-        cancelLiveConversion()
-
-        val queryId = ++currentLiveConversionQueryId
-
-        liveConversionJob = serviceScope.launch {
-            delay(LIVE_CONVERSION_DEBOUNCE_MS)
-            if (!isActive || queryId != currentLiveConversionQueryId) return@launch
-
-            val (flushHiragana, candidates, topCandidate) = withContext(Dispatchers.Default) {
-                if (!coroutineContext.isActive || queryId != currentLiveConversionQueryId) {
-                    return@withContext Triple("", emptyList(), "")
-                }
-                val flushHiraganaRaw = engine.romajiToHiraganaFlush(raw)
-                val flushHiragana = if (isKatakanaMode) engine.hiraganaToKatakana(flushHiraganaRaw) else flushHiraganaRaw
-                val candidates = fetchCandidates(flushHiragana, queryId)
-                val topCandidate = candidates.firstOrNull() ?: flushHiragana
-                Triple(flushHiragana, candidates, topCandidate)
-            }
-
-            if (isActive && queryId == currentLiveConversionQueryId && romajiBuffer.toString() == raw) {
-                val pureTopCandidate = topCandidate.extractPureCandidate()
-                currentLiveCandidate = pureTopCandidate
-                val detailStr = if (showCandidateDetails) " (推論: Live, 候補数: ${candidates.size})" else ""
-                val displayTopCandidate = if (settings.isShowCandidateAnnotationsEnabled) topCandidate else pureTopCandidate
-                composingTextView.text = "かな: $flushHiragana → $displayTopCandidate$katakanaTag$detailStr"
-                currentInputConnection?.setComposingText(pureTopCandidate, 1)
-                renderCandidates(flushHiragana, candidates)
-            }
-        }
     }
 
     private fun cancelLiveConversion() {
         liveConversionJob?.cancel()
         liveConversionJob = null
+        currentLiveCandidate = null
         if (currentLiveConversionQueryId > 0) {
             engine.cancelQuery(currentLiveConversionQueryId)
         }
@@ -1214,7 +1235,7 @@ class KarukanInputMethodService : InputMethodService() {
         var leftContext = ""
         if (settings.useContext) {
             val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 20, 0)?.toString() ?: ""
-            val rawBuffer = romajiBuffer.toString()
+            val rawBuffer = currentPreedit
             val currentLineContext = rawContext.substringAfterLast('\n').substringAfterLast('\r')
             var cleanedContext = currentLineContext
 
@@ -1275,12 +1296,9 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun performConversion() {
         if (isEnglishMode) return
+        if (!hasActiveInput) return
 
-        val raw = romajiBuffer.toString()
-        if (raw.isEmpty()) return
-
-        val hiraganaRaw = engine.romajiToHiraganaFlush(raw)
-        val hiragana = if (isKatakanaMode) engine.hiraganaToKatakana(hiraganaRaw) else hiraganaRaw
+        val hiragana = currentActiveQuery
         val combinedCandidates = fetchCandidates(hiragana)
 
         renderCandidates(hiragana, combinedCandidates)
@@ -1291,9 +1309,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun performConversionNoLearning() {
-        if (isEnglishMode || romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
-        val hiragana = engine.romajiToHiraganaFlush(raw)
+        if (isEnglishMode || !hasActiveInput) return
+        val hiragana = currentActiveQuery
         val candidates = fetchCandidates(hiragana)
         selectedCandidateIndex = 0
         renderCandidates(hiragana, candidates)
@@ -1301,9 +1318,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun convertPreeditTo(convertedText: String) {
-        if (romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
-        val hiragana = engine.romajiToHiraganaFlush(raw)
+        if (!hasActiveInput) return
+        val hiragana = currentActiveQuery
 
         currentCandidates = listOf(convertedText)
         selectedCandidateIndex = 0
@@ -1315,16 +1331,14 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun convertHiragana() {
-        if (romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
-        val hiragana = engine.romajiToHiraganaFlush(raw)
+        if (!hasActiveInput) return
+        val hiragana = currentActiveQuery
         convertPreeditTo(hiragana)
     }
 
     private fun commitKatakanaOrToggleMode() {
-        if (romajiBuffer.isNotEmpty()) {
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
+        if (hasActiveInput) {
+            val hiragana = currentActiveQuery
             val katakana = engine.hiraganaToKatakana(hiragana)
             convertPreeditTo(katakana)
         } else {
@@ -1334,33 +1348,22 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun fixChunkPreedit() {
-        if (romajiBuffer.isEmpty()) return
-
+        if (!hasActiveInput) return
         val res = engine.processKey('j'.code, 4)
-        if (res.consumed && res.hasPreedit && !res.preeditText.isNullOrEmpty()) {
-            romajiBuffer.clear()
-            romajiBuffer.append(res.preeditText)
-        } else {
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
-            romajiBuffer.clear()
-            romajiBuffer.append(hiragana)
-        }
-        updateComposingText()
+        applyProcessKeyResult(res)
     }
 
     private fun commitHankakuKatakana() {
-        if (romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
-        val hiragana = engine.romajiToHiraganaFlush(raw)
+        if (!hasActiveInput) return
+        val hiragana = currentActiveQuery
         val katakana = engine.hiraganaToKatakana(hiragana)
         val hankakuKatakana = toHankakuKatakana(katakana)
         convertPreeditTo(hankakuKatakana)
     }
 
     private fun commitZenkakuAlphanumeric() {
-        if (romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
+        if (!hasActiveInput) return
+        val raw = currentPreedit
         val current = currentCandidates.getOrNull(selectedCandidateIndex)
         val lower = toZenkakuAlphanumeric(raw.lowercase(Locale.getDefault()))
         val upper = toZenkakuAlphanumeric(raw.uppercase(Locale.getDefault()))
@@ -1375,8 +1378,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun commitHankakuAlphanumeric() {
-        if (romajiBuffer.isEmpty()) return
-        val raw = romajiBuffer.toString()
+        if (!hasActiveInput) return
+        val raw = currentPreedit
         val current = currentCandidates.getOrNull(selectedCandidateIndex)
         val lower = raw.lowercase(Locale.getDefault())
         val upper = raw.uppercase(Locale.getDefault())
@@ -1391,7 +1394,7 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun reconvert(): Boolean {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) return false
+        if (hasActiveInput || selectedCandidateIndex >= 0) return false
         if (lastCommittedSurface.isEmpty() || lastCommittedReading.isEmpty()) return false
 
         val surfaceLength = lastCommittedSurface.length
@@ -1401,7 +1404,8 @@ class KarukanInputMethodService : InputMethodService() {
         lastCommittedSurface = ""
         lastCommittedReading = ""
 
-        romajiBuffer.append(readingToRestore)
+        currentPreedit = readingToRestore
+        currentInputConnection?.setComposingText(currentPreedit, 1)
         updateComposingText()
         return true
     }
@@ -1466,8 +1470,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun updateSelectionPreview() {
         if (selectedCandidateIndex in currentCandidates.indices) {
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
+            val hiragana = currentActiveQuery
             val selectedCand = currentCandidates[selectedCandidateIndex]
             val pureCand = selectedCand.extractPureCandidate()
             val filterTag = if (activeSourceFilter != SourceFilter.ALL) " [${getSourceFilterLabel(activeSourceFilter)}]" else ""
@@ -1488,7 +1491,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun onPreviousCandidate() {
         if (currentCandidates.isEmpty()) {
-            if (romajiBuffer.isNotEmpty()) {
+            if (hasActiveInput) {
                 performConversion()
                 if (currentCandidates.isNotEmpty()) {
                     selectedCandidateIndex = currentCandidates.size - 1
@@ -1504,8 +1507,7 @@ class KarukanInputMethodService : InputMethodService() {
     private fun onDeleteSelectedCandidate() {
         if (selectedCandidateIndex in currentCandidates.indices) {
             val pureCand = currentCandidates[selectedCandidateIndex].extractPureCandidate()
-            val raw = romajiBuffer.toString()
-            val hiragana = engine.romajiToHiraganaFlush(raw)
+            val hiragana = currentActiveQuery
             engine.removeLearningEntry(hiragana, pureCand)
             performConversion()
         }
@@ -1535,7 +1537,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun clearComposingState() {
         cancelLiveConversion()
-        romajiBuffer.clear()
+        currentPreedit = ""
         currentLiveCandidate = null
         selectedCandidateIndex = -1
         activeSourceFilter = SourceFilter.ALL
@@ -1547,11 +1549,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun commitCurrentHiragana() {
-        val raw = romajiBuffer.toString()
-        if (raw.isEmpty()) return
-
-        val hiraganaRaw = engine.romajiToHiraganaFlush(raw)
-        val hiragana = if (isKatakanaMode) engine.hiraganaToKatakana(hiraganaRaw) else hiraganaRaw
+        if (!hasActiveInput) return
+        val hiragana = currentActiveQuery
         val commitTextValue = (currentLiveCandidate ?: hiragana).extractPureCandidate()
 
         if (settings.isLearningEnabled && commitTextValue != hiragana) {
@@ -1569,7 +1568,7 @@ class KarukanInputMethodService : InputMethodService() {
     // ---------------------------------------------------------------------------------------------
 
     private fun executeActionById(actionId: String): Boolean {
-        val isComposing = romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0
+        val isComposing = hasActiveInput || selectedCandidateIndex >= 0
         when (actionId) {
             "none" -> return false
             "select_all" -> selectAllEditingArea()
@@ -1587,30 +1586,36 @@ class KarukanInputMethodService : InputMethodService() {
                 if (!isComposing) return false
                 fixChunkPreedit()
             }
+
             "symbol_view" -> {
                 activeSourceFilter = SourceFilter.SYMBOL
                 performConversion()
             }
+
             "learning_view" -> {
                 activeSourceFilter = SourceFilter.LEARNING
                 performConversion()
             }
+
             "reconvert" -> {
                 if (isComposing) return false
                 reconvert()
             }
+
             "toggle_live_conversion" -> onToggleLiveConversion()
             "toggle_emoji_palette" -> {
                 if (::karukanInputView.isInitialized) {
                     karukanInputView.toggleEmojiPalette()
                 }
             }
+
             "toggle_detail" -> onToggleDetailDisplay()
             "toggle_candidate_expand" -> {
                 if (::karukanInputView.isInitialized) {
                     karukanInputView.toggleCandidateExpand()
                 }
             }
+
             "toggle_language_mode" -> onToggleLanguageMode()
             "cursor_left" -> onDpadLeft()
             "cursor_right" -> onDpadRight()
@@ -1625,6 +1630,7 @@ class KarukanInputMethodService : InputMethodService() {
                     onDpadDown()
                 }
             }
+
             "prev_candidate" -> {
                 if (isComposing) {
                     onPreviousCandidate()
@@ -1632,6 +1638,7 @@ class KarukanInputMethodService : InputMethodService() {
                     onDpadUp()
                 }
             }
+
             "full_width_space" -> onFullWidthSpace()
             else -> return false
         }
@@ -1668,35 +1675,35 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun selectAllEditingArea() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onEscape()
         }
         currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
     }
 
     private fun undoEditingArea() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onEscape()
         }
         currentInputConnection?.performContextMenuAction(android.R.id.undo)
     }
 
     private fun cutEditingArea() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onEscape()
         }
         currentInputConnection?.performContextMenuAction(android.R.id.cut)
     }
 
     private fun copyEditingArea() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onEscape()
         }
         currentInputConnection?.performContextMenuAction(android.R.id.copy)
     }
 
     private fun pasteEditingArea() {
-        if (romajiBuffer.isNotEmpty() || selectedCandidateIndex >= 0) {
+        if (hasActiveInput || selectedCandidateIndex >= 0) {
             onEscape()
         }
         currentInputConnection?.performContextMenuAction(android.R.id.paste)

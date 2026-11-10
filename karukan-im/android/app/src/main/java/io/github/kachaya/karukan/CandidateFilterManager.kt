@@ -29,6 +29,7 @@ object CandidateFilterManager {
                 }
                 if (learningCands.isNotEmpty()) learningCands else rawCandidates
             }
+
             KarukanInputMethodService.SourceFilter.SYMBOL -> {
                 val rewriterCands = rawCandidates.filter { it.contains("🔄") || it.contains("📅") }
                 val symbolCandList = rawCandidates.filter { cand ->
@@ -45,6 +46,7 @@ object CandidateFilterManager {
                 val sorted = rewriterCands + symbolCandList
                 if (sorted.isNotEmpty()) sorted else rawCandidates
             }
+
             KarukanInputMethodService.SourceFilter.AI -> rawCandidates.filter { it.extractPureCandidate() !in learningEntries }
             KarukanInputMethodService.SourceFilter.DICTIONARY -> rawCandidates.filter { it.isNotEmpty() }
             else -> rawCandidates
