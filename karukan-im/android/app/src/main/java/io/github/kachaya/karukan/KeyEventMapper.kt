@@ -127,71 +127,7 @@ object KeyEventMapper {
         return null
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Region: KeyEvent to Native Keysym/Modifiers
-    // ---------------------------------------------------------------------------------------------
 
-    fun toNativeKeysymAndModifiers(keyCode: Int, event: KeyEvent?, physicalKeyboardLayout: String = "jis109"): Pair<Int, Int>? {
-        if (event == null) return null
-
-        val isJis109 = physicalKeyboardLayout == "jis109"
-        val scanCode = event.scanCode
-        val mappedKeyCode = if (isJis109 && scanCode != 0) {
-            scancodeToKeyCodeMap[scanCode] ?: keyCode
-        } else {
-            keyCode
-        }
-
-        var modifiers = 0
-        if (event.isShiftPressed) modifiers = modifiers or 1
-        if (event.isCtrlPressed) modifiers = modifiers or 4
-        if (event.isAltPressed) modifiers = modifiers or 8
-
-        val keysym = when (mappedKeyCode) {
-            KeyEvent.KEYCODE_DEL -> 0xff08
-            KeyEvent.KEYCODE_FORWARD_DEL -> 0xffff
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> 0xff0d
-            KeyEvent.KEYCODE_ESCAPE -> 0xff1b
-            KeyEvent.KEYCODE_TAB -> if (event.isShiftPressed) 0xfe20 else 0xff09
-            KeyEvent.KEYCODE_SPACE -> 0x0020
-            KeyEvent.KEYCODE_DPAD_LEFT -> 0xff51
-            KeyEvent.KEYCODE_DPAD_UP -> 0xff52
-            KeyEvent.KEYCODE_DPAD_RIGHT -> 0xff53
-            KeyEvent.KEYCODE_DPAD_DOWN -> 0xff54
-            KeyEvent.KEYCODE_MOVE_HOME -> 0xff50
-            KeyEvent.KEYCODE_MOVE_END -> 0xff57
-            KeyEvent.KEYCODE_PAGE_UP -> 0xff55
-            KeyEvent.KEYCODE_PAGE_DOWN -> 0xff56
-            KeyEvent.KEYCODE_HENKAN -> 0xff23
-            KeyEvent.KEYCODE_MUHENKAN -> 0xff22
-            KeyEvent.KEYCODE_KATAKANA_HIRAGANA, KeyEvent.KEYCODE_KANA -> 0xff27
-            KeyEvent.KEYCODE_ZENKAKU_HANKAKU -> 0xff29
-            else -> {
-                if (isJis109) {
-                    val jisPair = jisCharacterMap[mappedKeyCode]
-                    if (jisPair != null) {
-                        val charToInput = if (event.isShiftPressed) jisPair.second else jisPair.first
-                        charToInput.code
-                    } else null
-                } else null
-            }
-        }
-
-        if (keysym != null) {
-            return Pair(keysym, modifiers)
-        }
-
-        val unicode = event.unicodeChar
-        if (unicode in 32..126) {
-            return Pair(unicode, modifiers)
-        }
-
-        return null
-    }
-
-    fun charToNativeKeysym(char: Char): Int {
-        return char.code
-    }
 
     private fun getCtrlShortcutChar(event: KeyEvent): String? {
         val unmod = event.getUnicodeChar(0)

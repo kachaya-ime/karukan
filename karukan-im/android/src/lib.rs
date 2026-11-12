@@ -53,14 +53,11 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeInit<'
     if let Ok(mut m_guard) = MODEL_PATH.lock() {
         *m_guard = Some(path_str.clone());
     }
-    if let Ok(mut e_guard) = ENGINE.lock() {
-        *e_guard = None;
-    }
 
     let path_buf = PathBuf::from(path_str);
     let source = ModelSource::Path(path_buf);
 
-    match KanaKanjiConverter::from_source(&source, "jinen-v2-xsmall-q5") {
+    match KanaKanjiConverter::from_source(&source, "jinen-v2-xsmall-q8_0") {
         Ok(converter) => {
             let mut guard = CONVERTER.lock().unwrap();
             *guard = Some(converter);
@@ -91,9 +88,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadSy
     if let Ok(mut s_guard) = SYSTEM_DICT_PATH.lock() {
         *s_guard = Some(path_str.clone());
     }
-    if let Ok(mut e_guard) = ENGINE.lock() {
-        *e_guard = None;
-    }
 
     report_progress(&mut env, &progress_listener, "システム辞書をロード中...", 50);
 
@@ -105,18 +99,20 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadSy
         return 0;
     }
 
+    let loaded_dict = match Dictionary::load_auto(&path_buf) {
+        Ok(dict) => Some(dict),
+        Err(_) => None,
+    };
+
     let mut guard = SYSTEM_DICT.lock().unwrap();
-    match Dictionary::load_auto(&path_buf) {
-        Ok(dict) => {
-            *guard = Some(dict);
-            report_progress(&mut env, &progress_listener, "システム辞書のロード完了", 100);
-            1
-        }
-        Err(_) => {
-            *guard = None;
-            report_progress(&mut env, &progress_listener, "システム辞書のロード失敗", 100);
-            0
-        }
+    if let Some(dict) = loaded_dict {
+        *guard = Some(dict);
+        report_progress(&mut env, &progress_listener, "システム辞書のロード完了", 100);
+        1
+    } else {
+        *guard = None;
+        report_progress(&mut env, &progress_listener, "システム辞書のロード失敗", 100);
+        0
     }
 }
 
@@ -134,9 +130,6 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeLoadUs
 
     if let Ok(mut u_guard) = USER_DICT_DIR.lock() {
         *u_guard = Some(dir_str.clone());
-    }
-    if let Ok(mut e_guard) = ENGINE.lock() {
-        *e_guard = None;
     }
 
     report_progress(&mut env, &progress_listener, "追加辞書ファイルを確認中...", 5);
@@ -213,6 +206,9 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
     chunk_alphabets: jni::sys::jint,
     beam_width: jni::sys::jint,
     beam_chars: jni::sys::jint,
+    persona: JString<'a>,
+    context_chars: jni::sys::jint,
+    use_context: jboolean,
     punctuation: JString<'a>,
     bracket: JString<'a>,
     slash: JString<'a>,
@@ -251,6 +247,16 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeUpdate
         config.chunk_alphabets = chunk_alphabets;
         config.beam_width = beam_width;
         config.beam_chars = beam_chars;
+        config.use_context = use_context != 0;
+        config.context_chars = if config.use_context {
+            context_chars
+        } else {
+            0
+        };
+        config.persona = env
+            .get_string(&persona)
+            .map(|s| s.into())
+            .unwrap_or_default();
     }
 
     let p_str: String = env.get_string(&punctuation).map(|s| s.into()).unwrap_or_default();
@@ -339,6 +345,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
     max_candidates: jni::sys::jint,
     context: JString<'a>,
     query_id: jni::sys::jlong,
+    source_filter: jni::sys::jint,
 ) -> JString<'a> {
     let q_id = if query_id > 0 { query_id as u64 } else { 0 };
 
@@ -352,7 +359,7 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeConver
         Err(_) => String::new(),
     };
 
-    let result = convert_query(&input_str, max_candidates, &context_str, q_id)
+    let result = convert_query(&input_str, max_candidates, &context_str, q_id, source_filter)
         .unwrap_or_default();
 
     env.new_string(result)
@@ -492,84 +499,19 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeRomaji
 
     env.new_string(result)
         .unwrap_or_else(|_| env.new_string("").unwrap())
-}
+    }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeProcessKey<'a>(
-    mut env: JNIEnv<'a>,
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeResetEngine<'a>(
+    _env: JNIEnv<'a>,
     _class: JClass<'a>,
-    keysym: jni::sys::jint,
-    modifiers: jni::sys::jint,
-    is_release: jboolean,
-) -> jobject {
-    let res = process_key_struct(keysym as u32, modifiers as u32, is_release == 0);
-
-    let cls = match env.find_class("io/github/kachaya/karukan/ProcessKeyResult") {
-        Ok(c) => c,
-        Err(_) => return std::ptr::null_mut(),
-    };
-
-    let commit_jstr = match res.commit_text {
-        Some(ref s) => env.new_string(s).ok().map(JObject::from),
-        None => None,
-    };
-
-    let preedit_jstr = match res.preedit_text {
-        Some(ref s) => env.new_string(s).ok().map(JObject::from),
-        None => None,
-    };
-
-    let aux_jstr = match res.aux_text {
-        Some(ref s) => env.new_string(s).ok().map(JObject::from),
-        None => None,
-    };
-
-    let candidates_jlist = if let Some(ref c_list) = res.candidates {
-        let array_list_cls = match env.find_class("java/util/ArrayList") {
-            Ok(c) => c,
-            Err(_) => return std::ptr::null_mut(),
-        };
-        let list_obj = match env.new_object(&array_list_cls, "(I)V", &[JValue::Int(c_list.len() as i32)]) {
-            Ok(o) => o,
-            Err(_) => return std::ptr::null_mut(),
-        };
-
-        for item in c_list {
-            if let Ok(item_jstr) = env.new_string(item) {
-                let _ = env.call_method(&list_obj, "add", "(Ljava/lang/Object;)Z", &[JValue::Object(&item_jstr)]);
-                let _ = env.delete_local_ref(JObject::from(item_jstr));
-            }
-        }
-        Some(list_obj)
-    } else {
-        None
-    };
-
-    let null_obj = JObject::null();
-
-    let args = [
-        JValue::Bool(if res.consumed { 1 } else { 0 }),
-        JValue::Object(commit_jstr.as_ref().unwrap_or(&null_obj)),
-        JValue::Bool(if res.has_preedit { 1 } else { 0 }),
-        JValue::Object(preedit_jstr.as_ref().unwrap_or(&null_obj)),
-        JValue::Int(res.caret as i32),
-        JValue::Bool(if res.has_candidates { 1 } else { 0 }),
-        JValue::Object(candidates_jlist.as_ref().unwrap_or(&null_obj)),
-        JValue::Bool(if res.hide_candidates { 1 } else { 0 }),
-        JValue::Object(aux_jstr.as_ref().unwrap_or(&null_obj)),
-    ];
-
-    let obj = match env.new_object(
-        &cls,
-        "(ZLjava/lang/String;ZLjava/lang/String;IZLjava/util/List;ZLjava/lang/String;)V",
-        &args,
-    ) {
-        Ok(o) => o,
-        Err(_) => return std::ptr::null_mut(),
-    };
-
-    obj.into_raw()
+) {
+    if let Ok(mut guard) = converter::ENGINE.lock() {
+        *guard = None;
+    }
 }
+
+
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSetDateConfigJson<'a>(
@@ -582,4 +524,83 @@ pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeSetDat
         .map(|s| s.into())
         .unwrap_or_default();
     dict_engine::update_date_config(&json_str);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Region: Native Text Transformation Helpers
+// -------------------------------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeToHankakuKatakana<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    let input_str: String = match env.get_string(&input) {
+        Ok(s) => s.into(),
+        Err(_) => return env.new_string("").unwrap(),
+    };
+
+    let mut result = String::with_capacity(input_str.len() * 2);
+    for c in input_str.chars() {
+        let mapped = match c {
+            'ア' => "ｱ", 'イ' => "ｲ", 'ウ' => "ｳ", 'エ' => "ｴ", 'オ' => "ｵ",
+            'カ' => "ｶ", 'キ' => "ｷ", 'ク' => "ｸ", 'ケ' => "ｹ", 'コ' => "ｺ",
+            'サ' => "ｻ", 'シ' => "ｼ", 'ス' => "ｽ", 'セ' => "ｾ", 'ソ' => "ｿ",
+            'タ' => "ﾀ", 'チ' => "ﾁ", 'ツ' => "ﾂ", 'テ' => "ﾃ", 'ト' => "ﾄ",
+            'ナ' => "ﾅ", 'ニ' => "ﾆ", 'ヌ' => "ﾇ", 'ネ' => "ﾈ", 'ノ' => "ﾉ",
+            'ハ' => "ﾊ", 'ヒ' => "ﾋ", 'フ' => "ﾌ", 'ヘ' => "ﾍ", 'ホ' => "ﾎ",
+            'マ' => "ﾏ", 'ミ' => "ﾐ", 'ム' => "ﾑ", 'メ' => "ﾒ", 'モ' => "ﾓ",
+            'ヤ' => "ﾔ", 'ユ' => "ﾕ", 'ヨ' => "ﾖ",
+            'ラ' => "ﾗ", 'リ' => "ﾘ", 'ル' => "ﾙ", 'レ' => "ﾚ", 'ロ' => "ﾛ",
+            'ワ' => "ﾜ", 'ヲ' => "ｦ", 'ン' => "ﾝ",
+            'ァ' => "ｧ", 'ィ' => "ｨ", 'ゥ' => "ｩ", 'ェ' => "ｪ", 'ォ' => "ｫ",
+            'ッ' => "ｯ", 'ャ' => "ｬ", 'ュ' => "ｭ", 'ョ' => "ｮ", 'ー' => "ｰ",
+            'ガ' => "ｶﾞ", 'ギ' => "ｷﾞ", 'グ' => "ｸﾞ", 'ゲ' => "ｹﾞ", 'ゴ' => "ｺﾞ",
+            'ザ' => "ｻﾞ", 'ジ' => "ｼﾞ", 'ズ' => "ｽﾞ", 'ゼ' => "ｾﾞ", 'ゾ' => "ｿﾞ",
+            'ダ' => "ﾀﾞ", 'ヂ' => "ﾁﾞ", 'ヅ' => "ﾂﾞ", 'デ' => "ﾃﾞ", 'ド' => "ﾄﾞ",
+            'バ' => "ﾊﾞ", 'ビ' => "ﾋﾞ", 'ブ' => "ﾌﾞ", 'ベ' => "ﾍﾞ", 'ボ' => "ﾎﾞ",
+            'パ' => "ﾊﾟ", 'ピ' => "ﾋﾟ", 'プ' => "ﾌﾟ", 'ペ' => "ﾍﾟ", 'ポ' => "ﾎﾟ",
+            'ヴ' => "ｳﾞ",
+            _ => {
+                result.push(c);
+                continue;
+            }
+        };
+        result.push_str(mapped);
+    }
+
+    env.new_string(result)
+        .unwrap_or_else(|_| env.new_string("").unwrap())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_io_github_kachaya_karukan_KarukanEngine_nativeToZenkakuAlphanumeric<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    input: JString<'a>,
+) -> JString<'a> {
+    let input_str: String = match env.get_string(&input) {
+        Ok(s) => s.into(),
+        Err(_) => return env.new_string("").unwrap(),
+    };
+
+    let mut result = String::with_capacity(input_str.len());
+    for c in input_str.chars() {
+        let code = c as u32;
+        if (0x0021..=0x007E).contains(&code) {
+            if let Some(zc) = char::from_u32(code + 0xFEE0) {
+                result.push(zc);
+            } else {
+                result.push(c);
+            }
+        } else if code == 0x0020 {
+            result.push('　');
+        } else {
+            result.push(c);
+        }
+    }
+
+    env.new_string(result)
+        .unwrap_or_else(|_| env.new_string("").unwrap())
 }

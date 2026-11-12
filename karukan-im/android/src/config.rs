@@ -33,6 +33,9 @@ pub struct AndroidEngineConfig {
     pub chunk_alphabets: i32,
     pub beam_width: i32,
     pub beam_chars: i32,
+    pub context_chars: i32,
+    pub use_context: bool,
+    pub persona: String,
 }
 
 impl Default for AndroidEngineConfig {
@@ -46,6 +49,9 @@ impl Default for AndroidEngineConfig {
             chunk_alphabets: 0,
             beam_width: 3,
             beam_chars: 30,
+            context_chars: 10,
+            use_context: true,
+            persona: String::new(),
         }
     }
 }

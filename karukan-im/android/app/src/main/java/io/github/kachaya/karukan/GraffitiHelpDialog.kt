@@ -27,9 +27,10 @@ object GraffitiHelpDialog {
         val dialog = Dialog(context)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
 
-        val bgColor = if (isDark) Color.parseColor("#202124") else Color.parseColor("#F8F9FA")
-        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
-        val btnBgColor = if (isDark) Color.parseColor("#3C4043") else Color.parseColor("#DADCE0")
+        val colors = ThemeColors.from(isDark)
+        val bgColor = colors.bg
+        val textColor = colors.textColor
+        val btnBgColor = colors.btnHelpBg
 
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL

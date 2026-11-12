@@ -5,7 +5,7 @@ package io.github.kachaya.karukan
  */
 data class KarukanSettings(
     // 基本変換設定
-    val modelName: String = "jinen-v2-xsmall-Q5_K_M.gguf",
+    val modelName: String = "jinen-v2-xsmall-Q8_0.gguf",
     val isLiveConversionEnabled: Boolean = true,
     val liveConversionDebounceMs: Int = 100,
     val isShowCandidateAnnotationsEnabled: Boolean = true,

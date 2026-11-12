@@ -36,6 +36,194 @@ fn clean_model_candidate(s: &str) -> String {
     cleaned.trim().to_string()
 }
 
+fn model_context(base_context: &str, preceding: &str, persona: &str, max_chars: usize) -> String {
+    let combined = format!("{base_context}{preceding}");
+    let char_count = combined.chars().count();
+    let context = combined
+        .chars()
+        .skip(char_count.saturating_sub(max_chars))
+        .collect::<String>();
+    let context = if context.trim().is_empty() {
+        String::new()
+    } else {
+        context
+    };
+
+    if persona.is_empty() {
+        context
+    } else if context.is_empty() {
+        persona.to_string()
+    } else {
+        format!("{persona} {context}")
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChunkTokenKind {
+    Japanese,
+    Digit,
+    Symbol,
+    Alphabet,
+}
+
+#[derive(Clone, Copy)]
+struct ChunkToken {
+    ch: char,
+    kind: ChunkTokenKind,
+}
+
+fn is_japanese(c: char) -> bool {
+    c != '\u{30FB}'
+        && matches!(
+            c,
+            '\u{3040}'..='\u{309F}'
+                | '\u{30A0}'..='\u{30FF}'
+                | '\u{3400}'..='\u{9FFF}'
+        )
+}
+
+fn classify_chunk_token(ch: char) -> ChunkToken {
+    let kind = if is_japanese(ch) {
+        ChunkTokenKind::Japanese
+    } else if karukan_engine::kana::is_digit(ch) {
+        ChunkTokenKind::Digit
+    } else if ch.is_alphabetic() {
+        ChunkTokenKind::Alphabet
+    } else {
+        ChunkTokenKind::Symbol
+    };
+    ChunkToken { ch, kind }
+}
+
+fn split_reading_into_chunks(
+    reading: &str,
+    max_chars: usize,
+    max_symbols: usize,
+    max_digits: usize,
+    max_alphabets: usize,
+) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut chunk: Vec<ChunkToken> = Vec::new();
+
+    for token in reading.chars().map(classify_chunk_token) {
+        let has_japanese = chunk
+            .iter()
+            .any(|existing| existing.kind == ChunkTokenKind::Japanese);
+        let budget = match token.kind {
+            ChunkTokenKind::Japanese => None,
+            ChunkTokenKind::Digit => Some(max_digits),
+            ChunkTokenKind::Symbol => Some(max_symbols),
+            ChunkTokenKind::Alphabet => Some(max_alphabets),
+        };
+        let fits = chunk.len() < max_chars.max(1)
+            && match budget {
+                None => has_japanese,
+                Some(_) if !has_japanese => true,
+                Some(budget) => chunk
+                    .iter()
+                    .filter(|existing| existing.kind == token.kind)
+                    .count()
+                    < budget,
+            };
+
+        if !chunk.is_empty() && !fits {
+            chunks.push(chunk.iter().map(|token| token.ch).collect());
+            chunk.clear();
+        }
+        chunk.push(token);
+    }
+
+    if !chunk.is_empty() {
+        chunks.push(chunk.iter().map(|token| token.ch).collect());
+    }
+    chunks
+}
+
+fn chunk_contains_japanese(chunk: &str) -> bool {
+    chunk.chars().any(is_japanese)
+}
+
+fn trailing_japanese_chunks_start(chunks: &[String], beam_chars: usize) -> usize {
+    let mut start = chunks.len();
+    let mut taken = 0;
+    for chunk in chunks.iter().rev() {
+        if !chunk_contains_japanese(chunk) {
+            break;
+        }
+        let len = chunk.chars().count();
+        if taken > 0 && taken + len > beam_chars {
+            break;
+        }
+        taken += len;
+        start -= 1;
+    }
+    start
+}
+
+fn convert_chunked_model_candidates(
+    input: &str,
+    base_context: &str,
+    persona: &str,
+    max_candidates: usize,
+    chunk_chars: usize,
+    chunk_symbols: usize,
+    chunk_digits: usize,
+    chunk_alphabets: usize,
+    beam_chars: usize,
+    context_chars: usize,
+    query_id: u64,
+    mut convert: impl FnMut(&str, &str, usize) -> Vec<String>,
+) -> Option<Vec<String>> {
+    let chunks = split_reading_into_chunks(
+        input,
+        chunk_chars,
+        chunk_symbols,
+        chunk_digits,
+        chunk_alphabets,
+    );
+    let beam_start = trailing_japanese_chunks_start(&chunks, beam_chars);
+    let mut prefix = String::new();
+
+    for chunk in &chunks[..beam_start] {
+        if is_query_cancelled(query_id) {
+            return None;
+        }
+        let converted = if chunk_contains_japanese(chunk) {
+            let lctx = model_context(base_context, &prefix, persona, context_chars);
+            let katakana = karukan_engine::hiragana_to_katakana(chunk);
+            convert(&katakana, &lctx, 1)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| chunk.clone())
+        } else {
+            chunk.clone()
+        };
+        prefix.push_str(&converted);
+    }
+
+    if is_query_cancelled(query_id) {
+        return None;
+    }
+    if beam_start == chunks.len() {
+        return Some(if prefix == input {
+            Vec::new()
+        } else {
+            vec![prefix]
+        });
+    }
+
+    let beam_reading = chunks[beam_start..].concat();
+    let lctx = model_context(base_context, &prefix, persona, context_chars);
+    let katakana = karukan_engine::hiragana_to_katakana(&beam_reading);
+    let tails = convert(&katakana, &lctx, max_candidates);
+    Some(
+        tails
+            .into_iter()
+            .map(|tail| format!("{prefix}{tail}"))
+            .collect(),
+    )
+}
+
 // -------------------------------------------------------------------------------------------------
 // Region: Conversion Pipeline (convert_query)
 // -------------------------------------------------------------------------------------------------
@@ -45,6 +233,7 @@ pub fn convert_query(
     max_candidates: i32,
     context_str: &str,
     q_id: u64,
+    source_filter: i32,
 ) -> Option<String> {
     if is_query_cancelled(q_id) || input_str.is_empty() {
         return Some(String::new());
@@ -53,17 +242,28 @@ pub fn convert_query(
     let has_left_context = !context_str.trim().is_empty();
 
     // Chunk および Beam 設定パラメータの取得
-    let (max_ai_len, chunk_symbols, chunk_digits, chunk_alphabets) = {
+    let (
+        chunk_chars,
+        chunk_symbols,
+        chunk_digits,
+        chunk_alphabets,
+        beam_chars,
+        context_chars,
+        persona,
+    ) = {
         let guard = ENGINE_CONFIG.lock().unwrap();
         if let Some(ref config) = *guard {
             (
-                config.chunk_chars.min(config.beam_chars).max(1) as usize,
+                config.chunk_chars.max(1) as usize,
                 config.chunk_symbols,
                 config.chunk_digits,
                 config.chunk_alphabets,
+                config.beam_chars.max(0) as usize,
+                config.context_chars.max(0) as usize,
+                config.persona.clone(),
             )
         } else {
-            (30, 1, 0, 0)
+            (30, 1, 0, 0, 30, 10, String::new())
         }
     };
 
@@ -83,18 +283,6 @@ pub fn convert_query(
         return Some(input_str.to_string());
     }
 
-    // 2. chunk_chars / beam_chars による最大AI変換入力長の調整（長文入力時の安全な切り出しとプレフィックス保持）
-    let effective_max_ai_len = max_ai_len.min(128);
-    let char_count = input_str.chars().count();
-    let (prefix_str, query_for_ai) = if char_count > effective_max_ai_len {
-        let skip_count = char_count - effective_max_ai_len;
-        let prefix = input_str.chars().take(skip_count).collect::<String>();
-        let suffix = input_str.chars().skip(skip_count).collect::<String>();
-        (prefix, suffix)
-    } else {
-        (String::new(), input_str.to_string())
-    };
-
     if is_query_cancelled(q_id) {
         return Some(String::new());
     }
@@ -110,12 +298,13 @@ pub fn convert_query(
                 bw.max(9)
             };
             let lat_ms = config.max_latency_ms;
+            let is_greedy_active = ADAPTIVE_USE_GREEDY.load(Ordering::Relaxed);
 
             let cand = match config.strategy.as_str() {
                 "light" => 1,
                 "main" => requested_cand.max(1),
                 _ => {
-                    if lat_ms > 0 && ADAPTIVE_USE_GREEDY.load(Ordering::Relaxed) && requested_cand > 1
+                    if lat_ms > 0 && is_greedy_active && requested_cand > 1
                     {
                         requested_cand.min(5)
                     } else {
@@ -123,6 +312,10 @@ pub fn convert_query(
                     }
                 }
             };
+            tracing::info!(
+                "[KarukanConverter] strategy={}, requested_cand={}, max_lat_ms={}, is_greedy_active={}, effective_max_cand={}",
+                config.strategy, requested_cand, lat_ms, is_greedy_active, cand
+            );
             (cand, lat_ms)
         } else {
             (
@@ -136,20 +329,29 @@ pub fn convert_query(
         }
     };
 
-    // 3. AIモデル推論 (文脈 context_str を考慮した推論)
+    // 2. Convert the chunk grid and beam only over its trailing Japanese span.
     let start_time = std::time::Instant::now();
 
     let raw_model_candidates = {
         let guard = CONVERTER.lock().unwrap();
         if let Some(ref converter) = *guard {
-            let res = converter
-                .convert(&query_for_ai, context_str, effective_max_cand)
-                .unwrap_or_else(|_| vec![query_for_ai.clone()]);
-            let raw = if prefix_str.is_empty() {
-                res
-            } else {
-                res.into_iter().map(|cand| format!("{}{}", prefix_str, cand)).collect()
-            };
+            let raw = convert_chunked_model_candidates(
+                input_str,
+                context_str,
+                &persona,
+                effective_max_cand,
+                chunk_chars,
+                chunk_symbols.max(0) as usize,
+                chunk_digits.max(0) as usize,
+                chunk_alphabets.max(0) as usize,
+                beam_chars,
+                context_chars,
+                q_id,
+                |reading, context, candidates| converter
+                    .convert(reading, context, candidates)
+                    .unwrap_or_default(),
+            )
+            .unwrap_or_default();
 
             let mut cleaned_res = Vec::with_capacity(raw.len());
             let mut seen = HashSet::new();
@@ -181,8 +383,16 @@ pub fn convert_query(
 
     if max_lat_ms > 0 {
         if elapsed_ms > max_lat_ms {
+            tracing::warn!(
+                "[KarukanConverter] Adaptive latency exceeded: elapsed={}ms > max_lat={}ms. Setting ADAPTIVE_USE_GREEDY = true",
+                elapsed_ms, max_lat_ms
+            );
             ADAPTIVE_USE_GREEDY.store(true, Ordering::Relaxed);
         } else {
+            tracing::info!(
+                "[KarukanConverter] Adaptive latency OK: elapsed={}ms <= max_lat={}ms. Setting ADAPTIVE_USE_GREEDY = false",
+                elapsed_ms, max_lat_ms
+            );
             ADAPTIVE_USE_GREEDY.store(false, Ordering::Relaxed);
         }
     }
@@ -369,9 +579,22 @@ pub fn convert_query(
         }
     }
 
-    // 8. アノテーション整形
+    // 8. ソースフィルターの適用 & アノテーション整形
     let mut final_candidates = Vec::with_capacity(candidates.len());
     for item in candidates {
+        // ソースフィルター判定 (0: ALL, 1: LEARNING, 2: DICTIONARY, 3: AI, 4: SYMBOL)
+        let is_match = match source_filter {
+            1 => item.source == CandidateSourceKind::Learning,
+            2 => item.source == CandidateSourceKind::UserDict || item.source == CandidateSourceKind::SystemDict,
+            3 => item.source == CandidateSourceKind::Model,
+            4 => item.source == CandidateSourceKind::Rewriter || item.source == CandidateSourceKind::Date,
+            _ => true,
+        };
+
+        if !is_match {
+            continue;
+        }
+
         let surface = item.surface;
 
         let kanji_desc = if surface.chars().count() == 1 {
@@ -381,62 +604,73 @@ pub fn convert_query(
         };
         let effective_desc = item.description.or_else(|| kanji_desc.map(|s| s.to_string()));
 
-        let formatted = match item.source {
+        let badge = match item.source {
             CandidateSourceKind::Learning => {
                 if let Some(desc) = effective_desc {
-                    format!("{} (📝 {})", surface, desc)
+                    format!(" (📝 {})", desc)
                 } else {
-                    format!("{} (📝)", surface)
+                    " (📝)".to_string()
                 }
             }
             CandidateSourceKind::UserDict => {
                 if let Some(desc) = effective_desc {
-                    format!("{} (👤 {})", surface, desc)
+                    format!(" (👤 {})", desc)
                 } else {
-                    format!("{} (👤)", surface)
+                    " (👤)".to_string()
                 }
             }
             CandidateSourceKind::Model => {
                 if let Some(desc) = effective_desc {
-                    format!("{} (🤖 {})", surface, desc)
+                    format!(" (🤖 {})", desc)
                 } else {
-                    format!("{} (🤖)", surface)
+                    " (🤖)".to_string()
                 }
             }
             CandidateSourceKind::SystemDict => {
                 if let Some(desc) = effective_desc {
-                    format!("{} ({})", surface, desc)
+                    format!(" ({})", desc)
                 } else {
-                    surface
+                    String::new()
                 }
             }
             CandidateSourceKind::Date => {
                 if let Some(desc) = effective_desc {
-                    format!("{} (📅 {})", surface, desc)
+                    format!(" (📅 {})", desc)
                 } else {
-                    format!("{} (📅)", surface)
+                    " (📅)".to_string()
                 }
             }
             CandidateSourceKind::Rewriter => {
                 if let Some(desc) = effective_desc {
-                    format!("{} (🔄 {})", surface, desc)
+                    format!(" (🔄 {})", desc)
                 } else {
-                    format!("{} (🔄)", surface)
+                    " (🔄)".to_string()
                 }
             }
             CandidateSourceKind::Fallback => {
                 if let Some(desc) = effective_desc {
-                    format!("{} ({})", surface, desc)
+                    format!(" ({})", desc)
                 } else {
-                    surface
+                    String::new()
                 }
             }
+        };
+
+        let formatted = if badge.is_empty() {
+            surface
+        } else {
+            format!("{}\x1f{}", surface, badge)
         };
 
         final_candidates.push(formatted);
     }
 
-    Some(final_candidates.join("\t"))
+    if final_candidates.is_empty() && source_filter != 0 {
+        // 該当フィルターで候補がない場合はそのまま空を返す
+        Some(String::new())
+    } else {
+        Some(final_candidates.join("\t"))
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -524,6 +758,9 @@ pub fn create_android_settings() -> karukan_im::config::Settings {
             settings.conversion.chunk_alphabets = config.chunk_alphabets as usize;
             settings.conversion.beam_width = config.beam_width as usize;
             settings.conversion.beam_chars = config.beam_chars as usize;
+            settings.conversion.context_chars = config.context_chars as usize;
+            settings.conversion.use_context = config.use_context;
+            settings.conversion.persona = config.persona.clone();
             settings.conversion.max_latency_ms = config.max_latency_ms as u64;
             settings.conversion.strategy = match config.strategy.as_str() {
                 "light" => karukan_im::config::settings::StrategyMode::Light,
@@ -536,83 +773,6 @@ pub fn create_android_settings() -> karukan_im::config::Settings {
     settings
 }
 
-// -------------------------------------------------------------------------------------------------
-// Region: Process Key Struct & Processor
-// -------------------------------------------------------------------------------------------------
 
-pub struct ProcessKeyResultStruct {
-    pub consumed: bool,
-    pub commit_text: Option<String>,
-    pub has_preedit: bool,
-    pub preedit_text: Option<String>,
-    pub caret: usize,
-    pub has_candidates: bool,
-    pub candidates: Option<Vec<String>>,
-    pub hide_candidates: bool,
-    pub aux_text: Option<String>,
-}
 
-pub fn process_key_struct(keysym: u32, modifiers: u32, is_press: bool) -> ProcessKeyResultStruct {
-    let modifiers_struct = KeyModifiers::from_modifier_state(modifiers);
-    let key_event = KeyEvent::new(
-        Keysym(keysym),
-        modifiers_struct,
-        is_press,
-    );
 
-    let mut guard = ENGINE.lock().unwrap();
-    if guard.is_none() {
-        let settings = create_android_settings();
-        let mut engine = InputMethodEngine::with_config(karukan_im::core::engine::EngineConfig::from_settings(&settings));
-        let _ = engine.init_from_settings(&settings);
-        *guard = Some(engine);
-    }
-
-    let engine = guard.as_mut().unwrap();
-    let result = engine.process_key(&key_event);
-
-    let mut commit_text = None;
-    let mut has_preedit = false;
-    let mut preedit_text = None;
-    let mut caret = 0;
-    let mut has_candidates = false;
-    let mut candidates = None;
-    let mut hide_candidates = false;
-    let mut aux_text = None;
-
-    for action in &result.actions {
-        match action {
-            EngineAction::Commit(text) => {
-                commit_text = Some(text.clone());
-            }
-            EngineAction::UpdatePreedit(preedit) => {
-                has_preedit = true;
-                preedit_text = Some(preedit.text().to_string());
-                caret = preedit.caret();
-            }
-            EngineAction::ShowCandidates(cand_list) => {
-                has_candidates = true;
-                candidates = Some(cand_list.candidates().iter().map(|c| c.text.clone()).collect());
-            }
-            EngineAction::HideCandidates => {
-                hide_candidates = true;
-            }
-            EngineAction::UpdateAuxText(aux) => {
-                aux_text = Some(aux.to_string());
-            }
-            _ => {}
-        }
-    }
-
-    ProcessKeyResultStruct {
-        consumed: result.consumed,
-        commit_text,
-        has_preedit,
-        preedit_text,
-        caret,
-        has_candidates,
-        candidates,
-        hide_candidates,
-        aux_text,
-    }
-}

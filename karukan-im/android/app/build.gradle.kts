@@ -8,8 +8,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Region: Plugins & Variables
 // -------------------------------------------------------------------------------------------------
 
-val appVersion = "1.2.1"
-val appVersionCode = 10201
+val appVersion = "1.2.2"
+val appVersionCode = 10202
 
 plugins {
     alias(libs.plugins.android.application)
@@ -30,7 +30,6 @@ android {
         versionCode = appVersionCode
         versionName = appVersion
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters.add("arm64-v8a")
@@ -74,9 +73,6 @@ android {
         buildConfig = true
     }
 
-    testOptions {
-        unitTests.isReturnDefaultValues = true
-    }
 }
 
 androidComponents {
@@ -163,8 +159,8 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
     outputs.dir(assetsDir)
     outputs.upToDateWhen {
         val tokenizer = File(assetsDir, "tokenizer.json")
-        val modelXSmall = File(assetsDir, "jinen-v2-xsmall-Q5_K_M.gguf")
-        val modelSmall = File(assetsDir, "jinen-v2-small-Q5_K_M.gguf")
+        val modelXSmall = File(assetsDir, "jinen-v2-xsmall-Q8_0.gguf")
+        val modelSmall = File(assetsDir, "jinen-v2-small-Q8_0.gguf")
         tokenizer.exists() && tokenizer.length() > 0L &&
             modelXSmall.exists() && modelXSmall.length() > 0L &&
             modelSmall.exists() && modelSmall.length() > 0L
@@ -177,8 +173,8 @@ val downloadAssetsTask = tasks.register("downloadAssets") {
 
         val downloads = mapOf(
             "tokenizer.json" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/tokenizer.json",
-            "jinen-v2-xsmall-Q5_K_M.gguf" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/jinen-v2-xsmall-Q5_K_M.gguf",
-            "jinen-v2-small-Q5_K_M.gguf" to "https://huggingface.co/togatogah/jinen-v2-small.gguf/resolve/main/jinen-v2-small-Q5_K_M.gguf"
+            "jinen-v2-xsmall-Q8_0.gguf" to "https://huggingface.co/togatogah/jinen-v2-xsmall.gguf/resolve/main/jinen-v2-xsmall-Q8_0.gguf",
+            "jinen-v2-small-Q8_0.gguf" to "https://huggingface.co/togatogah/jinen-v2-small.gguf/resolve/main/jinen-v2-small-Q8_0.gguf"
         )
 
         for ((fileName, urlString) in downloads) {
@@ -424,5 +420,4 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
     implementation(libs.commons.compress)
-    testImplementation("junit:junit:4.13.2")
 }

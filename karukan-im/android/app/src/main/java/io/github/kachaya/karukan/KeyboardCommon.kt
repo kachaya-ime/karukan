@@ -2,7 +2,6 @@ package io.github.kachaya.karukan
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -100,7 +99,8 @@ enum class KeyType {
 enum class InputMode {
     HIRAGANA,      // あ (日本語かな)
     ALPHANUMERIC,  // a (英数)
-    NUMERIC        // 1 (数字専用)
+    NUMERIC,       // 1 (数字専用)
+    SYMBOL         // 記号
 }
 
 enum class KeyBackgroundType {
@@ -132,35 +132,20 @@ data class KeyboardPalette(
  * キーボードの色（カラーコード）を一元管理するオブジェクト
  */
 object KeyboardColors {
-    private val baseDarkBg = "#202124".toColorInt()
-    private val baseLightBg = "#F8F9FA".toColorInt()
-    private val baseAccentBlue = "#1A73E8".toColorInt()
-
-    val Dark = KeyboardPalette(
-        keyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.11f),
-        actionKeyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
-        keyText = Color.WHITE,
-        keyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
-        actionKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.32f),
-        activeKeyBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.70f),
-        activeKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.85f),
-        activeKeyText = "#202124".toColorInt(),
-        disabledBg = baseDarkBg
-    )
-
-    val Light = KeyboardPalette(
-        keyBg = Color.WHITE,
-        actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),
-        keyText = "#202124".toColorInt(),
-        keyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
-        actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.22f),
-        activeKeyBg = baseAccentBlue,
-        activeKeyPressedBg = ColorUtils.blendARGB(baseAccentBlue, Color.BLACK, 0.20f),
-        activeKeyText = Color.WHITE,
-        disabledBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
-    )
-
-    fun get(isDark: Boolean): KeyboardPalette = if (isDark) Dark else Light
+    fun get(isDark: Boolean): KeyboardPalette {
+        val theme = ThemeColors.from(isDark)
+        return KeyboardPalette(
+            keyBg = theme.keyBg,
+            actionKeyBg = theme.actionKeyBg,
+            keyText = theme.keyText,
+            keyPressedBg = theme.keyPressedBg,
+            actionKeyPressedBg = theme.actionKeyPressedBg,
+            activeKeyBg = theme.activeKeyBg,
+            activeKeyPressedBg = theme.activeKeyPressedBg,
+            activeKeyText = theme.activeKeyText,
+            disabledBg = theme.disabledBg
+        )
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -376,8 +361,9 @@ fun createKeyButtonDrawable(
 // -------------------------------------------------------------------------------------------------
 
 fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
-    val mainColor = if (isDark) Color.WHITE else "#202124".toColorInt()
-    val subColor = if (isDark) "#9AA0A6".toColorInt() else "#70757A".toColorInt()
+    val theme = ThemeColors.from(isDark)
+    val mainColor = theme.keyText
+    val subColor = theme.keySubText
 
     val hColor = if (inputMode == InputMode.HIRAGANA) mainColor else subColor
     val nColor = if (inputMode == InputMode.NUMERIC) mainColor else subColor
@@ -394,8 +380,9 @@ fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
 }
 
 fun buildLangKeyText(isEnglishMode: Boolean, isDark: Boolean): CharSequence {
-    val mainColor = if (isDark) Color.WHITE else "#202124".toColorInt()
-    val subColor = if (isDark) "#9AA0A6".toColorInt() else "#70757A".toColorInt()
+    val theme = ThemeColors.from(isDark)
+    val mainColor = theme.keyText
+    val subColor = theme.keySubText
 
     val hColor = if (!isEnglishMode) mainColor else subColor
     val aColor = if (isEnglishMode) mainColor else subColor
@@ -457,6 +444,7 @@ class KeyButton(
     private var lastIsDark: Boolean = isDark
     private var lastInputMode: InputMode = InputMode.HIRAGANA
     private var lastIsEnglishMode: Boolean = false
+    private val density by lazy { context.resources.displayMetrics.density }
 
     private val mainPaint = TextPaint().apply {
         isAntiAlias = true
@@ -543,7 +531,6 @@ class KeyButton(
         val drawable = androidx.core.content.ContextCompat.getDrawable(context, resId)?.mutate() ?: return
         androidx.core.graphics.drawable.DrawableCompat.setTint(drawable, currentTextColor)
 
-        val density = context.resources.displayMetrics.density
         val iconSize = (24f * density).toInt()
         val left = (width - iconSize) / 2
         val top = (height - iconSize) / 2
@@ -556,7 +543,6 @@ class KeyButton(
         val subT2 = spec.subText2
         if (subT.isEmpty() || subT2.isEmpty()) return
 
-        val density = context.resources.displayMetrics.density
         mainPaint.textSize = 11f * density
         mainPaint.color = currentTextColor
 
@@ -578,7 +564,6 @@ class KeyButton(
         val t = text
         if (t.isEmpty()) return
 
-        val density = context.resources.displayMetrics.density
         val textStr = t.toString()
         mainPaint.textSize = (if (textStr.length >= 2) 16f else 22f) * density
         mainPaint.color = currentTextColor
@@ -601,7 +586,6 @@ class KeyButton(
         val subT = spec.subText
         val subT2 = spec.subText2
 
-        val density = context.resources.displayMetrics.density
         mainPaint.textSize = 21f * density
         mainPaint.color = currentTextColor
         mainPaint.textAlign = Paint.Align.RIGHT
@@ -758,7 +742,8 @@ class KeyButton(
 interface KeyboardEventListener {
     fun onKeyFeedback()
     fun onKeyPress(key: String, isShift: Boolean = false)
-    fun onNikoTouchInput(char: String)
+    fun onKanaInput(char: String)
+    fun onNikoTouchInput(char: String) { onKanaInput(char) }
     fun onNikoTouchToggle()
     fun onBackspace()
     fun onDelete()

@@ -250,8 +250,8 @@
         <item>jinen-v2-small (高精度・標準)</item>
     </string-array>
     <string-array name="pref_model_name_values">
-        <item>jinen-v2-xsmall-Q5_K_M.gguf</item>
-        <item>jinen-v2-small-Q5_K_M.gguf</item>
+        <item>jinen-v2-xsmall-Q8_0.gguf</item>
+        <item>jinen-v2-small-Q8_0.gguf</item>
     </string-array>
 
     <!-- キーボードレイアウト -->

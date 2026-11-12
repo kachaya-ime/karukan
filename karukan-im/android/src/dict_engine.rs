@@ -1,8 +1,9 @@
 use crate::config::IS_DATE_CONVERSION_ENABLED;
 use karukan_engine::{
     AlphabetRewriter, DateConfig, DateRewriter, Dictionary, EmojiRewriter,
-    HalfWidthKatakanaRewriter, NumberRewriter, Rewriter, SymbolRewriter,
+    HalfWidthKatakanaRewriter, Rewriter, SymbolRewriter,
 };
+use karukan_engine::rewriter::NumberRewriter;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;

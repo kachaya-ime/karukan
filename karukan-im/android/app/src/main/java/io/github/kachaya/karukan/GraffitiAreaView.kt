@@ -3,7 +3,6 @@ package io.github.kachaya.karukan
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
@@ -91,27 +90,22 @@ class GraffitiAreaView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val isDark = isDarkSupplier()
+        val colors = ThemeColors.from(isDark)
         val width = width.toFloat()
         val height = height.toFloat()
         if (width <= 0 || height <= 0) return
 
-        val bgColor = if (isDark) Color.parseColor("#1F2023") else Color.parseColor("#F1F3F4")
-        val dividerColor = if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#BDC1C6")
-        val guideTextColor = if (isDark) Color.parseColor("#444950") else Color.parseColor("#D0D4D9")
-        val strokeColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
-        val indicatorColor = if (isDark) Color.parseColor("#F28B82") else Color.parseColor("#D93025")
-
-        canvas.drawColor(bgColor)
+        canvas.drawColor(colors.graffitiBg)
 
         val midX = width / 2f
-        dividerPaint.color = dividerColor
+        dividerPaint.color = colors.dividerColor
         canvas.drawLine(midX, 16f, midX, height - 16f, dividerPaint)
 
-        guideTextPaint.color = guideTextColor
+        guideTextPaint.color = colors.graffitiGuideText
         canvas.drawText("ABC", midX / 2f, height / 2f + 12f, guideTextPaint)
         canvas.drawText("123", midX + midX / 2f, height / 2f + 12f, guideTextPaint)
 
-        modeIndicatorPaint.color = indicatorColor
+        modeIndicatorPaint.color = colors.graffitiIndicator
         var modeText = ""
         if (isCapsMode) {
             modeText += "[CAPS] "
@@ -128,16 +122,15 @@ class GraffitiAreaView(
         val btnW = 56f
         val btnH = 56f
         helpButtonBounds.set(width - btnW - 16f, 16f, width - 16f, 16f + btnH)
-        helpButtonPaint.color = if (isDark) Color.parseColor("#3C4043") else Color.parseColor("#DADCE0")
-        canvas.drawRoundRect(helpButtonBounds, 12f, 12f, helpButtonPaint)
-        helpTextPaint.color = if (isDark) Color.WHITE else Color.BLACK
+        helpButtonPaint.color = colors.btnHelpBg
+        helpTextPaint.color = colors.textColor
         canvas.drawText("?", helpButtonBounds.centerX(), helpButtonBounds.centerY() + 10f, helpTextPaint)
 
         if (currentPoints.isNotEmpty()) {
-            strokePaint.color = strokeColor
+            strokePaint.color = colors.graffitiStroke
             canvas.drawPath(strokePath, strokePaint)
 
-            startPointPaint.color = strokeColor
+            startPointPaint.color = colors.graffitiStroke
             val first = currentPoints.first()
             canvas.drawCircle(first.x, first.y, 10f, startPointPaint)
         }

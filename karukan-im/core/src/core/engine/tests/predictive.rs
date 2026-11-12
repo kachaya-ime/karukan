@@ -5,9 +5,9 @@ use super::*;
 #[test]
 fn predictive_dict_candidates_carry_full_reading() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]}]"#,
-    ));
+    )));
 
     let candidates = engine.lookup_dict_candidates("わせ");
     let waseda = candidates
@@ -20,9 +20,9 @@ fn predictive_dict_candidates_carry_full_reading() {
 #[test]
 fn predictive_needs_two_typed_chars() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]}]"#,
-    ));
+    )));
 
     assert!(
         engine
@@ -35,12 +35,12 @@ fn predictive_needs_two_typed_chars() {
 #[test]
 fn exact_matches_stay_ahead_of_predictive() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[
             {"reading":"わせ","candidates":[{"surface":"和瀬","score":5000.0}]},
             {"reading":"わせだ","candidates":[{"surface":"早稲田","score":100.0}]}
         ]"#,
-    ));
+    )));
 
     let candidates = engine.lookup_dict_candidates("わせ");
     let texts: Vec<&str> = candidates.iter().map(|c| c.text.as_str()).collect();
@@ -55,12 +55,12 @@ fn exact_matches_stay_ahead_of_predictive() {
 #[test]
 fn pending_romaji_narrows_predictive_candidates() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[
             {"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]},
             {"reading":"わせりん","candidates":[{"surface":"ワセリン","score":100.0}]}
         ]"#,
-    ));
+    )));
 
     for ch in "wase".chars() {
         engine.process_key(&press(ch));
@@ -88,9 +88,9 @@ fn pending_romaji_narrows_predictive_candidates() {
 #[test]
 fn dead_romaji_tail_suppresses_prediction() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]}]"#,
-    ));
+    )));
 
     for ch in "waseyk".chars() {
         engine.process_key(&press(ch));
@@ -109,7 +109,7 @@ fn dead_romaji_tail_suppresses_prediction() {
 #[test]
 fn conversion_list_gets_all_predictive_candidates() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[
             {"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]},
             {"reading":"わせだし","candidates":[{"surface":"早稲田市","score":2000.0}]},
@@ -117,7 +117,7 @@ fn conversion_list_gets_all_predictive_candidates() {
             {"reading":"わせだまえ","candidates":[{"surface":"早稲田前","score":4000.0}]},
             {"reading":"わせだえき","candidates":[{"surface":"早稲田駅","score":5000.0}]}
         ]"#,
-    ));
+    )));
 
     let conversion: Vec<String> = engine
         .build_conversion_candidates("わせ", "わせ", "", 1, LearningLookup::Use)
@@ -142,12 +142,12 @@ fn conversion_list_gets_all_predictive_candidates() {
 #[test]
 fn conversion_with_pending_keeps_narrowed_candidates() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.system = Some(dict_from_json(
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
         r#"[
             {"reading":"わせだ","candidates":[{"surface":"早稲田","score":1000.0}]},
             {"reading":"わせりん","candidates":[{"surface":"ワセリン","score":100.0}]}
         ]"#,
-    ));
+    )));
 
     for ch in "wased".chars() {
         engine.process_key(&press(ch));
@@ -169,4 +169,80 @@ fn conversion_with_pending_keeps_narrowed_candidates() {
         .find(|c| c.text == "早稲田")
         .unwrap();
     assert_eq!(waseda.reading.as_deref(), Some("わせだ"));
+}
+
+/// Texts of the conversion list Space opens on `romaji`.
+fn conversion_texts(engine: &mut InputMethodEngine, romaji: &str) -> Vec<String> {
+    for ch in romaji.chars() {
+        engine.process_key(&press(ch));
+    }
+    engine.process_key(&press_key(Keysym::SPACE));
+    engine
+        .candidates()
+        .expect("conversion candidates")
+        .candidates()
+        .iter()
+        .map(|c| c.text.clone())
+        .collect()
+}
+
+/// Space conversion with a large user dictionary (hundreds of thousands of
+/// proper nouns): a predictive (prefix) hit is a longer word the user may
+/// not have meant, so it must follow the model's conversion — otherwise
+/// けいざい converts to 経済移民 instead of 経済.
+#[test]
+fn conversion_ranks_user_predictive_after_model() {
+    let mut engine = InputMethodEngine::new();
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
+        r#"[{"reading":"けいざいいみん","candidates":[{"surface":"経済移民","score":1000.0}]}]"#,
+    )));
+    seed_model_cache(&mut engine, "ケイザイ", "", &["経済"]);
+
+    let texts = conversion_texts(&mut engine, "keizai");
+    assert_eq!(&texts[..2], ["経済", "経済移民"], "{texts:?}");
+}
+
+/// An exact user-dictionary match is what the user registered for this
+/// very reading, so it still outranks the model.
+#[test]
+fn conversion_keeps_user_exact_match_ahead_of_model() {
+    let mut engine = InputMethodEngine::new();
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
+        r#"[
+            {"reading":"けいざい","candidates":[{"surface":"経財","score":1000.0}]},
+            {"reading":"けいざいいみん","candidates":[{"surface":"経済移民","score":1000.0}]}
+        ]"#,
+    )));
+    seed_model_cache(&mut engine, "ケイザイ", "", &["経済"]);
+
+    let texts = conversion_texts(&mut engine, "keizai");
+    assert_eq!(&texts[..3], ["経財", "経済", "経済移民"], "{texts:?}");
+}
+
+/// Every exact match comes before every predictive one, whichever
+/// dictionary each is from: a homophone in the system dictionary is closer
+/// to what was typed than a longer word in the user's.
+#[test]
+fn conversion_ranks_exact_matches_ahead_of_predictive_across_dictionaries() {
+    let mut engine = InputMethodEngine::new();
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
+        r#"[
+            {"reading":"けいざい","candidates":[{"surface":"経財","score":1000.0}]},
+            {"reading":"けいざいいみん","candidates":[{"surface":"経済移民","score":1000.0}]}
+        ]"#,
+    )));
+    engine.dicts.system = Some(std::sync::Arc::new(dict_from_json(
+        r#"[
+            {"reading":"けいざい","candidates":[{"surface":"軽罪","score":1000.0}]},
+            {"reading":"けいざいがく","candidates":[{"surface":"経済学","score":1000.0}]}
+        ]"#,
+    )));
+    seed_model_cache(&mut engine, "ケイザイ", "", &["経済"]);
+
+    let texts = conversion_texts(&mut engine, "keizai");
+    assert_eq!(
+        &texts[..5],
+        ["経財", "経済", "軽罪", "経済移民", "経済学"],
+        "{texts:?}"
+    );
 }

@@ -76,6 +76,8 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 - **記号・文字幅スタイル**: `punctuationStyle`, `bracketStyle`, `slashStyle`, `spaceStyle`, `kanaSymbolWidth`, `asciiWidth`, `digitWidth`
 - **変換学習設定**: `maxLearningEntries`, `isLearningEnabled`, `isDateConversionEnabled`
 
+`nativeConvert` は共通エンジンと同じチャンク境界を使い、ビーム幅を末尾のチャンク範囲に適用します。ビーム範囲より前は各チャンクを先頭候補で変換し、その結果を次のチャンクの左文脈に含めます。純粋な数字・英字・記号チャンクはそのまま残します。
+
 ---
 
 ## 4. ショートカットキー・物理キーボード対応仕様 (Keyboard Shortcuts)

@@ -25,28 +25,32 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
         lastParamsRef = java.lang.ref.WeakReference(params)
         pendingNikoRowKey = null
         val mode = params.currentInputModeSupplier()
-        return if (mode == InputMode.NUMERIC) {
-            createNumericContainer(params)
-        } else {
-            createTouchContainer(params)
+        return when (mode) {
+            InputMode.NUMERIC -> createNumericContainer(params)
+            InputMode.SYMBOL -> createSymbolContainer(params)
+            else -> createTouchContainer(params)
         }
     }
 
     override fun updateInputState(hasInput: Boolean) {
-        if (currentHasInput == hasInput) return
+        if (currentHasInput == hasInput && pendingNikoRowKey == null) return
         currentHasInput = hasInput
-        if (pendingNikoRowKey == null) {
-            lastParamsRef?.get()?.let { params ->
-                val container = createContainer(params)
-                params.onContainerSwapRequested?.invoke(container)
-            }
+        if (!hasInput) {
+            pendingNikoRowKey = null
+            nikoKeyButtons.values.forEach { it.clearGuideText() }
+        }
+        lastParamsRef?.get()?.let { params ->
+            val container = createContainer(params)
+            params.onContainerSwapRequested?.invoke(container)
         }
     }
 
     override fun updateInputMode(inputMode: InputMode) {
-        val isDark = lastParamsRef?.get()?.isDarkSupplier?.invoke() ?: false
-        activeButtons?.forEach { btn ->
-            btn.updateInputMode(inputMode, isDark)
+        pendingNikoRowKey = null
+        nikoKeyButtons.values.forEach { it.clearGuideText() }
+        lastParamsRef?.get()?.let { params ->
+            val container = createContainer(params)
+            params.onContainerSwapRequested?.invoke(container)
         }
     }
 
@@ -71,7 +75,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
         val mode = params.currentInputModeSupplier()
         if (mode == InputMode.NUMERIC) {
             val charVal = keyIdx.toString()
-            params.listener.onNikoTouchInput(charVal)
+            params.listener.onKanaInput(charVal)
             return
         }
 
@@ -99,7 +103,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
             val indexInList = if (keyIdx == 0) 9 else keyIdx - 1
             val resultChar = guideList?.getOrNull(indexInList) ?: ""
             if (resultChar.isNotEmpty()) {
-                params.listener.onNikoTouchInput(resultChar)
+                params.listener.onKanaInput(resultChar)
             }
         }
     }
@@ -152,18 +156,33 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
             when (type) {
                 KeyType.BACKSPACE -> params.listener.onBackspace()
                 KeyType.NIKO_BACKSPACE -> {
-                    pendingNikoRowKey = null
-                    val firstStageContainer = createTouchContainer(params)
-                    params.onContainerSwapRequested?.invoke(firstStageContainer)
-                    params.listener.onBackspace()
+                    if (pendingNikoRowKey != null) {
+                        pendingNikoRowKey = null
+                        val firstStageContainer = createTouchContainer(params)
+                        params.onContainerSwapRequested?.invoke(firstStageContainer)
+                    } else {
+                        params.listener.onBackspace()
+                    }
                 }
 
+                KeyType.CHARACTER -> {
+                    params.listener.onKanaInput(btn.text.toString())
+                }
                 KeyType.DELETE -> params.listener.onDelete()
-                KeyType.SPACE -> params.listener.onSpaceOrConvert()
-                KeyType.ENTER -> params.listener.onCommit()
+                KeyType.SPACE -> {
+                    pendingNikoRowKey = null
+                    params.listener.onSpaceOrConvert()
+                }
+                KeyType.ENTER -> {
+                    pendingNikoRowKey = null
+                    params.listener.onCommit()
+                }
                 KeyType.LANG -> params.listener.onToggleLanguageMode()
                 KeyType.NIKO_LANG -> params.listener.onNikoToggleLanguageMode()
-                KeyType.CHUNK_FIX -> params.listener.onFixChunk()
+                KeyType.CHUNK_FIX -> {
+                    pendingNikoRowKey = null
+                    params.listener.onFixChunk()
+                }
                 KeyType.EMOJI -> params.listener.onToggleEmojiPalette()
                 KeyType.DPAD_LEFT -> params.listener.onDpadLeft()
                 KeyType.DPAD_RIGHT -> params.listener.onDpadRight()
@@ -184,13 +203,13 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
                         pendingNikoRowKey = null
                         val firstStageContainer = createTouchContainer(params)
                         params.onContainerSwapRequested?.invoke(firstStageContainer)
-                        params.listener.onNikoTouchInput(char)
+                        params.listener.onKanaInput(char)
                     }
                 }
 
                 KeyType.NIKO_TOGGLE -> params.listener.onNikoTouchToggle()
-                KeyType.NIKO_INPUT_STAR -> params.listener.onNikoTouchInput("*")
-                KeyType.NIKO_INPUT_POUND -> params.listener.onNikoTouchInput("#")
+                KeyType.NIKO_INPUT_STAR -> params.listener.onKanaInput("*")
+                KeyType.NIKO_INPUT_POUND -> params.listener.onKanaInput("#")
                 KeyType.NIKO_SYMBOL_PALETTE -> params.listener.onToggleSymbolPalette()
                 else -> {}
             }
@@ -327,6 +346,7 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
         val c = charText.firstOrNull() ?: return false
         return (c in 'a'..'z') || (c in 'A'..'Z') || (c in '0'..'9') ||
                 c == '.' || c == '-' || c == '@' || c == '_' ||
+                (c in '!'..'~') ||
                 (c in "、。・？！")
     }
 
@@ -461,6 +481,72 @@ object NikoKeyboardLayout : KeyboardLayoutProvider {
                 KeySpec("*", KeyType.NIKO_INPUT_STAR),
                 KeySpec("0", KeyType.NIKO_KEY_0),
                 KeySpec("#", KeyType.NIKO_INPUT_POUND),
+                KeySpec("⏎", KeyType.ENTER)
+            )
+        )
+    }
+
+    private fun createSymbolContainer(params: KeyboardCreateParams): LinearLayout {
+        pendingNikoRowKey = null
+        nikoKeyButtons.clear()
+        return buildNikoContainer(
+            layoutSpec = getSymbolLayoutSpec(currentHasInput),
+            params = params
+        ) { keySpec, btn ->
+            keySpec.normalType.nikoKeyIndex?.let { index ->
+                nikoKeyButtons[index] = btn
+            }
+        }
+    }
+
+    fun getSymbolLayoutSpec(hasInput: Boolean = true): List<List<KeySpec>> {
+        return listOf(
+            listOf(
+                KeySpec("Esc", KeyType.ESC),
+                KeySpec("!"),
+                KeySpec("\""),
+                KeySpec("#"),
+                KeySpec("$"),
+                KeySpec("%"),
+                KeySpec("&"),
+                KeySpec("'"),
+                KeySpec("("),
+                KeySpec("⌫", KeyType.BACKSPACE, repeatable = true)
+            ),
+            listOf(
+                KeySpec("◀", KeyType.DPAD_LEFT, repeatable = true),
+                KeySpec(")"),
+                KeySpec("*"),
+                KeySpec("+"),
+                KeySpec(","),
+                KeySpec("-"),
+                KeySpec("."),
+                KeySpec("/"),
+                KeySpec(":"),
+                KeySpec("▶", KeyType.DPAD_RIGHT, repeatable = true)
+            ),
+            listOf(
+                KeySpec("▲", KeyType.DPAD_UP, repeatable = true),
+                KeySpec(";"),
+                KeySpec("<"),
+                KeySpec("="),
+                KeySpec(">"),
+                KeySpec("?"),
+                KeySpec("@"),
+                KeySpec("["),
+                KeySpec("\\"),
+                KeySpec("⌴", KeyType.SPACE)
+            ),
+            listOf(
+                KeySpec("あ1", KeyType.NIKO_LANG),
+                KeySpec("]"),
+                KeySpec("^"),
+                KeySpec("_"),
+                KeySpec("`"),
+                KeySpec("{"),
+                KeySpec("|"),
+                KeySpec("}"),
+                KeySpec("~"),
                 KeySpec("⏎", KeyType.ENTER)
             )
         )

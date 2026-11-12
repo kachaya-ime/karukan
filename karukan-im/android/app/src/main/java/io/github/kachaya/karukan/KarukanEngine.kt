@@ -35,17 +35,6 @@ data class DictEntryItem(
     val comment: String = ""
 )
 
-data class ProcessKeyResult(
-    val consumed: Boolean,
-    val commitText: String? = null,
-    val hasPreedit: Boolean = false,
-    val preeditText: String? = null,
-    val caret: Int = 0,
-    val hasCandidates: Boolean = false,
-    val candidates: List<String>? = null,
-    val hideCandidates: Boolean = false,
-    val auxText: String? = null
-)
 
 fun interface DictLoadProgressListener {
     fun onProgress(message: String, percent: Int)
@@ -67,7 +56,7 @@ class KarukanEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "KarukanEngine"
-        private const val DEFAULT_MODEL_NAME = "jinen-v2-xsmall-Q5_K_M.gguf"
+        private const val DEFAULT_MODEL_NAME = "jinen-v2-xsmall-Q8_0.gguf"
         private const val TOKENIZER_NAME = "tokenizer.json"
         private const val SYSTEM_DICT_FILE_NAME = "dict.bin"
         private const val LEARNING_HISTORY_FILE = "learning_history.txt"
@@ -162,7 +151,8 @@ class KarukanEngine(private val context: Context) {
     }
 
     init {
-        val initialModel = PreferencesManager(context) {}.loadSettings().modelName
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val initialModel = prefs.getString("pref_model_name", DEFAULT_MODEL_NAME) ?: DEFAULT_MODEL_NAME
         switchModel(initialModel)
     }
 
@@ -387,11 +377,17 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun convert(query: String, maxCandidates: Int = 9, context: String = "", queryId: Long = 0): List<String> {
+    fun convert(
+        query: String,
+        maxCandidates: Int = 9,
+        context: String = "",
+        queryId: Long = 0,
+        sourceFilter: Int = 0
+    ): List<String> {
         if (query.isBlank() || !isLibraryLoaded || !isLoaded) return listOf(query)
 
         return try {
-            val joinedCandidates = nativeConvert(query, maxCandidates, context, queryId)
+            val joinedCandidates = nativeConvert(query, maxCandidates, context, queryId, sourceFilter)
             if (joinedCandidates.isNotEmpty()) {
                 joinedCandidates.split("\t")
             } else {
@@ -403,20 +399,6 @@ class KarukanEngine(private val context: Context) {
         }
     }
 
-    fun processKey(keysym: Int, modifiers: Int, isRelease: Boolean = false): ProcessKeyResult {
-        if (!isLibraryLoaded) return ProcessKeyResult(consumed = false)
-        return try {
-            nativeProcessKey(keysym, modifiers, isRelease) ?: ProcessKeyResult(consumed = false)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error in processKey: keysym=$keysym, modifiers=$modifiers", e)
-            ProcessKeyResult(consumed = false)
-        }
-    }
-
-    fun processChar(char: Char, modifiers: Int = 0): ProcessKeyResult {
-        val keysym = KeyEventMapper.charToNativeKeysym(char)
-        return processKey(keysym, modifiers)
-    }
 
     fun cancelQuery(queryId: Long) {
         if (!isLibraryLoaded || queryId <= 0) return
@@ -424,6 +406,15 @@ class KarukanEngine(private val context: Context) {
             nativeCancelQuery(queryId)
         } catch (e: Throwable) {
             Log.e(TAG, "Error cancelling query: $queryId", e)
+        }
+    }
+
+    fun resetEngine() {
+        if (!isLibraryLoaded) return
+        try {
+            nativeResetEngine()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error resetting engine", e)
         }
     }
 
@@ -621,7 +612,7 @@ class KarukanEngine(private val context: Context) {
 
     fun updateEngineConfig(settings: KarukanSettings) {
         if (!isLibraryLoaded) return
-        if (settings.modelName.isNotEmpty() && settings.modelName != currentLoadedModelName) {
+        if (settings.modelName.isNotEmpty() && settings.modelName != currentLoadedModelName && !isPreparing) {
             switchModel(settings.modelName)
         }
         try {
@@ -635,6 +626,9 @@ class KarukanEngine(private val context: Context) {
                 chunkAlphabets = settings.chunkAlphabets,
                 beamWidth = settings.beamWidth,
                 beamChars = settings.beamChars,
+                persona = settings.persona,
+                contextChars = settings.contextChars,
+                useContext = settings.useContext,
                 punctuation = settings.punctuationStyle,
                 bracket = settings.bracketStyle,
                 slash = settings.slashStyle,
@@ -647,8 +641,7 @@ class KarukanEngine(private val context: Context) {
                 isLearningEnabled = settings.isLearningEnabled,
                 isDateConversionEnabled = settings.isDateConversionEnabled
             )
-            val dateJson = if (settings.dateConfigJson.isNotEmpty()) settings.dateConfigJson else DateConfigData().toJsonString()
-            nativeSetDateConfigJson(dateJson)
+            nativeSetDateConfigJson(settings.dateConfigJson)
         } catch (e: Throwable) {
             Log.e(TAG, "Error updating engine config", e)
         }
@@ -678,6 +671,9 @@ class KarukanEngine(private val context: Context) {
         chunkAlphabets: Int,
         beamWidth: Int,
         beamChars: Int,
+        persona: String,
+        contextChars: Int,
+        useContext: Boolean,
         punctuation: String,
         bracket: String,
         slash: String,
@@ -691,17 +687,48 @@ class KarukanEngine(private val context: Context) {
         isDateConversionEnabled: Boolean
     )
 
+    fun toHankakuKatakana(input: String): String {
+        if (!isLibraryLoaded || input.isEmpty()) return TextTransformUtils.toHankakuKatakanaFallback(input)
+        return try {
+            nativeToHankakuKatakana(input)
+        } catch (_: Throwable) {
+            TextTransformUtils.toHankakuKatakanaFallback(input)
+        }
+    }
+
+    fun toZenkakuAlphanumeric(input: String): String {
+        if (!isLibraryLoaded || input.isEmpty()) return TextTransformUtils.toZenkakuAlphanumericFallback(input)
+        return try {
+            nativeToZenkakuAlphanumeric(input)
+        } catch (_: Throwable) {
+            TextTransformUtils.toZenkakuAlphanumericFallback(input)
+        }
+    }
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeToHankakuKatakana(input: String): String
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeToZenkakuAlphanumeric(input: String): String
+
     @Suppress("JniMissingFunction")
     private external fun nativeSetDateConfigJson(json: String)
 
-    @Suppress("JniMissingFunction")
-    private external fun nativeProcessKey(keysym: Int, modifiers: Int, isRelease: Boolean): ProcessKeyResult?
 
     @Suppress("JniMissingFunction")
     private external fun nativeCancelQuery(queryId: Long)
 
     @Suppress("JniMissingFunction")
-    private external fun nativeConvert(query: String, maxCandidates: Int, context: String, queryId: Long): String
+    private external fun nativeResetEngine()
+
+    @Suppress("JniMissingFunction")
+    private external fun nativeConvert(
+        query: String,
+        maxCandidates: Int,
+        context: String,
+        queryId: Long,
+        sourceFilter: Int
+    ): String
 
     @Suppress("JniMissingFunction")
     private external fun nativeRecordLearning(reading: String, surface: String)

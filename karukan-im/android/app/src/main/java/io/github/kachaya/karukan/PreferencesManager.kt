@@ -25,7 +25,6 @@ class PreferencesManager(
 
     fun startListening() {
         prefs.registerOnSharedPreferenceChangeListener(this)
-        currentSettings = loadSettings()
     }
 
     fun stopListening() {
@@ -53,7 +52,7 @@ class PreferencesManager(
         val activePersona = personaItems.firstOrNull { it.isSelected }?.text ?: ""
 
         val settings = KarukanSettings(
-            modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q5_K_M.gguf"),
+            modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q8_0.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
             liveConversionDebounceMs = prefs.getIntFromString("pref_live_conversion_debounce_ms", 100),
             isShowCandidateAnnotationsEnabled = prefs.getBoolean("pref_show_candidate_annotations", true),

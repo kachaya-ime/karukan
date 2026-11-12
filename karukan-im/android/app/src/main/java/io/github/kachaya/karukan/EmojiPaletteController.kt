@@ -30,12 +30,22 @@ class EmojiPaletteController(
 ) {
 
     // ---------------------------------------------------------------------------------------------
+    // Region: Theme & Color Caching
+    // ---------------------------------------------------------------------------------------------
+
+    fun getThemeColors(): ThemeColors {
+        return ThemeColors.from(isDarkThemeSupplier())
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Region: Properties & State
     // ---------------------------------------------------------------------------------------------
 
     lateinit var container: LinearLayout
         private set
 
+    private lateinit var headerLayout: LinearLayout
+    private lateinit var btnClose: Button
     private lateinit var emojiCategoryScrollContainer: HorizontalScrollView
     private lateinit var emojiCategoryLayout: LinearLayout
     private lateinit var viewPager: ViewPager2
@@ -46,11 +56,15 @@ class EmojiPaletteController(
 
     private var selectedCategoryIndex: Int = 0
     private var emojiCategoriesList: List<Pair<String, List<String>>> = emptyList()
-    private val categoryButtons: MutableList<Button> = mutableListOf()
+    private val categoryButtons: MutableList<TextView> = mutableListOf()
     private var isSymbolMode: Boolean = false
 
     private val sharedRecycledViewPool = RecyclerView.RecycledViewPool().apply {
         setMaxRecycledViews(0, 40)
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * context.resources.displayMetrics.density).toInt()
     }
 
     companion object {
@@ -74,15 +88,11 @@ class EmojiPaletteController(
     // ---------------------------------------------------------------------------------------------
 
     fun createView(): LinearLayout {
-        val isDark = isDarkThemeSupplier()
-        val bgColor = if (isDark) Color.parseColor("#202124") else Color.parseColor("#ECEFF1")
-        val candidateBgColor = if (isDark) Color.parseColor("#303134") else Color.parseColor("#F8F9FA")
-        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
-        val btnCloseBgColor = if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
+        val colors = getThemeColors()
 
         container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bgColor)
+            setBackgroundColor(colors.bg)
             visibility = View.GONE
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -90,9 +100,9 @@ class EmojiPaletteController(
             )
         }
 
-        val headerLayout = LinearLayout(context).apply {
+        headerLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(candidateBgColor)
+            setBackgroundColor(colors.candidateBg)
             setPadding(4, 2, 4, 2)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -110,11 +120,11 @@ class EmojiPaletteController(
         emojiCategoryScrollContainer.addView(emojiCategoryLayout)
         headerLayout.addView(emojiCategoryScrollContainer)
 
-        val btnClose = Button(context).apply {
+        btnClose = Button(context).apply {
             text = "✕ 閉じる"
             textSize = 12f
-            setTextColor(textColor)
-            backgroundTintList = ColorStateList.valueOf(btnCloseBgColor)
+            setTextColor(colors.textColor)
+            backgroundTintList = ColorStateList.valueOf(colors.btnCloseBg)
             setPadding(12, 4, 12, 4)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -127,9 +137,7 @@ class EmojiPaletteController(
         headerLayout.addView(btnClose)
         container.addView(headerLayout)
 
-        pagerAdapter = EmojiPagerAdapter(sharedRecycledViewPool) { emoji ->
-            onEmojiSelected(emoji)
-        }
+        pagerAdapter = EmojiPagerAdapter(sharedRecycledViewPool, ::getThemeColors, onEmojiSelected)
 
         viewPager = ViewPager2(context).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -254,22 +262,37 @@ class EmojiPaletteController(
             }
         }
 
-        val isDark = isDarkThemeSupplier()
-        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
-        val activeTextColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
+        val colors = getThemeColors()
+
+        if (::container.isInitialized) {
+            container.setBackgroundColor(colors.bg)
+        }
+        if (::headerLayout.isInitialized) {
+            headerLayout.setBackgroundColor(colors.candidateBg)
+        }
+        if (::btnClose.isInitialized) {
+            btnClose.setTextColor(colors.textColor)
+            btnClose.backgroundTintList = ColorStateList.valueOf(colors.btnCloseBg)
+        }
 
         if (categoryButtons.size != emojiCategoriesList.size) {
             emojiCategoryLayout.removeAllViews()
             categoryButtons.clear()
 
+            val paddingH = dpToPx(12)
+            val paddingV = dpToPx(6)
+
             for ((index, category) in emojiCategoriesList.withIndex()) {
                 val catName = category.first
-                val catBtn = Button(context).apply {
+                val catBtn = TextView(context).apply {
                     text = catName
-                    textSize = 12f
-                    setPadding(12, 4, 12, 4)
-                    setTextColor(if (index == selectedCategoryIndex) activeTextColor else textColor)
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(paddingH, paddingV, paddingH, paddingV)
+                    setTextColor(if (index == selectedCategoryIndex) colors.activeAccentText else colors.textColor)
                     setBackgroundColor(Color.TRANSPARENT)
+                    isClickable = true
+                    isFocusable = true
                     setOnClickListener {
                         if (selectedCategoryIndex != index) {
                             selectedCategoryIndex = index
@@ -295,12 +318,10 @@ class EmojiPaletteController(
     private fun updateTabHighlightAndScroll() {
         if (categoryButtons.isEmpty() || selectedCategoryIndex !in categoryButtons.indices) return
 
-        val isDark = isDarkThemeSupplier()
-        val textColor = if (isDark) Color.WHITE else Color.parseColor("#202124")
-        val activeTextColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
+        val colors = getThemeColors()
 
         for ((idx, btn) in categoryButtons.withIndex()) {
-            btn.setTextColor(if (idx == selectedCategoryIndex) activeTextColor else textColor)
+            btn.setTextColor(if (idx == selectedCategoryIndex) colors.activeAccentText else colors.textColor)
         }
 
         val selectedTabBtn = categoryButtons[selectedCategoryIndex]
@@ -316,6 +337,7 @@ class EmojiPaletteController(
 
     private class EmojiPagerAdapter(
         private val sharedViewPool: RecyclerView.RecycledViewPool,
+        private val getThemeColors: () -> ThemeColors,
         private val onEmojiSelected: (String) -> Unit
     ) : RecyclerView.Adapter<EmojiPageViewHolder>() {
 
@@ -345,7 +367,7 @@ class EmojiPaletteController(
                 setHasFixedSize(true)
                 setRecycledViewPool(sharedViewPool)
             }
-            return EmojiPageViewHolder(recyclerView, onEmojiSelected)
+            return EmojiPageViewHolder(recyclerView, getThemeColors, onEmojiSelected)
         }
 
         override fun onBindViewHolder(holder: EmojiPageViewHolder, position: Int) {
@@ -356,10 +378,11 @@ class EmojiPaletteController(
 
     private class EmojiPageViewHolder(
         recyclerView: RecyclerView,
+        getThemeColors: () -> ThemeColors,
         onEmojiSelected: (String) -> Unit
     ) : RecyclerView.ViewHolder(recyclerView) {
 
-        private val gridAdapter = EmojiGridAdapter(onClick = onEmojiSelected)
+        private val gridAdapter = EmojiGridAdapter(getThemeColors = getThemeColors, onClick = onEmojiSelected)
 
         init {
             recyclerView.adapter = gridAdapter
@@ -372,6 +395,7 @@ class EmojiPaletteController(
 
     private class EmojiGridAdapter(
         private var emojis: List<String> = emptyList(),
+        private val getThemeColors: () -> ThemeColors,
         private val onClick: (String) -> Unit
     ) : RecyclerView.Adapter<EmojiViewHolder>() {
 
@@ -385,10 +409,12 @@ class EmojiPaletteController(
         override fun getItemCount(): Int = emojis.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmojiViewHolder {
+            val colors = getThemeColors()
             val textView = TextView(parent.context).apply {
                 textSize = 20f
                 gravity = Gravity.CENTER
                 setPadding(0, 10, 0, 10)
+                setTextColor(colors.textColor)
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -398,7 +424,7 @@ class EmojiPaletteController(
         }
 
         override fun onBindViewHolder(holder: EmojiViewHolder, position: Int) {
-            holder.bind(emojis[position])
+            holder.bind(emojis[position], getThemeColors().textColor)
         }
     }
 
@@ -407,8 +433,9 @@ class EmojiPaletteController(
         private val onClick: (String) -> Unit
     ) : RecyclerView.ViewHolder(textView) {
 
-        fun bind(emoji: String) {
+        fun bind(emoji: String, textColor: Int) {
             textView.text = emoji
+            textView.setTextColor(textColor)
             textView.setOnClickListener {
                 onClick(emoji)
             }

@@ -101,9 +101,9 @@ fn test_bare_digit_during_conversion_refines_instead_of_selecting() {
     // Digits are plain text input everywhere: during conversion they extend
     // the reading like any printable char, never select a candidate.
     let mut engine = InputMethodEngine::new();
-    engine.dicts.user = Some(dict_from_json(
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"あい","candidates":[{"surface":"藍","score":1.0}]}]"#,
-    ));
+    )));
 
     engine.process_key(&press('a'));
     engine.process_key(&press('i'));
@@ -118,12 +118,12 @@ fn test_bare_digit_during_conversion_refines_instead_of_selecting() {
 #[test]
 fn test_ctrl_digit_selects_candidate_during_conversion() {
     let mut engine = InputMethodEngine::new();
-    engine.dicts.user = Some(dict_from_json(
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"あい","candidates":[
             {"surface":"藍","score":2.0},
             {"surface":"愛","score":1.0}
         ]}]"#,
-    ));
+    )));
 
     engine.process_key(&press('a'));
     engine.process_key(&press('i'));
@@ -148,9 +148,9 @@ fn test_ctrl_digit_selects_candidate_while_composing() {
     // commits straight from it — no Space needed first.
     let mut engine = InputMethodEngine::new();
     engine.converters.kanji = None;
-    engine.dicts.user = Some(dict_from_json(
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"あい","candidates":[{"surface":"藍","score":1.0}]}]"#,
-    ));
+    )));
 
     engine.process_key(&press('a'));
     let result = engine.process_key(&press('i'));
@@ -270,12 +270,12 @@ fn test_ctrl_b_in_conversion_moves_caret_like_left() {
 fn test_shift_space_steps_back_a_candidate() {
     // Shift+Space is prev-candidate, the mirror of Space, like Shift+Tab.
     let mut engine = InputMethodEngine::new();
-    engine.dicts.user = Some(dict_from_json(
+    engine.dicts.user = Some(std::sync::Arc::new(dict_from_json(
         r#"[{"reading":"あい","candidates":[
             {"surface":"藍","score":2.0},
             {"surface":"愛","score":1.0}
         ]}]"#,
-    ));
+    )));
     engine.process_key(&press('a'));
     engine.process_key(&press('i'));
     engine.process_key(&press_key(Keysym::SPACE));
@@ -288,4 +288,91 @@ fn test_shift_space_steps_back_a_candidate() {
     assert_eq!(engine.candidates().unwrap().cursor(), before);
     assert!(matches!(engine.state(), InputState::Conversion { .. }));
     assert!(committed(&result).is_none(), "Shift+Space must not commit");
+}
+
+#[test]
+fn test_ctrl_m_commits_while_composing() {
+    // Ctrl+M is Enter's twin (mozc's MS-IME keymap binds both to Commit).
+    // Left unbound it leaked to the application, where a terminal reads
+    // Ctrl+M as a bare Enter — submitting a half-typed line.
+    let mut engine = InputMethodEngine::new();
+    engine.process_key(&press('a'));
+    engine.process_key(&press('i'));
+    assert_eq!(engine.preedit().unwrap().text(), "あい");
+
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_M));
+    assert!(result.consumed, "Ctrl+M must not leak to the application");
+    assert_eq!(committed(&result).as_deref(), Some("あい"));
+    assert!(matches!(engine.state(), InputState::Empty));
+
+    // The uppercase keysym some environments fold Shift into works too.
+    engine.process_key(&press('a'));
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_M_UPPER));
+    assert!(result.consumed);
+    assert_eq!(committed(&result).as_deref(), Some("あ"));
+}
+
+#[test]
+fn test_ctrl_m_commits_during_conversion() {
+    let mut engine = engine_with_learned("あい", "愛");
+    engine.process_key(&press('a'));
+    engine.process_key(&press('i'));
+    engine.process_key(&press_key(Keysym::SPACE));
+    assert!(matches!(engine.state(), InputState::Conversion { .. }));
+
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_M));
+    assert!(result.consumed, "Ctrl+M must not leak to the application");
+    assert_eq!(committed(&result).as_deref(), Some("愛"));
+    assert!(matches!(engine.state(), InputState::Empty));
+}
+
+#[test]
+fn test_ctrl_m_passes_through_when_empty() {
+    // With nothing composed there is nothing to commit: the chord goes to
+    // the application, so a terminal still gets its Enter.
+    let mut engine = InputMethodEngine::new();
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_M));
+    assert!(!result.consumed);
+    assert!(matches!(engine.state(), InputState::Empty));
+}
+
+#[test]
+fn test_ctrl_h_deletes_like_backspace_while_composing() {
+    let mut engine = InputMethodEngine::new();
+    engine.process_key(&press('a'));
+    engine.process_key(&press('i'));
+
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_H));
+    assert!(result.consumed, "Ctrl+H must not leak to the application");
+    assert_eq!(engine.preedit().unwrap().text(), "あ");
+
+    // The uppercase keysym some environments fold Shift into works too.
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_H_UPPER));
+    assert!(result.consumed);
+    assert!(matches!(engine.state(), InputState::Empty));
+}
+
+#[test]
+fn test_ctrl_h_cancels_conversion_like_backspace() {
+    // Plain Backspace, not Ctrl+Backspace: the learned entry must survive.
+    let mut engine = engine_with_learned("あい", "愛");
+    engine.process_key(&press('a'));
+    engine.process_key(&press('i'));
+    engine.process_key(&press_key(Keysym::SPACE));
+    assert!(matches!(engine.state(), InputState::Conversion { .. }));
+
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_H));
+    assert!(result.consumed);
+    assert!(matches!(engine.state(), InputState::Composing { .. }));
+    assert_eq!(engine.preedit().unwrap().text(), "あい");
+
+    engine.process_key(&press_key(Keysym::SPACE));
+    assert_eq!(engine.candidates().unwrap().selected_text(), Some("愛"));
+}
+
+#[test]
+fn test_ctrl_h_passes_through_when_empty() {
+    let mut engine = InputMethodEngine::new();
+    let result = engine.process_key(&press_ctrl(Keysym::KEY_H));
+    assert!(!result.consumed);
 }

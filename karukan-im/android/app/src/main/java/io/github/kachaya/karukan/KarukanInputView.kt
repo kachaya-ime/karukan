@@ -50,59 +50,8 @@ class KarukanInputView @JvmOverloads constructor(
         return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, resources.displayMetrics).toInt()
     }
 
-    data class ThemeColors(
-        val bg: Int,
-        val statusText: Int,
-        val candidateBg: Int,
-        val candidateText: Int,
-        val candidateSelectedBg: Int,
-        val candidateSelectedText: Int,
-        val textColor: Int
-    )
-
     fun getThemeColors(): ThemeColors {
-        val isDark = listener?.isDarkTheme() == true
-        val baseAccentGreen = Color.parseColor("#00897B")
-        val baseDarkBg = Color.parseColor("#202124")
-        val baseLightBg = Color.parseColor("#F8F9FA")
-        val baseTextLight = Color.parseColor("#E8EAED")
-        val baseTextDark = Color.parseColor("#202124")
-
-        val bg = if (isDark) baseDarkBg else baseLightBg
-        val statusText = if (isDark) baseTextLight else baseTextDark
-        val textColor = if (isDark) Color.WHITE else baseTextDark
-
-        // candidateBg: ベース背景に 4% ティント・ブレンド
-        val candidateBg = if (isDark) {
-            ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
-        } else {
-            ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
-        }
-        val candidateText = if (isDark) baseTextLight else baseTextDark
-
-        // candidateSelectedBg: ベース背景にベースグリーンをティント・ブレンド
-        val candidateSelectedBg = if (isDark) {
-            ColorUtils.blendARGB(bg, baseAccentGreen, 0.30f)
-        } else {
-            ColorUtils.blendARGB(bg, baseAccentGreen, 0.15f)
-        }
-
-        // candidateSelectedText: ベースグリーンとブラック/ホワイトのブレンド
-        val candidateSelectedText = if (isDark) {
-            Color.WHITE
-        } else {
-            ColorUtils.blendARGB(baseAccentGreen, Color.BLACK, 0.50f)
-        }
-
-        return ThemeColors(
-            bg = bg,
-            statusText = statusText,
-            candidateBg = candidateBg,
-            candidateText = candidateText,
-            candidateSelectedBg = candidateSelectedBg,
-            candidateSelectedText = candidateSelectedText,
-            textColor = textColor
-        )
+        return ThemeColors.from(listener?.isDarkTheme() == true)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -139,15 +88,11 @@ class KarukanInputView @JvmOverloads constructor(
     private val floatingOverlay by lazy {
         FloatingCandidateOverlay(
             context = context,
-            isDarkSupplier = { listener?.isDarkTheme() == true },
             dpToPx = { dp -> dpToPx(dp) },
             getThemeColors = { getThemeColors() },
-            getComposingText = { if (::composingTextView.isInitialized) composingTextView.text.toString() else "" },
             getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
             isHardKeyboardConnected = { listener?.isHardKeyboardConnected() == true },
-            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true },
-            isShowFloatingStatusEnabled = { listener?.getSettings()?.isShowFloatingStatusTextEnabled == true },
-            onCandidateSelected = { hiragana, cand, index -> listener?.onCandidateSelected(hiragana, cand, index) }
+            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true }
         )
     }
 
@@ -255,6 +200,19 @@ class KarukanInputView @JvmOverloads constructor(
             visibility = VISIBLE
         }
 
+        val btnEmoji = TextView(context).apply {
+            text = "😊 絵文字"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(colors.candidateText)
+            setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                toggleEmojiPalette()
+            }
+        }
+
         val btnSettings = TextView(context).apply {
             text = "⚙️ 設定"
             textSize = 14f
@@ -267,6 +225,7 @@ class KarukanInputView @JvmOverloads constructor(
                 listener?.openSettingsActivity()
             }
         }
+        toolbarContainer.addView(btnEmoji)
         toolbarContainer.addView(btnSettings)
 
         // 2b. 1行変換候補バー領域 (文字入力中・変換候補存在時に表示)
@@ -402,6 +361,7 @@ class KarukanInputView @JvmOverloads constructor(
         if (::expandButton.isInitialized) {
             expandButton.visibility = GONE
         }
+        requestLayout()
     }
 
     private fun showCandidateBar() {
@@ -416,9 +376,14 @@ class KarukanInputView @JvmOverloads constructor(
         if (::expandButton.isInitialized) {
             expandButton.visibility = VISIBLE
         }
+        requestLayout()
     }
 
     fun setupKeyboardLayout(layoutName: String) {
+        if (::mainKeyboardContainer.isInitialized && keyboardLayoutSetting == layoutName) {
+            updateThemeColors()
+            return
+        }
         this.keyboardLayoutSetting = layoutName
         updateThemeColors()
 
@@ -499,6 +464,9 @@ class KarukanInputView @JvmOverloads constructor(
                 isSingleRowBar = false,
                 hiragana = hiragana
             )
+            if (selectedIndex >= 0) {
+                floatingOverlay.scrollToSelectedCandidate(selectedIndex)
+            }
         } else {
             showCandidateBar()
 
@@ -559,9 +527,9 @@ class KarukanInputView @JvmOverloads constructor(
             val isSelected = (i == selectedIndex)
 
             val displayCandidate = if (showAnnotations) {
-                rawCandidate
+                rawCandidate.replace("\u001f", "")
             } else {
-                stripCandidateAnnotations(rawCandidate)
+                rawCandidate.extractPureCandidate()
             }
 
             val child = if (i < container.childCount) {
@@ -596,8 +564,7 @@ class KarukanInputView @JvmOverloads constructor(
     }
 
     private fun stripCandidateAnnotations(raw: String): String {
-        val idx = raw.indexOf(" (")
-        return if (idx > 0) raw.substring(0, idx) else raw
+        return raw.extractPureCandidate()
     }
 
     private fun updateCandidateLayoutContainer(
@@ -677,6 +644,7 @@ class KarukanInputView @JvmOverloads constructor(
             InputMode.HIRAGANA -> "かなモード"
             InputMode.ALPHANUMERIC -> "英数モード"
             InputMode.NUMERIC -> "数字モード"
+            InputMode.SYMBOL -> "記号モード"
         }
         if (::composingTextView.isInitialized) {
             composingTextView.text = modeText
@@ -732,6 +700,7 @@ class KarukanInputView @JvmOverloads constructor(
                 scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, lastSelectedIndex)
             }
         }
+        requestLayout()
     }
 
     fun collapseCandidates() {
@@ -745,11 +714,13 @@ class KarukanInputView @JvmOverloads constructor(
         if (::expandButton.isInitialized) {
             expandButton.text = "▼"
         }
+        requestLayout()
     }
 
     fun hideEmojiPalette() {
         if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized && emojiPaletteController.isVisible) {
             emojiPaletteController.hide(mainKeyboardContainer)
+            requestLayout()
         }
     }
 
@@ -757,6 +728,7 @@ class KarukanInputView @JvmOverloads constructor(
         hideEmojiPalette()
         collapseCandidates()
         dismissFloatingCandidates()
+        requestLayout()
     }
 
     fun toggleEmojiPalette() {
@@ -772,6 +744,7 @@ class KarukanInputView @JvmOverloads constructor(
             if (wasVisible) {
                 updateKeyboardLayoutVisibility()
             }
+            requestLayout()
         }
     }
 
@@ -788,6 +761,7 @@ class KarukanInputView @JvmOverloads constructor(
             if (wasVisible) {
                 updateKeyboardLayoutVisibility()
             }
+            requestLayout()
         }
     }
 

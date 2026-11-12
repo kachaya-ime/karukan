@@ -35,7 +35,7 @@ Android 向け Karukan IME フロントエンドモジュールです。
 
 `app/build.gradle.kts` にて以下の自動ビルドタスクが `preBuild` に依存して実行されます。
 
-- **`downloadAssets`**: HuggingFace から GGUF モデル (`jinen-v2-xsmall-Q5_K_M.gguf`) および `tokenizer.json` を取得
+- **`downloadAssets`**: HuggingFace から GGUF モデル (`jinen-v2-xsmall-Q8_0.gguf`) および `tokenizer.json` を取得
 - **`downloadDict`**: 公式システム辞書アーカイブ (`dict.tgz`) を取得・展開
 - **`copyUserDicts`**: ユーザー辞書領域の初期化
 - **`generateEmojiList`**: `unicode.org` から `emoji-test.txt` を取得・処理し、カテゴリ別絵文字リスト (`emoji_categories.txt`) を生成

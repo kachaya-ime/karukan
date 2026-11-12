@@ -1,7 +1,6 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.util.Log
 import android.view.Gravity
@@ -19,15 +18,11 @@ import android.widget.TextView
  */
 class FloatingCandidateOverlay(
     private val context: Context,
-    private val isDarkSupplier: () -> Boolean,
     private val dpToPx: (Float) -> Int,
-    private val getThemeColors: () -> KarukanInputView.ThemeColors,
-    private val getComposingText: () -> String,
+    private val getThemeColors: () -> ThemeColors,
     private val getAnchorView: () -> View?,
     private val isHardKeyboardConnected: () -> Boolean,
-    private val isShowFloatingWindowEnabled: () -> Boolean,
-    private val isShowFloatingStatusEnabled: () -> Boolean,
-    private val onCandidateSelected: (hiragana: String, candidate: String, index: Int) -> Unit
+    private val isShowFloatingWindowEnabled: () -> Boolean
 ) {
 
     private var popupWindow: PopupWindow? = null
@@ -49,7 +44,6 @@ class FloatingCandidateOverlay(
     private fun createPopupWindow(): PopupWindow {
         val colors = getThemeColors()
         val density = context.resources.displayMetrics.density
-        val isDark = isDarkSupplier()
 
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -58,7 +52,7 @@ class FloatingCandidateOverlay(
                 shape = GradientDrawable.RECTANGLE
                 setColor(colors.candidateBg)
                 cornerRadius = 8 * density
-                setStroke(dpToPx(1f), if (isDark) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0"))
+                setStroke(dpToPx(1f), colors.strokeBorderColor)
             }
             elevation = dpToPx(8f).toFloat()
         }
@@ -72,7 +66,7 @@ class FloatingCandidateOverlay(
         }
 
         val divView = View(context).apply {
-            setBackgroundColor(if (isDark) Color.parseColor("#4A4D51") else Color.parseColor("#E0E0E0"))
+            setBackgroundColor(colors.dividerColor)
             visibility = View.GONE
         }
 
@@ -132,28 +126,14 @@ class FloatingCandidateOverlay(
         cursorYBottom: Float,
         cursorYTop: Float
     ) {
-        if (!isHardKeyboardConnected() || !isShowFloatingWindowEnabled()) {
+        if (!isHardKeyboardConnected() || !isShowFloatingWindowEnabled() || selectedIndex < 0) {
             dismiss()
             return
         }
 
-        val rawStatusText = getComposingText()
-        var formattedStatusText = rawStatusText
-        if (formattedStatusText.startsWith("かな: ")) {
-            formattedStatusText = formattedStatusText.substring("かな: ".length)
-        }
-        formattedStatusText = formattedStatusText.trim()
-
-        val isDefaultEmptyStatus = formattedStatusText.isEmpty() ||
-                formattedStatusText == "(なし)" ||
-                formattedStatusText.startsWith("(なし)") ||
-                formattedStatusText == "英数モード"
-
-        val hasComposing = !isDefaultEmptyStatus
-        val showStatus = hasComposing && isShowFloatingStatusEnabled()
         val hasCandidates = (candidateFlowLayout?.childCount ?: 0) > 0
 
-        if (!showStatus && !hasCandidates) {
+        if (!hasCandidates) {
             dismiss()
             return
         }
@@ -165,11 +145,9 @@ class FloatingCandidateOverlay(
         val statusTv = statusTextView ?: return
         val sv = candidateScrollView ?: return
 
-        statusTv.text = formattedStatusText
-        statusTv.visibility = if (showStatus) View.VISIBLE else View.GONE
-
-        sv.visibility = if (hasCandidates) View.VISIBLE else View.GONE
-        dividerView?.visibility = if (showStatus && hasCandidates) View.VISIBLE else View.GONE
+        statusTv.visibility = View.GONE
+        sv.visibility = View.VISIBLE
+        dividerView?.visibility = View.GONE
 
         showInternal(hasCandidates, isCursorAnchorValid, cursorX, cursorYBottom, cursorYTop)
     }
@@ -313,5 +291,16 @@ class FloatingCandidateOverlay(
         lastY = Int.MIN_VALUE
         lastWidth = Int.MIN_VALUE
         lastHeight = Int.MIN_VALUE
+    }
+
+    fun scrollToSelectedCandidate(index: Int) {
+        val sv = candidateScrollView ?: return
+        val flowLayout = candidateFlowLayout ?: return
+        if (index < 0 || index >= flowLayout.childCount) return
+        val selectedView = flowLayout.getChildAt(index) ?: return
+        sv.post {
+            val scrollTo = selectedView.top - (sv.height / 2) + (selectedView.height / 2)
+            sv.smoothScrollTo(0, maxOf(0, scrollTo))
+        }
     }
 }

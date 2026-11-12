@@ -7,6 +7,7 @@ sealed interface KeyAction {
 
     // 文字入力アクション
     data class InputChar(val text: String, val isShift: Boolean = false) : KeyAction
+    data class KanaInput(val char: String) : KeyAction
     data class NikoTouchInput(val char: String) : KeyAction
     data object NikoTouchToggle : KeyAction
 

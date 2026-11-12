@@ -35,6 +35,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private lateinit var engine: KarukanEngine
     private var currentPreedit: String = ""
+    private var romajiBuffer: String = ""
     private val hasActiveInput: Boolean
         get() = currentPreedit.isNotEmpty()
     private val currentActiveQuery: String
@@ -127,6 +128,9 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         preferencesManager = PreferencesManager(this) { updatedSettings ->
+            invalidateThemeCache()
+            invalidateHeightCache()
+            invalidateHardKeyboardCache()
             if (::engine.isInitialized) {
                 engine.updateEngineConfig(updatedSettings)
             }
@@ -209,35 +213,97 @@ class KarukanInputMethodService : InputMethodService() {
         return karukanInputView
     }
 
+    override fun setInputView(view: View?) {
+        super.setInputView(view)
+        view?.post {
+            view.requestLayout()
+        }
+    }
+
+    override fun onComputeInsets(outInsets: InputMethodService.Insets) {
+        super.onComputeInsets(outInsets)
+        if (!isFullscreenMode()) {
+            val view = if (::karukanInputView.isInitialized) karukanInputView else null
+            val height = if (view != null && view.height > 0) {
+                view.height
+            } else if (view != null && view.measuredHeight > 0) {
+                view.measuredHeight
+            } else {
+                getKeyboardHeightPx() + getKeyButtonHeight()
+            }
+            val visibleTop = window?.window?.decorView?.let { it.height - height } ?: 0
+            outInsets.contentTopInsets = visibleTop
+            outInsets.visibleTopInsets = visibleTop
+            outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_VISIBLE
+        }
+    }
+
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         currentEditorInfo = attribute
-        requestCursorUpdates()
-        if (settings.isAutoCommitEnabled && hasActiveInput) {
-            commitCurrentHiragana()
-        }
-        currentPreedit = ""
-        if (::composingTextView.isInitialized) {
-            updateComposingText()
-            clearCandidateBar()
+
+        if (!restarting) {
+            requestCursorUpdates()
+            if (settings.isAutoCommitEnabled && hasActiveInput) {
+                commitCurrentHiragana()
+            }
+            currentPreedit = ""
+            evaluateEditorInfo(attribute)
+            if (::composingTextView.isInitialized) {
+                updateComposingText()
+                clearCandidateBar()
+            }
+        } else {
+            if (hasActiveInput) {
+                currentInputConnection?.setComposingText(currentPreedit, 1)
+            }
         }
     }
 
     override fun onStartInputView(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(attribute, restarting)
         currentEditorInfo = attribute
-        requestCursorUpdates()
-        if (::karukanInputView.isInitialized) {
+        if (!restarting && ::karukanInputView.isInitialized) {
             karukanInputView.resetKeyboardState()
         }
         val effectiveLayout = getEffectiveKeyboardLayout()
         if (pendingInputViewReload || currentEffectiveKeyboardLayout != effectiveLayout) {
             pendingInputViewReload = false
+            currentEffectiveKeyboardLayout = effectiveLayout
             setInputView(onCreateInputView())
         } else if (::karukanInputView.isInitialized) {
-            karukanInputView.setupKeyboardLayout(effectiveLayout)
             karukanInputView.setInputMode(inputMode)
             updateKeyboardLayoutVisibility()
+        }
+    }
+
+    private fun evaluateEditorInfo(info: EditorInfo?) {
+        if (info == null) return
+        val inputType = info.inputType
+        val clazz = inputType and EditorInfo.TYPE_MASK_CLASS
+        val variation = inputType and EditorInfo.TYPE_MASK_VARIATION
+
+        when (clazz) {
+            EditorInfo.TYPE_CLASS_NUMBER, EditorInfo.TYPE_CLASS_PHONE, EditorInfo.TYPE_CLASS_DATETIME -> {
+                inputMode = InputMode.NUMERIC
+            }
+            EditorInfo.TYPE_CLASS_TEXT -> {
+                when (variation) {
+                    EditorInfo.TYPE_TEXT_VARIATION_PASSWORD,
+                    EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                    EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+                    EditorInfo.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                    EditorInfo.TYPE_TEXT_VARIATION_URI -> {
+                        inputMode = InputMode.ALPHANUMERIC
+                    }
+                    else -> {
+                        inputMode = InputMode.HIRAGANA
+                    }
+                }
+            }
+            else -> {
+                inputMode = InputMode.HIRAGANA
+            }
         }
     }
 
@@ -268,6 +334,9 @@ class KarukanInputMethodService : InputMethodService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        invalidateHardKeyboardCache()
+        invalidateThemeCache()
+        invalidateHeightCache()
         updateInputViewShown()
         currentEffectiveKeyboardLayout = getEffectiveKeyboardLayout()
         setInputView(onCreateInputView())
@@ -282,12 +351,26 @@ class KarukanInputMethodService : InputMethodService() {
     // Region: UI & Theme Helpers
     // ---------------------------------------------------------------------------------------------
 
+    private var cachedIsDarkTheme: Boolean? = null
+    private var cachedKeyButtonHeight: Int? = null
+
+    private fun invalidateThemeCache() {
+        cachedIsDarkTheme = null
+    }
+
+    private fun invalidateHeightCache() {
+        cachedKeyButtonHeight = null
+    }
+
     private fun isDarkTheme(): Boolean {
-        return when (settings.keyboardTheme) {
+        cachedIsDarkTheme?.let { return it }
+        val dark = when (settings.keyboardTheme) {
             "light" -> false
             "system" -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
             else -> true
         }
+        cachedIsDarkTheme = dark
+        return dark
     }
 
     private fun triggerKeyFeedback() {
@@ -313,12 +396,15 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun getKeyButtonHeight(): Int {
+        cachedKeyButtonHeight?.let { return it }
         val density = resources.displayMetrics.density
-        return when (settings.keyboardHeight) {
+        val height = when (settings.keyboardHeight) {
             "small" -> (42 * density).toInt()
             "large" -> (62 * density).toInt()
             else -> (52 * density).toInt()
         }
+        cachedKeyButtonHeight = height
+        return height
     }
 
     private fun getKeyboardHeightPx(): Int {
@@ -360,7 +446,22 @@ class KarukanInputMethodService : InputMethodService() {
         startActivity(intent)
     }
 
+    private var cachedIsHardKeyboardConnected: Boolean? = null
+    private var cachedIsIntegratedHardKeyboardConnected: Boolean? = null
+
+    private fun invalidateHardKeyboardCache() {
+        cachedIsHardKeyboardConnected = null
+        cachedIsIntegratedHardKeyboardConnected = null
+    }
+
     private fun isHardKeyboardConnected(): Boolean {
+        cachedIsHardKeyboardConnected?.let { return it }
+        val result = checkIsHardKeyboardConnected()
+        cachedIsHardKeyboardConnected = result
+        return result
+    }
+
+    private fun checkIsHardKeyboardConnected(): Boolean {
         // 1. Check configuration (built-in hard keyboard)
         val config = resources.configuration
         val configHasHardKeyboard = (config.keyboard == Configuration.KEYBOARD_QWERTY ||
@@ -387,6 +488,13 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun isIntegratedHardKeyboardConnected(): Boolean {
+        cachedIsIntegratedHardKeyboardConnected?.let { return it }
+        val result = checkIsIntegratedHardKeyboardConnected()
+        cachedIsIntegratedHardKeyboardConnected = result
+        return result
+    }
+
+    private fun checkIsIntegratedHardKeyboardConnected(): Boolean {
         val deviceIds = android.view.InputDevice.getDeviceIds()
         for (id in deviceIds) {
             val device = android.view.InputDevice.getDevice(id)
@@ -493,7 +601,8 @@ class KarukanInputMethodService : InputMethodService() {
 
         override fun onKeyFeedback() = keyboardEventListener.onKeyFeedback()
         override fun onKeyPress(key: String, isShift: Boolean) = keyboardEventListener.onKeyPress(key, isShift)
-        override fun onNikoTouchInput(char: String) = keyboardEventListener.onNikoTouchInput(char)
+        override fun onKanaInput(char: String) = keyboardEventListener.onKanaInput(char)
+        override fun onNikoTouchInput(char: String) = keyboardEventListener.onKanaInput(char)
         override fun onNikoTouchToggle() = keyboardEventListener.onNikoTouchToggle()
         override fun onBackspace() = keyboardEventListener.onBackspace()
         override fun onDelete() = keyboardEventListener.onDelete()
@@ -521,8 +630,12 @@ class KarukanInputMethodService : InputMethodService() {
             executeKeyAction(KeyAction.InputChar(key, isShift))
         }
 
+        override fun onKanaInput(char: String) {
+            executeKeyAction(KeyAction.KanaInput(char))
+        }
+
         override fun onNikoTouchInput(char: String) {
-            executeKeyAction(KeyAction.NikoTouchInput(char))
+            executeKeyAction(KeyAction.KanaInput(char))
         }
 
         override fun onNikoTouchToggle() {
@@ -554,7 +667,14 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         override fun onToggleSymbolPalette() {
-            executeKeyAction(KeyAction.ToggleSymbolPalette)
+            if (hasActiveInput) {
+                commitCurrentHiragana()
+            }
+            inputMode = InputMode.SYMBOL
+            clearComposingState()
+            if (::karukanInputView.isInitialized) {
+                karukanInputView.setInputMode(inputMode)
+            }
         }
 
         override fun onToggleLanguageMode() {
@@ -566,7 +686,7 @@ class KarukanInputMethodService : InputMethodService() {
                 commitCurrentHiragana()
             }
             inputMode = when (inputMode) {
-                InputMode.NUMERIC -> InputMode.HIRAGANA
+                InputMode.NUMERIC, InputMode.SYMBOL -> InputMode.HIRAGANA
                 else -> InputMode.NUMERIC
             }
             clearComposingState()
@@ -619,7 +739,8 @@ class KarukanInputMethodService : InputMethodService() {
     fun executeKeyAction(action: KeyAction, isPhysicalKeyboard: Boolean = false): Boolean {
         when (action) {
             is KeyAction.InputChar -> onKeyPress(action.text, action.isShift)
-            is KeyAction.NikoTouchInput -> onNikoTouchInput(action.char)
+            is KeyAction.KanaInput -> onKanaInput(action.char)
+            is KeyAction.NikoTouchInput -> onKanaInput(action.char)
             KeyAction.NikoTouchToggle -> onNikoTouchToggle()
             KeyAction.Backspace -> onBackspace()
             KeyAction.DeleteForward -> onDeleteForward()
@@ -683,8 +804,13 @@ class KarukanInputMethodService : InputMethodService() {
             }
 
             KeyAction.ToggleSymbolPalette -> {
+                if (hasActiveInput) {
+                    commitCurrentHiragana()
+                }
+                inputMode = InputMode.SYMBOL
+                clearComposingState()
                 if (::karukanInputView.isInitialized) {
-                    karukanInputView.toggleSymbolPalette()
+                    karukanInputView.setInputMode(inputMode)
                 }
             }
 
@@ -746,7 +872,23 @@ class KarukanInputMethodService : InputMethodService() {
             return true
         }
 
-        val isNikoMode = getEffectiveKeyboardLayout() == "niko"
+        if (keyCode == KeyEvent.KEYCODE_SPACE) {
+            if (event?.isShiftPressed == true) {
+                onFullWidthSpace()
+            } else {
+                onSpaceKey()
+            }
+            return true
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_ENTER) {
+            if (selectedCandidateIndex >= 0 && selectedCandidateIndex in currentCandidates.indices) {
+                onCommitKey()
+                return true
+            }
+        }
+
+        val isNikoMode = (currentEffectiveKeyboardLayout ?: getEffectiveKeyboardLayout()) == "niko"
         val nikoKeyIndex = NikoKeyboardLayout.keyCodeToNikoKeyIndex(keyCode)
         if (!isEnglishMode && isNikoMode && nikoKeyIndex != null && ::keyboardLayoutBuilder.isInitialized) {
             triggerKeyFeedback()
@@ -759,16 +901,6 @@ class KarukanInputMethodService : InputMethodService() {
         // 1. Android 固有の編集アクション (Ctrl+A/C/V/X/Z, 全選択, コピー, 画面UI切替等) を最優先でハンドリング
         if (action != null && isAndroidSpecificAction(action)) {
             if (executeKeyAction(action, isPhysicalKeyboard = true)) {
-                return true
-            }
-        }
-
-        // 2. 文字入力・カーソル移動・変換・削除等は Native (Core Engine) の InputBuffer を優先試行
-        val nativePair = KeyEventMapper.toNativeKeysymAndModifiers(keyCode, event, settings.physicalKeyboardLayout)
-        if (nativePair != null) {
-            val (keysym, modifiers) = nativePair
-            val res = engine.processKey(keysym, modifiers, isRelease = false)
-            if (applyProcessKeyResult(res)) {
                 return true
             }
         }
@@ -808,60 +940,26 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
-    private fun applyProcessKeyResult(result: ProcessKeyResult): Boolean {
-        if (!result.consumed) return false
-
-        result.commitText?.let { commitStr ->
-            if (commitStr.isNotEmpty()) {
-                val commitTextValue = (currentLiveCandidate ?: commitStr).extractPureCandidate()
-                val reading = currentActiveQuery.ifEmpty { commitStr }
-                if (settings.isLearningEnabled && commitTextValue != reading) {
-                    engine.recordLearning(reading, commitTextValue)
-                }
-                lastCommittedSurface = commitTextValue
-                lastCommittedReading = reading
-                currentInputConnection?.commitText(commitTextValue, 1)
-                clearComposingState()
-            }
-        }
-
-        if (result.hasPreedit && result.preeditText != null) {
-            val preedit = result.preeditText
-            currentLiveCandidate = null
-            if (preedit.isNotEmpty()) {
-                currentPreedit = preedit
-                val caretPos = if (result.caret >= preedit.length) 1 else result.caret - preedit.length
-                currentInputConnection?.setComposingText(preedit, caretPos)
-                if (::composingTextView.isInitialized) {
-                    composingTextView.text = preedit
-                }
-                if (settings.isLiveConversionEnabled) {
-                    triggerLiveConversion(preedit)
-                }
-            } else {
-                currentPreedit = ""
-                currentInputConnection?.finishComposingText()
-                cancelLiveConversion()
-            }
-        } else if (result.commitText != null && !result.hasPreedit) {
-            currentPreedit = ""
-            clearComposingState()
-        }
-
-        if (result.hasCandidates && result.candidates != null) {
-            currentCandidates = result.candidates
-            val activePreedit = if (currentPreedit.isNotEmpty()) currentPreedit else ""
-            renderCandidates(activePreedit, currentCandidates)
-        } else if (result.hideCandidates) {
-            clearCandidateBar()
-        }
-
-        return true
-    }
 
     private fun triggerLiveConversion(preedit: String) {
         cancelLiveConversion()
+        clearCandidateBar()
         val queryId = ++currentLiveConversionQueryId
+
+        // Fetch leftContext safely on the main thread before switching to Dispatchers.Default
+        val leftContext = if (settings.useContext) {
+            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + preedit.length + 10, 0)?.toString() ?: ""
+            val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
+            if (preedit.isNotEmpty() && currentLine.endsWith(preedit)) {
+                currentLine.substring(0, currentLine.length - preedit.length)
+            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
+                currentLine.substring(0, currentLine.length - currentPreedit.length)
+            } else {
+                currentLine
+            }.trim()
+        } else {
+            ""
+        }
 
         liveConversionJob = serviceScope.launch {
             val debounceMs = settings.liveConversionDebounceMs.toLong()
@@ -874,7 +972,7 @@ class KarukanInputMethodService : InputMethodService() {
                 if (!coroutineContext.isActive || queryId != currentLiveConversionQueryId) {
                     return@withContext Pair(emptyList(), "")
                 }
-                val candidates = fetchCandidates(preedit, queryId)
+                val candidates = fetchCandidates(preedit, queryId, leftContext)
                 val topCandidate = candidates.firstOrNull() ?: preedit
                 Pair(candidates, topCandidate)
             }
@@ -886,7 +984,7 @@ class KarukanInputMethodService : InputMethodService() {
                 val displayTopCandidate = if (settings.isShowCandidateAnnotationsEnabled) topCandidate else pureTopCandidate
                 composingTextView.text = "かな: $preedit → $displayTopCandidate${if (isKatakanaMode) " [カタカナ]" else ""}$detailStr"
                 currentInputConnection?.setComposingText(pureTopCandidate, 1)
-                renderCandidates(preedit, candidates)
+                clearCandidateBar()
             }
         }
     }
@@ -902,7 +1000,7 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         if (isShift && key.length == 1 && key[0] in 'A'..'Z') {
-            if (currentPreedit.isNotEmpty()) {
+            if (currentPreedit.isNotEmpty() || romajiBuffer.isNotEmpty()) {
                 commitCurrentHiragana()
             }
             inputMode = InputMode.ALPHANUMERIC
@@ -917,28 +1015,53 @@ class KarukanInputMethodService : InputMethodService() {
             selectedCandidateIndex = -1
         }
 
-        val code = key[0].code
-        val modifiers = if (isShift) 1 else 0
-        val res = engine.processKey(code, modifiers)
-        applyProcessKeyResult(res)
+        clearCandidateBar()
+        romajiBuffer += if (isShift) key.uppercase(Locale.getDefault()) else key.lowercase(Locale.getDefault())
+        val converted = engine.romajiToHiragana(romajiBuffer)
+        currentPreedit = converted
+        val displayPreedit = currentPreedit
+        currentLiveCandidate = null
+        currentInputConnection?.setComposingText(displayPreedit, 1)
+        if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
+            composingTextView.text = displayPreedit
+        }
+        if (settings.isLiveConversionEnabled) {
+            triggerLiveConversion(displayPreedit)
+        } else {
+            clearCandidateBar()
+        }
     }
 
-    private fun onNikoTouchInput(char: String) {
+    private fun onKanaInput(char: String) {
         if (isEnglishMode || NikoKeyboardLayout.isDirectCommit(char)) {
-            if (currentPreedit.isNotEmpty()) {
+            if (currentPreedit.isNotEmpty() || romajiBuffer.isNotEmpty()) {
                 commitCurrentHiragana()
             }
             currentInputConnection?.commitText(char, 1)
             return
         }
-        val code = char[0].code
-        val res = engine.processKey(code, 0)
-        applyProcessKeyResult(res)
+        if (selectedCandidateIndex >= 0) {
+            selectedCandidateIndex = -1
+        }
+        clearCandidateBar()
+        romajiBuffer = ""
+        currentPreedit += char
+        val displayPreedit = currentPreedit
+        currentLiveCandidate = null
+        currentInputConnection?.setComposingText(displayPreedit, 1)
+        if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
+            composingTextView.text = displayPreedit
+        }
+        if (settings.isLiveConversionEnabled) {
+            triggerLiveConversion(displayPreedit)
+        } else {
+            clearCandidateBar()
+        }
     }
 
     private fun onNikoTouchToggle() {
         val textBefore = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() ?: ""
-        if (textBefore.isNotEmpty()) {
+        if (textBefore.isNotEmpty() && currentPreedit.isEmpty()) {
             val c = textBefore[0]
             val toggled = when {
                 c in 'a'..'z' -> c.uppercaseChar().toString()
@@ -956,9 +1079,16 @@ class KarukanInputMethodService : InputMethodService() {
             val lastChar = currentPreedit.last().toString()
             val toggled = NikoKeyboardLayout.toggleChar(lastChar)
             if (lastChar != toggled) {
-                engine.processKey(0xff08, 0)
-                val res = engine.processKey(toggled[0].code, 0)
-                applyProcessKeyResult(res)
+                currentPreedit = currentPreedit.dropLast(1) + toggled
+                currentInputConnection?.setComposingText(currentPreedit, 1)
+                if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
+                    composingTextView.text = currentPreedit
+                }
+                if (settings.isLiveConversionEnabled) {
+                    triggerLiveConversion(currentPreedit)
+                } else {
+                    clearCandidateBar()
+                }
             }
         }
     }
@@ -970,15 +1100,37 @@ class KarukanInputMethodService : InputMethodService() {
             updateComposingText()
             return
         }
-        val res = engine.processKey(0xff08, 0)
-        if (!applyProcessKeyResult(res)) {
-            val selectedText = currentInputConnection?.getSelectedText(0)
-            if (!selectedText.isNullOrEmpty()) {
-                currentInputConnection?.commitText("", 1)
-            } else {
-                currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-                currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+        if (romajiBuffer.isNotEmpty()) {
+            romajiBuffer = romajiBuffer.dropLast(1)
+            currentPreedit = if (romajiBuffer.isEmpty()) "" else engine.romajiToHiragana(romajiBuffer)
+        } else if (currentPreedit.isNotEmpty()) {
+            currentPreedit = currentPreedit.dropLast(1)
+        }
+
+        if (currentPreedit.isEmpty() && romajiBuffer.isEmpty()) {
+            romajiBuffer = ""
+            currentInputConnection?.finishComposingText()
+            cancelLiveConversion()
+            clearComposingState()
+        } else {
+            currentLiveCandidate = null
+            currentInputConnection?.setComposingText(currentPreedit, 1)
+            if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
+                composingTextView.text = currentPreedit
             }
+            if (settings.isLiveConversionEnabled) {
+                triggerLiveConversion(currentPreedit)
+            } else {
+                clearCandidateBar()
+            }
+            return
+        }
+        val selectedText = currentInputConnection?.getSelectedText(0)
+        if (!selectedText.isNullOrEmpty()) {
+            currentInputConnection?.commitText("", 1)
+        } else {
+            currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+            currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
         }
     }
 
@@ -1120,6 +1272,10 @@ class KarukanInputMethodService : InputMethodService() {
         if (selectedCandidateIndex >= 0) {
             onEscape()
         }
+        val textBefore = currentInputConnection?.getTextBeforeCursor(1, 0)
+        if (textBefore.isNullOrEmpty()) {
+            return
+        }
         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, 0, metaState))
@@ -1130,6 +1286,10 @@ class KarukanInputMethodService : InputMethodService() {
         if (selectedCandidateIndex >= 0) {
             onEscape()
         }
+        val textAfter = currentInputConnection?.getTextAfterCursor(1, 0)
+        if (textAfter.isNullOrEmpty()) {
+            return
+        }
         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, 0, metaState))
@@ -1137,7 +1297,9 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onDpadUp(isShift: Boolean = false) {
-        val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
+
+
+         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP, 0, metaState))
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP, 0, metaState))
@@ -1226,67 +1388,32 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
-    private fun fetchEmojiCandidates(query: String): List<String> =
-        CandidateFilterManager.fetchEmojiCandidates(engine, query)
-
-    private fun fetchCandidates(hiragana: String, queryId: Long = 0): List<String> {
+    private fun fetchCandidates(hiragana: String, queryId: Long = 0, precomputedLeftContext: String? = null): List<String> {
         if (hiragana.isEmpty()) return emptyList()
 
-        var leftContext = ""
-        if (settings.useContext) {
-            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 20, 0)?.toString() ?: ""
-            val rawBuffer = currentPreedit
-            val currentLineContext = rawContext.substringAfterLast('\n').substringAfterLast('\r')
-            var cleanedContext = currentLineContext
-
-            var changed = true
-            while (changed && cleanedContext.isNotEmpty()) {
-                changed = false
-                val liveCand = currentLiveCandidate?.extractPureCandidate() ?: ""
-                if (liveCand.isNotEmpty() && cleanedContext.endsWith(liveCand)) {
-                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - liveCand.length)
-                    changed = true
-                } else if (hiragana.isNotEmpty() && cleanedContext.endsWith(hiragana)) {
-                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - hiragana.length)
-                    changed = true
-                } else if (rawBuffer.isNotEmpty() && cleanedContext.endsWith(rawBuffer)) {
-                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - rawBuffer.length)
-                    changed = true
-                }
-            }
-
-            for (len in hiragana.length downTo 1) {
-                if (cleanedContext.length >= len &&
-                    cleanedContext.regionMatches(cleanedContext.length - len, hiragana, 0, len)
-                ) {
-                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - len)
-                    break
-                }
-            }
-            for (len in rawBuffer.length downTo 1) {
-                if (cleanedContext.length >= len &&
-                    cleanedContext.regionMatches(cleanedContext.length - len, rawBuffer, 0, len)
-                ) {
-                    cleanedContext = cleanedContext.substring(0, cleanedContext.length - len)
-                    break
-                }
-            }
-
-            cleanedContext = cleanedContext.replace(Regex("""\s*\([👤🤖📝🔄][^)]*\)"""), "")
-
-            leftContext = cleanedContext.trimEnd('\r', '\n')
-            if (leftContext.length > settings.contextChars) {
-                leftContext = leftContext.takeLast(settings.contextChars)
-            }
-        }
-
-        val fullContext = if (settings.persona.isNotEmpty()) {
-            if (leftContext.isNotEmpty()) "${settings.persona} $leftContext" else settings.persona
+        val leftContext = precomputedLeftContext ?: if (settings.useContext) {
+            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 10, 0)?.toString() ?: ""
+            val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
+            if (hiragana.isNotEmpty() && currentLine.endsWith(hiragana)) {
+                currentLine.substring(0, currentLine.length - hiragana.length)
+            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
+                currentLine.substring(0, currentLine.length - currentPreedit.length)
+            } else {
+                currentLine
+            }.trim()
         } else {
-            leftContext
+            ""
         }
 
-        val rawCandidates = engine.convert(hiragana, 50, fullContext, queryId)
+        val nativeFilter = when (activeSourceFilter) {
+            SourceFilter.ALL -> 0
+            SourceFilter.LEARNING -> 1
+            SourceFilter.DICTIONARY -> 2
+            SourceFilter.AI -> 3
+            SourceFilter.SYMBOL -> 4
+        }
+
+        val rawCandidates = engine.convert(hiragana, 50, leftContext, queryId, nativeFilter)
         return if (settings.isShowCandidateAnnotationsEnabled) {
             rawCandidates
         } else {
@@ -1348,9 +1475,8 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun fixChunkPreedit() {
-        if (!hasActiveInput) return
-        val res = engine.processKey('j'.code, 4)
-        applyProcessKeyResult(res)
+        if (!hasActiveInput && romajiBuffer.isEmpty()) return
+        commitCurrentHiragana()
     }
 
     private fun commitHankakuKatakana() {
@@ -1414,9 +1540,6 @@ class KarukanInputMethodService : InputMethodService() {
     // Region: Candidate Rendering & Filtering
     // ---------------------------------------------------------------------------------------------
 
-    private fun filterCandidatesBySource(rawCandidates: List<String>): List<String> =
-        CandidateFilterManager.filterCandidatesBySource(rawCandidates, activeSourceFilter, engine)
-
     private fun renderCandidates(hiragana: String, rawCandidates: List<String>) {
         val isHardKb = isHardKeyboardConnected()
         val isSuggestEnabled = settings.isShowPhysicalKeyboardSuggestCandidatesEnabled
@@ -1435,10 +1558,10 @@ class KarukanInputMethodService : InputMethodService() {
         } else {
             rawCandidates.map { it.extractPureCandidate() }.distinct()
         }
-        val filtered = filterCandidatesBySource(candidatesToProcess)
+
         val allCandidates = mutableListOf<String>()
-        if (filtered.isNotEmpty()) {
-            allCandidates.addAll(filtered)
+        if (candidatesToProcess.isNotEmpty()) {
+            allCandidates.addAll(candidatesToProcess)
         }
         if (!allCandidates.contains(hiragana) && activeSourceFilter == SourceFilter.ALL) {
             allCandidates.add(hiragana)
@@ -1538,6 +1661,7 @@ class KarukanInputMethodService : InputMethodService() {
     private fun clearComposingState() {
         cancelLiveConversion()
         currentPreedit = ""
+        romajiBuffer = ""
         currentLiveCandidate = null
         selectedCandidateIndex = -1
         activeSourceFilter = SourceFilter.ALL
@@ -1546,9 +1670,17 @@ class KarukanInputMethodService : InputMethodService() {
         currentInputConnection?.finishComposingText()
         updateComposingText()
         clearCandidateBar()
+        engine.resetEngine()
     }
 
     private fun commitCurrentHiragana() {
+        if (romajiBuffer.isNotEmpty()) {
+            val flushed = engine.romajiToHiraganaFlush(romajiBuffer)
+            if (flushed.isNotEmpty()) {
+                currentPreedit = flushed
+            }
+            romajiBuffer = ""
+        }
         if (!hasActiveInput) return
         val hiragana = currentActiveQuery
         val commitTextValue = (currentLiveCandidate ?: hiragana).extractPureCandidate()
@@ -1713,14 +1845,9 @@ class KarukanInputMethodService : InputMethodService() {
     // Region: String & Character Utilities
     // ---------------------------------------------------------------------------------------------
 
-    private fun toHankakuKatakana(str: String): String = TextTransformUtils.toHankakuKatakana(str)
+    private fun toHankakuKatakana(str: String): String = engine.toHankakuKatakana(str)
 
-    private fun toZenkakuAlphanumeric(str: String): String = TextTransformUtils.toZenkakuAlphanumeric(str)
+    private fun toZenkakuAlphanumeric(str: String): String = engine.toZenkakuAlphanumeric(str)
 
     private fun isPairedBracket(text: String): Boolean = TextTransformUtils.isPairedBracket(text)
-
-    private fun String.extractPureCandidate(): String {
-        val lastOpen = this.lastIndexOf(" (")
-        return if (lastOpen > 0 && this.endsWith(")")) this.substring(0, lastOpen) else this
-    }
 }
