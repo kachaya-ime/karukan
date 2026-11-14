@@ -67,7 +67,7 @@ class GraffitiAreaView(
         style = Paint.Style.FILL
     }
     private val helpTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 28f
+        textSize = 56f
         textAlign = Paint.Align.CENTER
     }
 
@@ -119,12 +119,12 @@ class GraffitiAreaView(
             canvas.drawText(modeText, 24f, 44f, modeIndicatorPaint)
         }
 
-        val btnW = 56f
-        val btnH = 56f
+        val btnW = 112f
+        val btnH = 112f
         helpButtonBounds.set(width - btnW - 16f, 16f, width - 16f, 16f + btnH)
         helpButtonPaint.color = colors.btnHelpBg
         helpTextPaint.color = colors.textColor
-        canvas.drawText("?", helpButtonBounds.centerX(), helpButtonBounds.centerY() + 10f, helpTextPaint)
+        canvas.drawText("?", helpButtonBounds.centerX(), helpButtonBounds.centerY() + 20f, helpTextPaint)
 
         if (currentPoints.isNotEmpty()) {
             strokePaint.color = colors.graffitiStroke

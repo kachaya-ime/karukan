@@ -979,6 +979,49 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
+    private fun triggerSuggestFetch(preedit: String) {
+        cancelLiveConversion()
+        if (preedit.isEmpty()) {
+            clearCandidateBar()
+            return
+        }
+        val queryId = ++currentLiveConversionQueryId
+
+        val leftContext = if (settings.useContext) {
+            val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + preedit.length + 10, 0)?.toString() ?: ""
+            val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
+            if (preedit.isNotEmpty() && currentLine.endsWith(preedit)) {
+                currentLine.substring(0, currentLine.length - preedit.length)
+            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
+                currentLine.substring(0, currentLine.length - currentPreedit.length)
+            } else {
+                currentLine
+            }.trim()
+        } else {
+            ""
+        }
+
+        liveConversionJob = serviceScope.launch {
+            val debounceMs = settings.liveConversionDebounceMs.toLong()
+            if (debounceMs > 0L) {
+                delay(debounceMs)
+            }
+            if (!isActive || queryId != currentLiveConversionQueryId) return@launch
+
+            val candidates = withContext(Dispatchers.Default) {
+                if (!coroutineContext.isActive || queryId != currentLiveConversionQueryId) {
+                    return@withContext emptyList<String>()
+                }
+                fetchCandidates(preedit, queryId, leftContext)
+            }
+
+            if (isActive && queryId == currentLiveConversionQueryId && currentPreedit == preedit) {
+                currentLiveCandidate = null
+                renderCandidates(preedit, candidates)
+            }
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Region: Keyboard Command Action Handlers
     // ---------------------------------------------------------------------------------------------
@@ -1016,6 +1059,8 @@ class KarukanInputMethodService : InputMethodService() {
         }
         if (settings.isLiveConversionEnabled) {
             triggerLiveConversion(displayPreedit)
+        } else if (settings.isShowPhysicalKeyboardSuggestCandidatesEnabled) {
+            triggerSuggestFetch(displayPreedit)
         } else {
             clearCandidateBar()
         }
@@ -1042,6 +1087,8 @@ class KarukanInputMethodService : InputMethodService() {
         }
         if (settings.isLiveConversionEnabled) {
             triggerLiveConversion(displayPreedit)
+        } else if (settings.isShowPhysicalKeyboardSuggestCandidatesEnabled) {
+            triggerSuggestFetch(displayPreedit)
         } else {
             clearCandidateBar()
         }
@@ -1074,6 +1121,8 @@ class KarukanInputMethodService : InputMethodService() {
                 }
                 if (settings.isLiveConversionEnabled) {
                     triggerLiveConversion(currentPreedit)
+                } else if (settings.isShowPhysicalKeyboardSuggestCandidatesEnabled) {
+                    triggerSuggestFetch(currentPreedit)
                 } else {
                     clearCandidateBar()
                 }
@@ -1108,6 +1157,8 @@ class KarukanInputMethodService : InputMethodService() {
             }
             if (settings.isLiveConversionEnabled) {
                 triggerLiveConversion(currentPreedit)
+            } else if (settings.isShowPhysicalKeyboardSuggestCandidatesEnabled) {
+                triggerSuggestFetch(currentPreedit)
             } else {
                 clearCandidateBar()
             }

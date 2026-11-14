@@ -150,12 +150,7 @@ class FloatingCandidateOverlay(
         val showWindow = isShowFloatingWindowEnabled()
         val showStatus = isShowStatusTextEnabled() || !statusText.isNullOrEmpty()
 
-        if (!hardKb || (!showWindow && !showStatus)) {
-            dismiss()
-            return
-        }
-
-        val hasCandidates = showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
+        val hasCandidates = hardKb && showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
         val hasStatus = !statusText.isNullOrEmpty()
 
         if (!hasCandidates && !hasStatus) {

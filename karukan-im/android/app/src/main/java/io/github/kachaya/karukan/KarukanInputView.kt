@@ -171,7 +171,8 @@ class KarukanInputView @JvmOverloads constructor(
             candidateBarContainer.setBackgroundColor(colors.bg)
         }
         if (::expandButton.isInitialized) {
-            expandButton.setTextColor(colors.candidateText)
+            expandButton.background = createKeyDrawableByType(context, colors.isDark, KeyBackgroundType.ACTION, cornerRadiusDp = 6f, insetDp = 3f)
+            expandButton.setTextColor(colors.keyText)
         }
         if (::candidateExpandedContainer.isInitialized) {
             candidateExpandedContainer.setBackgroundColor(colors.bg)
@@ -206,19 +207,6 @@ class KarukanInputView @JvmOverloads constructor(
             visibility = VISIBLE
         }
 
-        val btnEmoji = TextView(context).apply {
-            text = "😊 絵文字"
-            textSize = 14f
-            gravity = android.view.Gravity.CENTER
-            setTextColor(colors.candidateText)
-            setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                toggleEmojiPalette()
-            }
-        }
-
         val btnSettings = TextView(context).apply {
             text = "⚙️ 設定"
             textSize = 14f
@@ -231,7 +219,6 @@ class KarukanInputView @JvmOverloads constructor(
                 listener?.openSettingsActivity()
             }
         }
-        toolbarContainer.addView(btnEmoji)
         toolbarContainer.addView(btnSettings)
 
         // 2b. 1行変換候補バー領域 (文字入力中・変換候補存在時に表示)
@@ -259,10 +246,11 @@ class KarukanInputView @JvmOverloads constructor(
 
         expandButton = Button(context, null, android.R.attr.borderlessButtonStyle).apply {
             text = "▼"
-            textSize = 12f
+            textSize = 14f
             gravity = android.view.Gravity.CENTER
-            setTextColor(colors.candidateText)
-            setPadding(dpToPx(8f), 0, dpToPx(8f), 0)
+            setTextColor(colors.keyText)
+            background = createKeyDrawableByType(context, colors.isDark, KeyBackgroundType.ACTION, cornerRadiusDp = 6f, insetDp = 3f)
+            setPadding(0, 0, 0, 0)
             visibility = GONE
             setOnClickListener {
                 toggleCandidateExpand()
@@ -275,7 +263,7 @@ class KarukanInputView @JvmOverloads constructor(
         )
         candidateBarContainer.addView(
             expandButton,
-            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
+            LayoutParams(slotHeight, LayoutParams.MATCH_PARENT)
         )
 
         candidateSlotContainer.addView(
@@ -448,6 +436,9 @@ class KarukanInputView @JvmOverloads constructor(
             collapseCandidates()
             showToolbar()
             candidateBarContentLayout.removeAllViews()
+            if (::candidateScrollView.isInitialized) {
+                candidateScrollView.scrollTo(0, 0)
+            }
             if (::candidateFlowLayout.isInitialized) {
                 candidateFlowLayout.removeAllViews()
             }
@@ -501,8 +492,12 @@ class KarukanInputView @JvmOverloads constructor(
                 }
             }
 
-            if (!isCandidateExpanded && selectedIndex >= 0) {
-                scrollToSelectedCandidate(selectedIndex)
+            if (!isCandidateExpanded) {
+                if (selectedIndex >= 0) {
+                    scrollToSelectedCandidate(selectedIndex)
+                } else if (::candidateScrollView.isInitialized) {
+                    candidateScrollView.scrollTo(0, 0)
+                }
             }
         }
 
@@ -571,6 +566,26 @@ class KarukanInputView @JvmOverloads constructor(
 
             child.text = displayCandidate
 
+            val lp = if (isSingleRowBar) {
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    if (i > 0) {
+                        setMargins(dpToPx(6f), 0, 0, 0)
+                    } else {
+                        setMargins(0, 0, 0, 0)
+                    }
+                }
+            } else {
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            child.layoutParams = lp
+
             if (isSelected) {
                 child.background = selectedBg
                 child.setTextColor(colors.candidateSelectedText)
@@ -637,6 +652,9 @@ class KarukanInputView @JvmOverloads constructor(
         }
         showToolbar()
         candidateBarContentLayout.removeAllViews()
+        if (::candidateScrollView.isInitialized) {
+            candidateScrollView.scrollTo(0, 0)
+        }
         if (::candidateFlowLayout.isInitialized) {
             candidateFlowLayout.removeAllViews()
         }
@@ -674,7 +692,7 @@ class KarukanInputView @JvmOverloads constructor(
             composingTextView.text = modeText
         }
         if (listener?.isHardKeyboardConnected() == true) {
-            updateFloatingOverlay()
+            updateFloatingOverlay(overrideStatusText = modeText)
         }
         clearCandidateBar(inputMode != InputMode.HIRAGANA)
     }
@@ -829,11 +847,10 @@ class KarukanInputView @JvmOverloads constructor(
     // Region: Floating Overlay Popup Delegation
     // ---------------------------------------------------------------------------------------------
 
-    fun updateFloatingOverlay(selectedIndex: Int = -1) {
-        val statusText = if (::composingTextView.isInitialized) composingTextView.text?.toString() else null
+    fun updateFloatingOverlay(selectedIndex: Int = -1, overrideStatusText: String? = null) {
         floatingOverlay.updateOverlay(
             selectedIndex = selectedIndex,
-            statusText = statusText,
+            statusText = overrideStatusText,
             isCursorAnchorValid = isCursorAnchorValid,
             cursorX = cursorX,
             cursorYBottom = cursorYBottom,
