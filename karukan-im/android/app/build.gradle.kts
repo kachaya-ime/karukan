@@ -8,8 +8,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Region: Plugins & Variables
 // -------------------------------------------------------------------------------------------------
 
-val appVersion = "1.2.2"
-val appVersionCode = 10202
+val appVersion = "1.3.0"
+val appVersionCode = 10300
 
 plugins {
     alias(libs.plugins.android.application)
@@ -375,14 +375,14 @@ val generateEmojiListTask = tasks.register("generateEmojiList") {
 
         val categoryNameMap = mapOf(
             "Smileys & Emotion" to "顔・感情",
-            "People & Body" to "人・身体",
+            "People & Body" to "人・体",
             "Animals & Nature" to "動物・自然",
-            "Food & Drink" to "食べ物",
-            "Travel & Places" to "乗り物・建物",
+            "Food & Drink" to "食べ物・飲み物",
+            "Travel & Places" to "旅行・場所",
             "Activities" to "アクティビティ",
-            "Objects" to "モノ",
-            "Symbols" to "記号・マーク",
-            "Flags" to "国旗"
+            "Objects" to "物",
+            "Symbols" to "記号",
+            "Flags" to "旗"
         )
 
         val sb = StringBuilder()

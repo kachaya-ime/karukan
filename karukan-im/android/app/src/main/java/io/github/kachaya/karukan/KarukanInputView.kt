@@ -1,7 +1,6 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
-import android.graphics.Color
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
@@ -12,7 +11,6 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.children
@@ -92,13 +90,17 @@ class KarukanInputView @JvmOverloads constructor(
             getThemeColors = { getThemeColors() },
             getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
             isHardKeyboardConnected = { listener?.isHardKeyboardConnected() == true },
-            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true },
-            isShowStatusTextEnabled = { listener?.getSettings()?.isShowFloatingStatusTextEnabled == true }
+            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true }
         )
     }
 
-    val floatingCandidateFlowLayout: CandidateFlowLayout?
-        get() = floatingOverlay.candidateFlowLayout
+    private val floatingTooltipOverlay by lazy {
+        FloatingTooltipOverlay(
+            context = context,
+            dpToPx = { dp -> dpToPx(dp) },
+            getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView }
+        )
+    }
 
     var isCursorAnchorValid: Boolean = false
         private set
@@ -123,8 +125,8 @@ class KarukanInputView @JvmOverloads constructor(
     init {
         orientation = VERTICAL
         layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
+            LayoutParams.MATCH_PARENT,
+            LayoutParams.WRAP_CONTENT
         )
         setPadding(0, 0, 0, 0)
         ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
@@ -373,8 +375,8 @@ class KarukanInputView @JvmOverloads constructor(
         requestLayout()
     }
 
-    fun setupKeyboardLayout(layoutName: String) {
-        if (::mainKeyboardContainer.isInitialized && keyboardLayoutSetting == layoutName) {
+    fun setupKeyboardLayout(layoutName: String, forceRebuild: Boolean = false) {
+        if (!forceRebuild && ::mainKeyboardContainer.isInitialized && keyboardLayoutSetting == layoutName) {
             updateThemeColors()
             return
         }
@@ -406,6 +408,10 @@ class KarukanInputView @JvmOverloads constructor(
         updateCandidateSlotHeight()
         requestLayout()
         invalidate()
+    }
+
+    fun refreshKeyboard() {
+        setupKeyboardLayout(keyboardLayoutSetting, forceRebuild = true)
     }
 
     private fun swapKeyboardContainer(newContainer: View) {
@@ -452,14 +458,19 @@ class KarukanInputView @JvmOverloads constructor(
         if (isHardKb) {
             showToolbar()
             val floatingFlow = floatingOverlay.getOrCreateCandidateFlowLayout()
-            renderCandidateList(
+            CandidateRenderer.render(
                 container = floatingFlow,
                 candidates = candidates,
                 selectedIndex = selectedIndex,
                 colors = colors,
                 showAnnotations = showAnnotations,
                 isSingleRowBar = false,
-                hiragana = hiragana
+                dpToPx = { dp -> dpToPx(dp) },
+                onItemClick = { i, rawCandidate ->
+                    collapseCandidates()
+                    val cleanCand = stripCandidateAnnotations(rawCandidate)
+                    listener?.onCandidateSelected(hiragana, cleanCand, i)
+                }
             )
             if (selectedIndex >= 0) {
                 floatingOverlay.scrollToSelectedCandidate(selectedIndex)
@@ -467,25 +478,35 @@ class KarukanInputView @JvmOverloads constructor(
         } else {
             showCandidateBar()
 
-            renderCandidateList(
+            CandidateRenderer.render(
                 container = candidateBarContentLayout,
                 candidates = candidates,
                 selectedIndex = selectedIndex,
                 colors = colors,
                 showAnnotations = showAnnotations,
                 isSingleRowBar = true,
-                hiragana = hiragana
+                dpToPx = { dp -> dpToPx(dp) },
+                onItemClick = { i, rawCandidate ->
+                    collapseCandidates()
+                    val cleanCand = stripCandidateAnnotations(rawCandidate)
+                    listener?.onCandidateSelected(hiragana, cleanCand, i)
+                }
             )
 
             if (::candidateFlowLayout.isInitialized) {
-                renderCandidateList(
+                CandidateRenderer.render(
                     container = candidateFlowLayout,
                     candidates = candidates,
                     selectedIndex = selectedIndex,
                     colors = colors,
                     showAnnotations = showAnnotations,
                     isSingleRowBar = false,
-                    hiragana = hiragana
+                    dpToPx = { dp -> dpToPx(dp) },
+                    onItemClick = { i, rawCandidate ->
+                        collapseCandidates()
+                        val cleanCand = stripCandidateAnnotations(rawCandidate)
+                        listener?.onCandidateSelected(hiragana, cleanCand, i)
+                    }
                 )
                 if (isCandidateExpanded && ::expandedScrollView.isInitialized) {
                     scrollToSelectedCandidateVertical(expandedScrollView, candidateFlowLayout, selectedIndex)
@@ -504,108 +525,6 @@ class KarukanInputView @JvmOverloads constructor(
         updateFloatingOverlay(selectedIndex)
     }
 
-    private fun renderCandidateList(
-        container: ViewGroup,
-        candidates: List<String>,
-        selectedIndex: Int,
-        colors: ThemeColors,
-        showAnnotations: Boolean,
-        isSingleRowBar: Boolean,
-        hiragana: String
-    ) {
-        val existingCount = container.childCount
-        val targetCount = candidates.size
-
-        if (existingCount > targetCount) {
-            container.removeViews(targetCount, existingCount - targetCount)
-        }
-
-        val paddingH = dpToPx(10f)
-        val paddingV = dpToPx(6f)
-        val density = context.resources.displayMetrics.density
-        val cornerRadius = 6 * density
-        val strokeWidth = dpToPx(1f)
-        val strokeColor = colors.strokeBorderColor
-
-        val normalBg = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            setColor(colors.candidateBg)
-            this.cornerRadius = cornerRadius
-            setStroke(strokeWidth, strokeColor)
-        }
-
-        val selectedBg = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            setColor(colors.candidateSelectedBg)
-            this.cornerRadius = cornerRadius
-            setStroke(strokeWidth, strokeColor)
-        }
-
-        for (i in 0 until targetCount) {
-            val rawCandidate = candidates[i]
-            val isSelected = (i == selectedIndex)
-
-            val displayCandidate = if (showAnnotations) {
-                TextTransformUtils.formatCandidateText(rawCandidate)
-            } else {
-                rawCandidate.extractPureCandidate()
-            }
-
-            val child = if (i < container.childCount) {
-                container.getChildAt(i) as TextView
-            } else {
-                TextView(context).apply {
-                    textSize = 16f
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(paddingH, paddingV, paddingH, paddingV)
-                    isClickable = true
-                    isFocusable = true
-                    container.addView(this)
-                }
-            }
-
-            child.text = displayCandidate
-
-            val lp = if (isSingleRowBar) {
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                    if (i > 0) {
-                        setMargins(dpToPx(6f), 0, 0, 0)
-                    } else {
-                        setMargins(0, 0, 0, 0)
-                    }
-                }
-            } else {
-                ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            child.layoutParams = lp
-
-            if (isSelected) {
-                child.background = selectedBg
-                child.setTextColor(colors.candidateSelectedText)
-            } else {
-                child.background = normalBg
-                child.setTextColor(colors.candidateText)
-            }
-
-            child.setOnClickListener {
-                collapseCandidates()
-                val cleanCand = stripCandidateAnnotations(rawCandidate)
-                listener?.onCandidateSelected(hiragana, cleanCand, i)
-            }
-        }
-    }
-
-    private fun stripCandidateAnnotations(raw: String): String {
-        return raw.extractPureCandidate()
-    }
-
     private fun updateCandidateLayoutContainer(
         container: ViewGroup,
         hiragana: String,
@@ -614,15 +533,24 @@ class KarukanInputView @JvmOverloads constructor(
     ) {
         val colors = getThemeColors()
         val showAnnotations = listener?.getSettings()?.isShowCandidateAnnotationsEnabled ?: true
-        renderCandidateList(
+        CandidateRenderer.render(
             container = container,
             candidates = candidates,
             selectedIndex = selectedIndex,
             colors = colors,
             showAnnotations = showAnnotations,
             isSingleRowBar = false,
-            hiragana = hiragana
+            dpToPx = { dp -> dpToPx(dp) },
+            onItemClick = { i, rawCandidate ->
+                collapseCandidates()
+                val cleanCand = stripCandidateAnnotations(rawCandidate)
+                listener?.onCandidateSelected(hiragana, cleanCand, i)
+            }
         )
+    }
+
+    private fun stripCandidateAnnotations(raw: String): String {
+        return raw.extractPureCandidate()
     }
 
     private fun scrollToSelectedCandidate(index: Int) {
@@ -691,10 +619,24 @@ class KarukanInputView @JvmOverloads constructor(
         if (::composingTextView.isInitialized) {
             composingTextView.text = modeText
         }
-        if (listener?.isHardKeyboardConnected() == true) {
-            updateFloatingOverlay(overrideStatusText = modeText)
+        collapseCandidates()
+        if (inputMode != InputMode.HIRAGANA) {
+            lastHiragana = ""
+            lastCandidates = emptyList()
+            lastSelectedIndex = -1
         }
-        clearCandidateBar(inputMode != InputMode.HIRAGANA)
+        showToolbar()
+        candidateBarContentLayout.removeAllViews()
+        if (::candidateScrollView.isInitialized) {
+            candidateScrollView.scrollTo(0, 0)
+        }
+        if (::candidateFlowLayout.isInitialized) {
+            candidateFlowLayout.removeAllViews()
+        }
+        floatingOverlay.candidateFlowLayout?.removeAllViews()
+        if (listener?.isHardKeyboardConnected() == true) {
+            updateFloatingTooltipOverlay(modeText)
+        }
     }
 
     fun updateNikoInputState(hasInput: Boolean) {
@@ -793,23 +735,6 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
-    fun toggleSymbolPalette() {
-        collapseCandidates()
-        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
-            val wasVisible = emojiPaletteController.isVisible
-            val isHardKb = listener?.isHardKeyboardConnected() ?: false
-            emojiPaletteController.toggle(
-                mainKeyboardContainer,
-                isHardKeyboard = isHardKb,
-                symbolMode = true
-            )
-            if (wasVisible) {
-                updateKeyboardLayoutVisibility()
-            }
-            requestLayout()
-        }
-    }
-
     fun updateKeyboardLayoutVisibility() {
         if (!::mainKeyboardContainer.isInitialized) return
         if (isCandidateExpanded) {
@@ -847,10 +772,9 @@ class KarukanInputView @JvmOverloads constructor(
     // Region: Floating Overlay Popup Delegation
     // ---------------------------------------------------------------------------------------------
 
-    fun updateFloatingOverlay(selectedIndex: Int = -1, overrideStatusText: String? = null) {
+    fun updateFloatingOverlay(selectedIndex: Int = -1) {
         floatingOverlay.updateOverlay(
             selectedIndex = selectedIndex,
-            statusText = overrideStatusText,
             isCursorAnchorValid = isCursorAnchorValid,
             cursorX = cursorX,
             cursorYBottom = cursorYBottom,
@@ -858,7 +782,19 @@ class KarukanInputView @JvmOverloads constructor(
         )
     }
 
+    fun updateFloatingTooltipOverlay(message: String, autoDismissDelayMs: Long = 1200L) {
+        floatingTooltipOverlay.showTooltip(
+            message = message,
+            isCursorAnchorValid = isCursorAnchorValid,
+            cursorX = cursorX,
+            cursorYBottom = cursorYBottom,
+            cursorYTop = cursorYTop,
+            autoDismissDelayMs = autoDismissDelayMs
+        )
+    }
+
     fun dismissFloatingCandidates() {
         floatingOverlay.dismiss()
+        floatingTooltipOverlay.dismiss()
     }
 }

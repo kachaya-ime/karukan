@@ -10,10 +10,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ScrollView
-import android.widget.TextView
 
 /**
- * 物理キーボード接続時にカーソル直下に候補およびステータスを表示する
+ * カーソル近辺に候補を表示する
  * フローティング PopupWindow オーバーレイ管理ヘルパークラスです。
  */
 class FloatingCandidateOverlay(
@@ -22,33 +21,13 @@ class FloatingCandidateOverlay(
     private val getThemeColors: () -> ThemeColors,
     private val getAnchorView: () -> View?,
     private val isHardKeyboardConnected: () -> Boolean,
-    private val isShowFloatingWindowEnabled: () -> Boolean,
-    private val isShowStatusTextEnabled: () -> Boolean
+    private val isShowFloatingWindowEnabled: () -> Boolean
 ) {
 
     private var popupWindow: PopupWindow? = null
-    private var statusTextView: TextView? = null
-    private var dividerView: View? = null
     private var candidateScrollView: ScrollView? = null
     var candidateFlowLayout: CandidateFlowLayout? = null
         private set
-
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var dismissRunnable: Runnable? = null
-
-    private fun scheduleAutoDismiss() {
-        dismissRunnable?.let { handler.removeCallbacks(it) }
-        val runnable = Runnable {
-            dismiss()
-        }
-        dismissRunnable = runnable
-        handler.postDelayed(runnable, 1200L)
-    }
-
-    private fun cancelAutoDismiss() {
-        dismissRunnable?.let { handler.removeCallbacks(it) }
-        dismissRunnable = null
-    }
 
     private var lastX: Int = Int.MIN_VALUE
     private var lastY: Int = Int.MIN_VALUE
@@ -65,34 +44,21 @@ class FloatingCandidateOverlay(
 
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dpToPx(10f), dpToPx(8f), dpToPx(10f), dpToPx(10f))
+            setPadding(dpToPx(6f), dpToPx(6f), dpToPx(6f), dpToPx(6f))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 setColor(colors.candidateBg)
-                cornerRadius = 8 * density
+                cornerRadius = 6 * density
                 setStroke(dpToPx(1f), colors.strokeBorderColor)
             }
             elevation = dpToPx(8f).toFloat()
-        }
-
-        val statusTv = TextView(context).apply {
-            textSize = 15f
-            setPadding(dpToPx(4f), dpToPx(2f), dpToPx(4f), dpToPx(4f))
-            setTextColor(colors.textColor)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            visibility = View.GONE
-        }
-
-        val divView = View(context).apply {
-            setBackgroundColor(colors.dividerColor)
-            visibility = View.GONE
         }
 
         val sv = ScrollView(context).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            visibility = View.GONE
+            visibility = View.VISIBLE
         }
 
         val flowLayout = CandidateFlowLayout(context).apply {
@@ -106,14 +72,8 @@ class FloatingCandidateOverlay(
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
         )
 
-        container.addView(statusTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        container.addView(divView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1f)).apply {
-            setMargins(0, dpToPx(4f), 0, dpToPx(4f))
-        })
         container.addView(sv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        statusTextView = statusTv
-        dividerView = divView
         candidateScrollView = sv
         candidateFlowLayout = flowLayout
 
@@ -140,7 +100,6 @@ class FloatingCandidateOverlay(
     @Suppress("UNUSED_PARAMETER")
     fun updateOverlay(
         selectedIndex: Int,
-        statusText: String?,
         isCursorAnchorValid: Boolean,
         cursorX: Float,
         cursorYBottom: Float,
@@ -148,54 +107,25 @@ class FloatingCandidateOverlay(
     ) {
         val hardKb = isHardKeyboardConnected()
         val showWindow = isShowFloatingWindowEnabled()
-        val showStatus = isShowStatusTextEnabled() || !statusText.isNullOrEmpty()
 
         val hasCandidates = hardKb && showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
-        val hasStatus = !statusText.isNullOrEmpty()
 
-        if (!hasCandidates && !hasStatus) {
+        if (!hasCandidates) {
             dismiss()
             return
-        }
-
-        if (hasCandidates) {
-            cancelAutoDismiss()
-        } else {
-            scheduleAutoDismiss()
         }
 
         if (popupWindow == null) {
             popupWindow = createPopupWindow()
         }
 
-        val statusTv = statusTextView ?: return
         val sv = candidateScrollView ?: return
-        val divView = dividerView
+        sv.visibility = View.VISIBLE
 
-        if (showStatus && hasStatus) {
-            statusTv.text = statusText
-            statusTv.visibility = View.VISIBLE
-        } else {
-            statusTv.visibility = View.GONE
-        }
-
-        if (showWindow && hasCandidates) {
-            sv.visibility = View.VISIBLE
-        } else {
-            sv.visibility = View.GONE
-        }
-
-        if (showStatus && hasStatus && showWindow && hasCandidates) {
-            divView?.visibility = View.VISIBLE
-        } else {
-            divView?.visibility = View.GONE
-        }
-
-        showInternal(hasCandidates, isCursorAnchorValid, cursorX, cursorYBottom, cursorYTop)
+        showInternal(isCursorAnchorValid, cursorX, cursorYBottom, cursorYTop)
     }
 
     private fun showInternal(
-        isSelectingCandidates: Boolean,
         isCursorAnchorValid: Boolean,
         cursorX: Float,
         cursorYBottom: Float,
@@ -227,20 +157,13 @@ class FloatingCandidateOverlay(
             }
         }
 
-        val maxPopupHeight = (screenHeight * 0.45f).toInt()
-        val targetWidth = if (isSelectingCandidates) screenWidth - dpToPx(32f) else ViewGroup.LayoutParams.WRAP_CONTENT
+        val maxPopupHeight = (screenHeight * 0.4f).toInt()
+        val targetWidth = screenWidth - dpToPx(32f)
 
-        if (targetWidth == ViewGroup.LayoutParams.WRAP_CONTENT) {
-            contentView.measure(
-                View.MeasureSpec.makeMeasureSpec(screenWidth - dpToPx(32f), View.MeasureSpec.AT_MOST),
-                View.MeasureSpec.makeMeasureSpec(maxPopupHeight, View.MeasureSpec.AT_MOST)
-            )
-        } else {
-            contentView.measure(
-                View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(maxPopupHeight, View.MeasureSpec.AT_MOST)
-            )
-        }
+        contentView.measure(
+            View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxPopupHeight, View.MeasureSpec.AT_MOST)
+        )
 
         val popupWidth = contentView.measuredWidth
         val popupHeight = minOf(contentView.measuredHeight, maxPopupHeight)
@@ -249,12 +172,8 @@ class FloatingCandidateOverlay(
         var screenY: Int
 
         if (isCursorAnchorValid && !cursorYBottom.isNaN()) {
-            if (isSelectingCandidates || cursorX.isNaN()) {
-                screenX = dpToPx(16f)
-            } else {
-                screenX = cursorX.toInt()
-                screenX = screenX.coerceIn(dpToPx(16f), maxOf(dpToPx(16f), screenWidth - popupWidth - dpToPx(16f)))
-            }
+            screenX = dpToPx(16f)
+            screenX = screenX.coerceIn(dpToPx(16f), maxOf(dpToPx(16f), screenWidth - popupWidth - dpToPx(16f)))
 
             screenY = cursorYBottom.toInt() + dpToPx(4f)
             if (screenY + popupHeight > screenHeight - dpToPx(8f)) {
@@ -332,7 +251,6 @@ class FloatingCandidateOverlay(
     }
 
     fun dismiss() {
-        cancelAutoDismiss()
         popupWindow?.dismiss()
         lastX = Int.MIN_VALUE
         lastY = Int.MIN_VALUE

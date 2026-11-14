@@ -44,9 +44,7 @@ data class KeyShortcutItem(
             KeyShortcutItem("w", "Ctrl + W", "none"),
             KeyShortcutItem("x", "Ctrl + X", "cut", isReserved = true),
             KeyShortcutItem("y", "Ctrl + Y", "none"),
-            KeyShortcutItem("z", "Ctrl + Z", "undo", isReserved = true),
-            KeyShortcutItem("space_ctrl", "Ctrl + Space", "toggle_language_mode", isReserved = true),
-            KeyShortcutItem("space_shift", "Shift + Space", "full_width_space")
+            KeyShortcutItem("z", "Ctrl + Z", "undo", isReserved = true)
         )
 
         fun toJsonString(items: List<KeyShortcutItem>): String {

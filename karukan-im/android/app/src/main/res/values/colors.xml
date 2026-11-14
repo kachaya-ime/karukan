@@ -5,17 +5,17 @@
     <color name="keyboard_bg">#D1D5DB</color>
     <color name="candidate_bg">#F3F4F6</color>
 
-    <!-- Blue / Light Blue Theme Palette -->
-    <color name="blue_primary">#1976D2</color>
-    <color name="blue_primary_variant">#1565C0</color>
+    <!-- Light-Blue / Aqua Theme Palette (水色系統一) -->
+    <color name="blue_primary">#03A9F4</color>
+    <color name="blue_primary_variant">#0288D1</color>
     <color name="blue_on_primary">#FFFFFF</color>
 
-    <color name="cyan_secondary">#0288D1</color>
+    <color name="cyan_secondary">#00BCD4</color>
     <color name="cyan_secondary_variant">#0097A7</color>
     <color name="cyan_on_secondary">#FFFFFF</color>
 
-    <!-- Dark Mode Theme Palette -->
-    <color name="blue_primary_dark">#90CAF9</color>
-    <color name="blue_primary_variant_dark">#1565C0</color>
+    <!-- Dark Mode Light-Blue / Aqua Palette -->
+    <color name="blue_primary_dark">#4FC3F7</color>
+    <color name="blue_primary_variant_dark">#0288D1</color>
     <color name="cyan_secondary_dark">#80DEEA</color>
 </resources>

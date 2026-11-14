@@ -45,7 +45,7 @@ class KeyShortcutListActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setTitle("キーショートカットの設定")
 
-        val mainView = findViewById<View>(R.id.keyShortcutListMainLayout) ?: window.decorView
+        val mainView = findViewById(R.id.keyShortcutListMainLayout) ?: window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(mainView) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
@@ -169,17 +169,37 @@ class KeyShortcutAdapter(
         holder.tvKeyCombo.text = item.displayKeyCombo
         holder.tvActionLabel.text = KeyShortcutItem.getActionLabel(item.actionId)
 
+        val context = holder.itemView.context
+        val isDark = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val density = context.resources.displayMetrics.density
+
+        val badgeBg = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            cornerRadius = 4 * density
+        }
+
         if (item.isReserved) {
             holder.tvStatusBadge.text = "固定"
-            holder.tvStatusBadge.setTextColor(0xFF888888.toInt())
-            holder.tvStatusBadge.setBackgroundColor(0x1F888888.toInt())
+            if (isDark) {
+                badgeBg.setColor(0x3C4043.toInt())
+                holder.tvStatusBadge.setTextColor(0xFF9AA0A6.toInt())
+            } else {
+                badgeBg.setColor(0xFFE0E0E0.toInt())
+                holder.tvStatusBadge.setTextColor(0xFF5F6368.toInt())
+            }
             holder.itemView.alpha = 0.75f
         } else {
             holder.tvStatusBadge.text = "変更可能"
-            holder.tvStatusBadge.setTextColor(0xFF0F5132.toInt())
-            holder.tvStatusBadge.setBackgroundColor(0x30E6F4EA.toInt())
+            if (isDark) {
+                badgeBg.setColor(0x3300BCD4.toInt())
+                holder.tvStatusBadge.setTextColor(0xFF80DEEA.toInt())
+            } else {
+                badgeBg.setColor(0xFFE0F7FA.toInt())
+                holder.tvStatusBadge.setTextColor(0xFF01579B.toInt())
+            }
             holder.itemView.alpha = 1.0f
         }
+        holder.tvStatusBadge.background = badgeBg
 
         holder.itemView.setOnClickListener {
             onItemClick(item)

@@ -11,14 +11,24 @@ object KeyEventMapper {
     // Region: Scancode & JIS Character Maps
     // ---------------------------------------------------------------------------------------------
 
+    private object ScanCode {
+        const val ZENKAKU_HANKAKU_ALT = 148
+        const val ZENKAKU_HANKAKU = 41
+        const val HENKAN = 92
+        const val MUHENKAN = 94
+        const val KATAKANA_HIRAGANA = 208
+        const val YEN = 124
+        const val RO = 89
+    }
+
     private val scancodeToKeyCodeMap = mapOf(
-        148 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU, // 半角/全角
-        41 to KeyEvent.KEYCODE_ZENKAKU_HANKAKU,  // 半角/全角 (109 keyboard top-left key)
-        92 to KeyEvent.KEYCODE_HENKAN,           // 変換
-        94 to KeyEvent.KEYCODE_MUHENKAN,         // 無変換
-        208 to KeyEvent.KEYCODE_KATAKANA_HIRAGANA, // カタカナ/ひらがな
-        124 to KeyEvent.KEYCODE_YEN,             // ￥
-        89 to KeyEvent.KEYCODE_RO                // ろ / バックスラッシュキー
+        ScanCode.ZENKAKU_HANKAKU_ALT to KeyEvent.KEYCODE_ZENKAKU_HANKAKU, // 半角/全角
+        ScanCode.ZENKAKU_HANKAKU to KeyEvent.KEYCODE_ZENKAKU_HANKAKU,  // 半角/全角 (109 keyboard top-left key)
+        ScanCode.HENKAN to KeyEvent.KEYCODE_HENKAN,           // 変換
+        ScanCode.MUHENKAN to KeyEvent.KEYCODE_MUHENKAN,         // 無変換
+        ScanCode.KATAKANA_HIRAGANA to KeyEvent.KEYCODE_KATAKANA_HIRAGANA, // カタカナ/ひらがな
+        ScanCode.YEN to KeyEvent.KEYCODE_YEN,             // ￥
+        ScanCode.RO to KeyEvent.KEYCODE_RO                // ろ / バックスラッシュキー
     )
 
     private val jisCharacterMap = mapOf(
@@ -62,20 +72,23 @@ object KeyEventMapper {
         }
 
         if (event.isCtrlPressed) {
-            if (mappedKeyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
-                return KeyAction.DeleteSelectedCandidate
+            return when (mappedKeyCode) {
+                KeyEvent.KEYCODE_SPACE -> KeyAction.ToggleLanguageMode
+                KeyEvent.KEYCODE_FORWARD_DEL -> KeyAction.DeleteSelectedCandidate
+                // Ctrl+数字での候補選択
+                in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_1)
+                in KeyEvent.KEYCODE_NUMPAD_1..KeyEvent.KEYCODE_NUMPAD_9 -> KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_NUMPAD_1)
+                else -> {
+                    val unmod = event.getUnicodeChar(0)
+                    val char = when {
+                        unmod in 32..126 -> unmod.toChar().lowercaseChar()
+                        event.keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (event.keyCode - KeyEvent.KEYCODE_A)
+                        event.keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> '0' + (event.keyCode - KeyEvent.KEYCODE_0)
+                        else -> null
+                    }
+                    char?.let { KeyAction.CtrlShortcut(it.toString()) }
+                }
             }
-            if (mappedKeyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
-                return KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_1)
-            }
-            if (mappedKeyCode in KeyEvent.KEYCODE_NUMPAD_1..KeyEvent.KEYCODE_NUMPAD_9) {
-                return KeyAction.SelectCandidateNumber(mappedKeyCode - KeyEvent.KEYCODE_NUMPAD_1)
-            }
-            if (mappedKeyCode == KeyEvent.KEYCODE_SPACE) {
-                return KeyAction.ToggleLanguageMode
-            }
-
-            return getCtrlShortcutChar(event)?.let { KeyAction.CtrlShortcut(it) }
         }
 
         when (mappedKeyCode) {
@@ -91,7 +104,7 @@ object KeyEventMapper {
             KeyEvent.KEYCODE_ESCAPE -> return KeyAction.Escape
             KeyEvent.KEYCODE_TAB -> return KeyAction.Tab(event.isShiftPressed)
             KeyEvent.KEYCODE_HENKAN -> return KeyAction.Henkan
-            KeyEvent.KEYCODE_MUHENKAN -> return KeyAction.CommitKatakana
+            KeyEvent.KEYCODE_MUHENKAN -> return KeyAction.EisuMode
             KeyEvent.KEYCODE_KATAKANA_HIRAGANA, KeyEvent.KEYCODE_KANA -> return KeyAction.KanaMode
             KeyEvent.KEYCODE_ZENKAKU_HANKAKU -> return KeyAction.ToggleLanguageMode
             KeyEvent.KEYCODE_EISU -> return KeyAction.EisuMode
@@ -122,23 +135,6 @@ object KeyEventMapper {
             return KeyAction.InputChar(charStr, event.isShiftPressed)
         }
 
-        return null
-    }
-
-
-
-    private fun getCtrlShortcutChar(event: KeyEvent): String? {
-        val unmod = event.getUnicodeChar(0)
-        if (unmod in 32..126) {
-            return unmod.toChar().lowercaseChar().toString()
-        }
-        val keyCode = event.keyCode
-        if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
-            return ('a' + (keyCode - KeyEvent.KEYCODE_A)).toString()
-        }
-        if (keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
-            return ('0' + (keyCode - KeyEvent.KEYCODE_0)).toString()
-        }
         return null
     }
 }

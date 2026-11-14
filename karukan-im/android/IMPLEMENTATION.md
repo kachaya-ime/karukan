@@ -10,7 +10,9 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
   - `KarukanInputMethodService.kt`: IME ライフサイクル管理（ウィンドウ非表示、入力ビュー終了・開始時のキーボード状態リセット）、キーイベント処理、ライブ変換・確定制御
   - `KarukanInputView.kt`: キーボード表示、候補インライン表示、フローティング候補表示の親ビュー。絵文字・記号パレットおよび候補展開の管理 (`resetKeyboardState()`, `hideEmojiPalette()`)
   - `CandidateFlowLayout.kt`: 候補一覧のフローレイアウト管理
+  - `CandidateRenderer.kt`: 入力ビュー内候補（水平バー・展開フロー）およびフローティング候補一覧のビュー生成・描画・スタイリング共通レンダラー
   - `FloatingCandidateOverlay.kt`: 物理キーボード接続時、カーソル位置追従PopupWindowフローティング表示の独立オーバーレイ管理
+  - `FloatingTooltipOverlay.kt`: 物理キーボード接続時、カーソル位置追従で任意の文字列メッセージやツールチップを短時間表示する汎用オーバーレイヘルパー
 - **エンジンブリッジ・設定管理**:
   - `KarukanEngine.kt`: JNI ブリッジ、GGUF モデル切り替え、Native 辞書・設定・推論制御 (`Companion.calculateOptimalNThreads()` 等)
   - `EngineAssetPreparer.kt`: HuggingFace GGUF モデル、Tokenizer、システム辞書 (`dict.tgz` / `dict.bin`) アセットの非同期解凍・コピープリペアドライバ
@@ -142,6 +144,17 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **Shift + ← / → / ↑ / ↓** | テキスト範囲選択 | 選択範囲を変更する KeyEvent を送信 (`sendKeyEvent` with `META_SHIFT_ON`) |
 | **Shift + Tab** | 逆方向移動 / 前候補 | 候補選択時は前候補選択、非入力時は逆方向フォーカス移動 |
 | **Shift + Space** | 全角スペース / 前候補 | 入力中/変換時: 前候補選択 (`onPreviousCandidate`) / 非入力時: 全角スペースを入力 (`onFullWidthSpace`) |
+
+### JIS 109キーボード物理キー仕様 (JIS 109 Physical Keyboard Keys)
+JIS 109キーボード特有の物理キー（スキャンコード対応）の動作仕様です。最近のWindows標準IME等の挙動に準拠しています。
+
+| キー | 機能 | 動作・処理 |
+|---|---|---|
+| **変換** | 日本語モード切替 / 変換・次候補 | 未入力時は日本語（ひらがな）モードへ切り替え (`InputMode.HIRAGANA`)、入力中・候補選択中は次候補選択（変換） (`onSpaceKey`) |
+| **無変換** | 英語モード切替 | 未確定文字のコミット後、英語（英数）モードへ切り替え (`EisuMode`) |
+| **半角/全角** | 言語モード切替 | 日本語（ひらがな）モードと英語（英数）モードのトグル切替 (`ToggleLanguageMode`) |
+| **カタカナ/ひらがな** | かなモード切替 | 入力中はひらがな変換、非入力時はひらがなモードへ切替 (`KanaMode`) |
+| **￥ / ろ / 記号キー** | JIS記号入力 | JIS配列の刻印（`￥`, `｜`, `\`, `_`, `^`, `@` 等）に合わせた文字入力 (`jisCharacterMap`) |
 
 ---
 

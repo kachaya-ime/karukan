@@ -23,6 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Karukan IME の Android InputMethodService 実装クラス (QWERTY & ニコタッチ 12キー入力対応)
@@ -125,13 +126,13 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         preferencesManager = PreferencesManager(this) { updatedSettings ->
-            invalidateThemeCache()
-            invalidateHeightCache()
-            invalidateHardKeyboardCache()
             if (::engine.isInitialized) {
                 engine.updateEngineConfig(updatedSettings)
             }
-            serviceScope.launch {
+            serviceScope.launch(Dispatchers.Main) {
+                if (::karukanInputView.isInitialized) {
+                    karukanInputView.refreshKeyboard()
+                }
                 pendingInputViewReload = true
                 if (isInputViewShown) {
                     setInputView(onCreateInputView())
@@ -217,9 +218,9 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
-    override fun onComputeInsets(outInsets: InputMethodService.Insets) {
+    override fun onComputeInsets(outInsets: Insets) {
         super.onComputeInsets(outInsets)
-        if (!isFullscreenMode()) {
+        if (!isFullscreenMode) {
             val view = if (::karukanInputView.isInitialized) karukanInputView else null
             val height = if (view != null && view.height > 0) {
                 view.height
@@ -231,7 +232,7 @@ class KarukanInputMethodService : InputMethodService() {
             val visibleTop = window?.window?.decorView?.let { it.height - height } ?: 0
             outInsets.contentTopInsets = visibleTop
             outInsets.visibleTopInsets = visibleTop
-            outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_VISIBLE
+            outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_VISIBLE
         }
     }
 
@@ -284,6 +285,7 @@ class KarukanInputMethodService : InputMethodService() {
             EditorInfo.TYPE_CLASS_NUMBER, EditorInfo.TYPE_CLASS_PHONE, EditorInfo.TYPE_CLASS_DATETIME -> {
                 inputMode = InputMode.NUMERIC
             }
+
             EditorInfo.TYPE_CLASS_TEXT -> {
                 when (variation) {
                     EditorInfo.TYPE_TEXT_VARIATION_PASSWORD,
@@ -293,11 +295,13 @@ class KarukanInputMethodService : InputMethodService() {
                     EditorInfo.TYPE_TEXT_VARIATION_URI -> {
                         inputMode = InputMode.ALPHANUMERIC
                     }
+
                     else -> {
                         inputMode = InputMode.HIRAGANA
                     }
                 }
             }
+
             else -> {
                 inputMode = InputMode.HIRAGANA
             }
@@ -333,9 +337,6 @@ class KarukanInputMethodService : InputMethodService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        invalidateHardKeyboardCache()
-        invalidateThemeCache()
-        invalidateHeightCache()
         updateInputViewShown()
         currentEffectiveKeyboardLayout = getEffectiveKeyboardLayout()
         setInputView(onCreateInputView())
@@ -350,26 +351,12 @@ class KarukanInputMethodService : InputMethodService() {
     // Region: UI & Theme Helpers
     // ---------------------------------------------------------------------------------------------
 
-    private var cachedIsDarkTheme: Boolean? = null
-    private var cachedKeyButtonHeight: Int? = null
-
-    private fun invalidateThemeCache() {
-        cachedIsDarkTheme = null
-    }
-
-    private fun invalidateHeightCache() {
-        cachedKeyButtonHeight = null
-    }
-
     private fun isDarkTheme(): Boolean {
-        cachedIsDarkTheme?.let { return it }
-        val dark = when (settings.keyboardTheme) {
+        return when (settings.keyboardTheme) {
             "light" -> false
             "system" -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
             else -> true
         }
-        cachedIsDarkTheme = dark
-        return dark
     }
 
     private fun triggerKeyFeedback() {
@@ -395,22 +382,15 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun getKeyButtonHeight(): Int {
-        cachedKeyButtonHeight?.let { return it }
         val density = resources.displayMetrics.density
-        val height = when (settings.keyboardHeight) {
+        return when (settings.keyboardHeight) {
             "small" -> (42 * density).toInt()
             "large" -> (62 * density).toInt()
             else -> (52 * density).toInt()
         }
-        cachedKeyButtonHeight = height
-        return height
     }
 
     private fun getKeyboardHeightPx(): Int {
-        if (::mainKeyboardContainer.isInitialized) {
-            if (mainKeyboardContainer.height > 0) return mainKeyboardContainer.height
-            if (mainKeyboardContainer.measuredHeight > 0) return mainKeyboardContainer.measuredHeight
-        }
         val rows = KeyboardLayoutRegistry.getProvider(getEffectiveKeyboardLayout()).rowCount
         return getKeyButtonHeight() * rows
     }
@@ -445,22 +425,7 @@ class KarukanInputMethodService : InputMethodService() {
         startActivity(intent)
     }
 
-    private var cachedIsHardKeyboardConnected: Boolean? = null
-    private var cachedIsIntegratedHardKeyboardConnected: Boolean? = null
-
-    private fun invalidateHardKeyboardCache() {
-        cachedIsHardKeyboardConnected = null
-        cachedIsIntegratedHardKeyboardConnected = null
-    }
-
     private fun isHardKeyboardConnected(): Boolean {
-        cachedIsHardKeyboardConnected?.let { return it }
-        val result = checkIsHardKeyboardConnected()
-        cachedIsHardKeyboardConnected = result
-        return result
-    }
-
-    private fun checkIsHardKeyboardConnected(): Boolean {
         // 1. Check configuration (built-in hard keyboard)
         val config = resources.configuration
         val configHasHardKeyboard = (config.keyboard == Configuration.KEYBOARD_QWERTY ||
@@ -474,7 +439,7 @@ class KarukanInputMethodService : InputMethodService() {
         val deviceIds = android.view.InputDevice.getDeviceIds()
         for (id in deviceIds) {
             val device = android.view.InputDevice.getDevice(id)
-            if (device != null && !device.isVirtual()) {
+            if (device != null && !device.isVirtual) {
                 val sources = device.sources
                 if ((sources and android.view.InputDevice.SOURCE_KEYBOARD) == android.view.InputDevice.SOURCE_KEYBOARD) {
                     if (device.keyboardType == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
@@ -487,21 +452,14 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun isIntegratedHardKeyboardConnected(): Boolean {
-        cachedIsIntegratedHardKeyboardConnected?.let { return it }
-        val result = checkIsIntegratedHardKeyboardConnected()
-        cachedIsIntegratedHardKeyboardConnected = result
-        return result
-    }
-
-    private fun checkIsIntegratedHardKeyboardConnected(): Boolean {
         val deviceIds = android.view.InputDevice.getDeviceIds()
         for (id in deviceIds) {
             val device = android.view.InputDevice.getDevice(id)
-            if (device != null && !device.isVirtual()) {
+            if (device != null && !device.isVirtual) {
                 val sources = device.sources
                 if ((sources and android.view.InputDevice.SOURCE_KEYBOARD) == android.view.InputDevice.SOURCE_KEYBOARD) {
                     if (device.keyboardType == android.view.InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
-                        if (!device.isExternal()) {
+                        if (!device.isExternal) {
                             return true
                         }
                     }
@@ -746,7 +704,7 @@ class KarukanInputMethodService : InputMethodService() {
             KeyAction.DeleteSelectedCandidate -> onDeleteSelectedCandidate()
             KeyAction.SpaceOrConvert -> onSpaceKey()
             KeyAction.FullWidthSpace -> {
-                handleSpecialShortcut("space_shift") { onFullWidthSpace() }
+                onFullWidthSpace()
             }
 
             is KeyAction.Commit -> {
@@ -784,7 +742,7 @@ class KarukanInputMethodService : InputMethodService() {
             }
 
             KeyAction.ToggleLanguageMode -> {
-                handleSpecialShortcut("space_ctrl") { onToggleLanguageMode() }
+                onToggleLanguageMode()
             }
 
             KeyAction.Henkan -> onHenkanKey()
@@ -940,12 +898,18 @@ class KarukanInputMethodService : InputMethodService() {
         val leftContext = if (settings.useContext) {
             val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + preedit.length + 10, 0)?.toString() ?: ""
             val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
-            if (preedit.isNotEmpty() && currentLine.endsWith(preedit)) {
-                currentLine.substring(0, currentLine.length - preedit.length)
-            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
-                currentLine.substring(0, currentLine.length - currentPreedit.length)
-            } else {
-                currentLine
+            when {
+                preedit.isNotEmpty() && currentLine.endsWith(preedit) -> {
+                    currentLine.substring(0, currentLine.length - preedit.length)
+                }
+
+                currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit) -> {
+                    currentLine.substring(0, currentLine.length - currentPreedit.length)
+                }
+
+                else -> {
+                    currentLine
+                }
             }.trim()
         } else {
             ""
@@ -954,7 +918,7 @@ class KarukanInputMethodService : InputMethodService() {
         liveConversionJob = serviceScope.launch {
             val debounceMs = settings.liveConversionDebounceMs.toLong()
             if (debounceMs > 0L) {
-                delay(debounceMs)
+                delay(debounceMs.milliseconds)
             }
             if (!isActive || queryId != currentLiveConversionQueryId) return@launch
 
@@ -990,12 +954,18 @@ class KarukanInputMethodService : InputMethodService() {
         val leftContext = if (settings.useContext) {
             val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + preedit.length + 10, 0)?.toString() ?: ""
             val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
-            if (preedit.isNotEmpty() && currentLine.endsWith(preedit)) {
-                currentLine.substring(0, currentLine.length - preedit.length)
-            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
-                currentLine.substring(0, currentLine.length - currentPreedit.length)
-            } else {
-                currentLine
+            when {
+                preedit.isNotEmpty() && currentLine.endsWith(preedit) -> {
+                    currentLine.substring(0, currentLine.length - preedit.length)
+                }
+
+                currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit) -> {
+                    currentLine.substring(0, currentLine.length - currentPreedit.length)
+                }
+
+                else -> {
+                    currentLine
+                }
             }.trim()
         } else {
             ""
@@ -1004,13 +974,13 @@ class KarukanInputMethodService : InputMethodService() {
         liveConversionJob = serviceScope.launch {
             val debounceMs = settings.liveConversionDebounceMs.toLong()
             if (debounceMs > 0L) {
-                delay(debounceMs)
+                delay(debounceMs.milliseconds)
             }
             if (!isActive || queryId != currentLiveConversionQueryId) return@launch
 
             val candidates = withContext(Dispatchers.Default) {
                 if (!coroutineContext.isActive || queryId != currentLiveConversionQueryId) {
-                    return@withContext emptyList<String>()
+                    return@withContext emptyList()
                 }
                 fetchCandidates(preedit, queryId, leftContext)
             }
@@ -1097,10 +1067,9 @@ class KarukanInputMethodService : InputMethodService() {
     private fun onNikoTouchToggle() {
         val textBefore = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() ?: ""
         if (textBefore.isNotEmpty() && currentPreedit.isEmpty()) {
-            val c = textBefore[0]
-            val toggled = when {
-                c in 'a'..'z' -> c.uppercaseChar().toString()
-                c in 'A'..'Z' -> c.lowercaseChar().toString()
+            val toggled = when (val c = textBefore[0]) {
+                in 'a'..'z' -> c.uppercaseChar().toString()
+                in 'A'..'Z' -> c.lowercaseChar().toString()
                 else -> null
             }
             if (toggled != null) {
@@ -1208,8 +1177,15 @@ class KarukanInputMethodService : InputMethodService() {
         if (hasActiveInput || selectedCandidateIndex >= 0) {
             onSpaceKey()
         } else {
-            if (!reconvert()) {
-                currentInputConnection?.commitText(getSpaceString(), 1)
+            inputMode = InputMode.HIRAGANA
+            isKatakanaMode = false
+            clearComposingState()
+            if (::composingTextView.isInitialized) {
+                composingTextView.text = if (isEnglishMode) "en" else "jp"
+            }
+            if (::karukanInputView.isInitialized) {
+                karukanInputView.setInputMode(inputMode)
+                karukanInputView.updateFloatingOverlay()
             }
         }
     }
@@ -1221,8 +1197,12 @@ class KarukanInputMethodService : InputMethodService() {
             inputMode = InputMode.HIRAGANA
             isKatakanaMode = false
             clearComposingState()
+            if (::composingTextView.isInitialized) {
+                composingTextView.text = if (isEnglishMode) "en" else "jp"
+            }
             if (::karukanInputView.isInitialized) {
                 karukanInputView.setInputMode(inputMode)
+                karukanInputView.updateFloatingOverlay()
             }
         }
     }
@@ -1233,8 +1213,12 @@ class KarukanInputMethodService : InputMethodService() {
         }
         inputMode = InputMode.ALPHANUMERIC
         clearComposingState()
+        if (::composingTextView.isInitialized) {
+            composingTextView.text = if (isEnglishMode) "en" else "jp"
+        }
         if (::karukanInputView.isInitialized) {
             karukanInputView.setInputMode(inputMode)
+            karukanInputView.updateFloatingOverlay()
         }
     }
 
@@ -1342,7 +1326,7 @@ class KarukanInputMethodService : InputMethodService() {
     private fun onDpadUp(isShift: Boolean = false) {
 
 
-         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
+        val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP, 0, metaState))
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_UP, 0, metaState))
@@ -1451,12 +1435,18 @@ class KarukanInputMethodService : InputMethodService() {
         val leftContext = precomputedLeftContext ?: if (settings.useContext) {
             val rawContext = currentInputConnection?.getTextBeforeCursor(settings.contextChars + hiragana.length + 10, 0)?.toString() ?: ""
             val currentLine = rawContext.substringAfterLast('\n').substringAfterLast('\r')
-            if (hiragana.isNotEmpty() && currentLine.endsWith(hiragana)) {
-                currentLine.substring(0, currentLine.length - hiragana.length)
-            } else if (currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit)) {
-                currentLine.substring(0, currentLine.length - currentPreedit.length)
-            } else {
-                currentLine
+            when {
+                hiragana.isNotEmpty() && currentLine.endsWith(hiragana) -> {
+                    currentLine.substring(0, currentLine.length - hiragana.length)
+                }
+
+                currentPreedit.isNotEmpty() && currentLine.endsWith(currentPreedit) -> {
+                    currentLine.substring(0, currentLine.length - currentPreedit.length)
+                }
+
+                else -> {
+                    currentLine
+                }
             }.trim()
         } else {
             ""
@@ -1841,15 +1831,6 @@ class KarukanInputMethodService : InputMethodService() {
         return executeActionById(item.actionId)
     }
 
-    private fun handleSpecialShortcut(shortcutKey: String, fallbackAction: () -> Unit) {
-        val shortcutItems = KeyShortcutItem.fromJsonString(settings.keyShortcutsJson)
-        val item = shortcutItems.firstOrNull { it.shortcutKey == shortcutKey }
-        if (item != null && item.actionId != "none") {
-            executeActionById(item.actionId)
-        } else {
-            fallbackAction()
-        }
-    }
 
     private fun onToggleLiveConversion() {
         val nextState = !settings.isLiveConversionEnabled
