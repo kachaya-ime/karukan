@@ -83,8 +83,6 @@ object KeyEventMapper {
             KeyEvent.KEYCODE_FORWARD_DEL -> return KeyAction.DeleteForward
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> return KeyAction.Commit(event.isShiftPressed)
             KeyEvent.KEYCODE_SPACE -> return if (event.isShiftPressed) KeyAction.FullWidthSpace else KeyAction.SpaceOrConvert
-            KeyEvent.KEYCODE_F3 -> return KeyAction.ToggleLanguageMode
-            KeyEvent.KEYCODE_F4 -> return KeyAction.ToggleEmojiPalette
             KeyEvent.KEYCODE_F6 -> return KeyAction.CommitHiragana
             KeyEvent.KEYCODE_F7 -> return KeyAction.CommitKatakana
             KeyEvent.KEYCODE_F8 -> return KeyAction.CommitHankakuKatakana

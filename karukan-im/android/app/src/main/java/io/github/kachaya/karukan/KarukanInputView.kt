@@ -92,7 +92,8 @@ class KarukanInputView @JvmOverloads constructor(
             getThemeColors = { getThemeColors() },
             getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
             isHardKeyboardConnected = { listener?.isHardKeyboardConnected() == true },
-            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true }
+            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true },
+            isShowStatusTextEnabled = { listener?.getSettings()?.isShowFloatingStatusTextEnabled == true }
         )
     }
 
@@ -146,6 +147,11 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        dismissFloatingCandidates()
+    }
+
     private fun updateThemeColors() {
         val colors = getThemeColors()
         setBackgroundColor(colors.bg)
@@ -154,7 +160,7 @@ class KarukanInputView @JvmOverloads constructor(
             composingTextView.setTextColor(colors.statusText)
         }
         if (::toolbarContainer.isInitialized) {
-            toolbarContainer.setBackgroundColor(colors.bg)
+            toolbarContainer.setBackgroundColor(colors.toolbarBg)
             for (child in toolbarContainer.children) {
                 if (child is TextView) {
                     child.setTextColor(colors.candidateText)
@@ -196,7 +202,7 @@ class KarukanInputView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dpToPx(4f), 0, dpToPx(4f), 0)
-            setBackgroundColor(colors.bg)
+            setBackgroundColor(colors.toolbarBg)
             visibility = VISIBLE
         }
 
@@ -521,13 +527,31 @@ class KarukanInputView @JvmOverloads constructor(
 
         val paddingH = dpToPx(10f)
         val paddingV = dpToPx(6f)
+        val density = context.resources.displayMetrics.density
+        val cornerRadius = 6 * density
+        val strokeWidth = dpToPx(1f)
+        val strokeColor = colors.strokeBorderColor
+
+        val normalBg = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(colors.candidateBg)
+            this.cornerRadius = cornerRadius
+            setStroke(strokeWidth, strokeColor)
+        }
+
+        val selectedBg = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(colors.candidateSelectedBg)
+            this.cornerRadius = cornerRadius
+            setStroke(strokeWidth, strokeColor)
+        }
 
         for (i in 0 until targetCount) {
             val rawCandidate = candidates[i]
             val isSelected = (i == selectedIndex)
 
             val displayCandidate = if (showAnnotations) {
-                rawCandidate.replace("\u001f", "")
+                TextTransformUtils.formatCandidateText(rawCandidate)
             } else {
                 rawCandidate.extractPureCandidate()
             }
@@ -548,10 +572,10 @@ class KarukanInputView @JvmOverloads constructor(
             child.text = displayCandidate
 
             if (isSelected) {
-                child.setBackgroundColor(colors.candidateSelectedBg)
+                child.background = selectedBg
                 child.setTextColor(colors.candidateSelectedText)
             } else {
-                child.setBackgroundColor(colors.candidateBg)
+                child.background = normalBg
                 child.setTextColor(colors.candidateText)
             }
 
@@ -641,13 +665,16 @@ class KarukanInputView @JvmOverloads constructor(
             }
         }
         val modeText = when (inputMode) {
-            InputMode.HIRAGANA -> "かなモード"
-            InputMode.ALPHANUMERIC -> "英数モード"
-            InputMode.NUMERIC -> "数字モード"
-            InputMode.SYMBOL -> "記号モード"
+            InputMode.HIRAGANA -> "jp"
+            InputMode.ALPHANUMERIC -> "en"
+            InputMode.NUMERIC -> "num"
+            InputMode.SYMBOL -> "sym"
         }
         if (::composingTextView.isInitialized) {
             composingTextView.text = modeText
+        }
+        if (listener?.isHardKeyboardConnected() == true) {
+            updateFloatingOverlay()
         }
         clearCandidateBar(inputMode != InputMode.HIRAGANA)
     }
@@ -803,8 +830,10 @@ class KarukanInputView @JvmOverloads constructor(
     // ---------------------------------------------------------------------------------------------
 
     fun updateFloatingOverlay(selectedIndex: Int = -1) {
+        val statusText = if (::composingTextView.isInitialized) composingTextView.text?.toString() else null
         floatingOverlay.updateOverlay(
             selectedIndex = selectedIndex,
+            statusText = statusText,
             isCursorAnchorValid = isCursorAnchorValid,
             cursorX = cursorX,
             cursorYBottom = cursorYBottom,

@@ -20,6 +20,7 @@ data class ThemeColors(
     val candidateText: Int,
     val candidateSelectedBg: Int,
     val candidateSelectedText: Int,
+    val toolbarBg: Int,
 
     // キーボードキー要素
     val keyBg: Int,
@@ -74,7 +75,8 @@ data class ThemeColors(
         private fun createDarkTheme(): ThemeColors {
             val bg = baseDarkBg
             val candidateBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.30f)
+            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.16f)
+            val toolbarBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.08f)
 
             return ThemeColors(
                 isDark = true,
@@ -85,6 +87,7 @@ data class ThemeColors(
                 candidateText = baseTextLight,
                 candidateSelectedBg = candidateSelectedBg,
                 candidateSelectedText = Color.WHITE,
+                toolbarBg = toolbarBg,
 
                 keyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.11f),
                 actionKeyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
@@ -113,8 +116,9 @@ data class ThemeColors(
         private fun createLightTheme(): ThemeColors {
             val bg = Color.parseColor("#ECEFF1")
             val candidateBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.15f)
+            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.08f)
             val candidateSelectedText = ColorUtils.blendARGB(baseAccentGreen, Color.BLACK, 0.50f)
+            val toolbarBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f)
 
             return ThemeColors(
                 isDark = false,
@@ -125,6 +129,7 @@ data class ThemeColors(
                 candidateText = baseTextDark,
                 candidateSelectedBg = candidateSelectedBg,
                 candidateSelectedText = candidateSelectedText,
+                toolbarBg = toolbarBg,
 
                 keyBg = Color.WHITE,
                 actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),

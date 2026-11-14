@@ -22,6 +22,25 @@ object TextTransformUtils {
     }
 
     /**
+     * 候補文字列内の（）で囲まれた説明部分（アノテーション）に 0.75倍の相対フォントサイズを適用した SpannableString を返します。
+     */
+    fun formatCandidateText(candidateStr: String): CharSequence {
+        val cleanText = candidateStr.replace("\u001f", "")
+        val openIdx = cleanText.lastIndexOf('(')
+        if (openIdx >= 0 && cleanText.endsWith(')')) {
+            val spannable = android.text.SpannableString(cleanText)
+            spannable.setSpan(
+                android.text.style.RelativeSizeSpan(0.75f),
+                openIdx,
+                cleanText.length,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            return spannable
+        }
+        return cleanText
+    }
+
+    /**
      * 全角カタカナを半角カタカナに変換します（フォールバック用）。
      */
     fun toHankakuKatakanaFallback(str: String): String {

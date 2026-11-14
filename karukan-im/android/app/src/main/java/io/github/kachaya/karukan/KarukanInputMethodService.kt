@@ -96,9 +96,6 @@ class KarukanInputMethodService : InputMethodService() {
     private var powerManager: PowerManager? = null
     private var thermalStatusListener: PowerManager.OnThermalStatusChangedListener? = null
 
-    private var lastF3TimeMs: Long = 0L
-    private var lastF4TimeMs: Long = 0L
-
     companion object {
         private const val TAG = "KarukanInputService"
     }
@@ -309,6 +306,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        dismissFloatingCandidates()
         if (::karukanInputView.isInitialized) {
             karukanInputView.resetKeyboardState()
         }
@@ -327,6 +325,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        dismissFloatingCandidates()
         if (::karukanInputView.isInitialized) {
             karukanInputView.resetKeyboardState()
         }
@@ -856,16 +855,6 @@ class KarukanInputMethodService : InputMethodService() {
     // ---------------------------------------------------------------------------------------------
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        val currentTime = SystemClock.uptimeMillis()
-        if (keyCode == KeyEvent.KEYCODE_F3) {
-            lastF3TimeMs = currentTime
-        } else if (keyCode == KeyEvent.KEYCODE_F8 && event?.deviceId == -1 && (currentTime - lastF3TimeMs) < 300) {
-            return true
-        } else if (keyCode == KeyEvent.KEYCODE_F4) {
-            lastF4TimeMs = currentTime
-        } else if (keyCode == KeyEvent.KEYCODE_F9 && event?.deviceId == -1 && (currentTime - lastF4TimeMs) < 300) {
-            return true
-        }
 
         if (::karukanInputView.isInitialized && karukanInputView.isCandidateExpanded && keyCode == KeyEvent.KEYCODE_BACK) {
             collapseCandidates()
@@ -873,12 +862,14 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         if (keyCode == KeyEvent.KEYCODE_SPACE) {
-            if (event?.isShiftPressed == true) {
-                onFullWidthSpace()
-            } else {
-                onSpaceKey()
+            if (event?.isCtrlPressed != true) {
+                if (event?.isShiftPressed == true) {
+                    onFullWidthSpace()
+                } else {
+                    onSpaceKey()
+                }
+                return true
             }
-            return true
         }
 
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -943,7 +934,6 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun triggerLiveConversion(preedit: String) {
         cancelLiveConversion()
-        clearCandidateBar()
         val queryId = ++currentLiveConversionQueryId
 
         // Fetch leftContext safely on the main thread before switching to Dispatchers.Default
@@ -982,9 +972,9 @@ class KarukanInputMethodService : InputMethodService() {
                 currentLiveCandidate = pureTopCandidate
                 val detailStr = if (showCandidateDetails) " (推論: Live, 候補数: ${candidates.size})" else ""
                 val displayTopCandidate = if (settings.isShowCandidateAnnotationsEnabled) topCandidate else pureTopCandidate
-                composingTextView.text = "かな: $preedit → $displayTopCandidate${if (isKatakanaMode) " [カタカナ]" else ""}$detailStr"
+                composingTextView.text = getStatusText(preedit, "$displayTopCandidate${if (isKatakanaMode) " [カタカナ]" else ""}$detailStr")
                 currentInputConnection?.setComposingText(pureTopCandidate, 1)
-                clearCandidateBar()
+                renderCandidates(preedit, candidates)
             }
         }
     }
@@ -1015,7 +1005,6 @@ class KarukanInputMethodService : InputMethodService() {
             selectedCandidateIndex = -1
         }
 
-        clearCandidateBar()
         romajiBuffer += if (isShift) key.uppercase(Locale.getDefault()) else key.lowercase(Locale.getDefault())
         val converted = engine.romajiToHiragana(romajiBuffer)
         currentPreedit = converted
@@ -1023,7 +1012,7 @@ class KarukanInputMethodService : InputMethodService() {
         currentLiveCandidate = null
         currentInputConnection?.setComposingText(displayPreedit, 1)
         if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
-            composingTextView.text = displayPreedit
+            composingTextView.text = getStatusText(displayPreedit)
         }
         if (settings.isLiveConversionEnabled) {
             triggerLiveConversion(displayPreedit)
@@ -1043,14 +1032,13 @@ class KarukanInputMethodService : InputMethodService() {
         if (selectedCandidateIndex >= 0) {
             selectedCandidateIndex = -1
         }
-        clearCandidateBar()
         romajiBuffer = ""
         currentPreedit += char
         val displayPreedit = currentPreedit
         currentLiveCandidate = null
         currentInputConnection?.setComposingText(displayPreedit, 1)
         if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
-            composingTextView.text = displayPreedit
+            composingTextView.text = getStatusText(displayPreedit)
         }
         if (settings.isLiveConversionEnabled) {
             triggerLiveConversion(displayPreedit)
@@ -1082,7 +1070,7 @@ class KarukanInputMethodService : InputMethodService() {
                 currentPreedit = currentPreedit.dropLast(1) + toggled
                 currentInputConnection?.setComposingText(currentPreedit, 1)
                 if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
-                    composingTextView.text = currentPreedit
+                    composingTextView.text = getStatusText(currentPreedit)
                 }
                 if (settings.isLiveConversionEnabled) {
                     triggerLiveConversion(currentPreedit)
@@ -1116,7 +1104,7 @@ class KarukanInputMethodService : InputMethodService() {
             currentLiveCandidate = null
             currentInputConnection?.setComposingText(currentPreedit, 1)
             if (!settings.isLiveConversionEnabled && ::composingTextView.isInitialized) {
-                composingTextView.text = currentPreedit
+                composingTextView.text = getStatusText(currentPreedit)
             }
             if (settings.isLiveConversionEnabled) {
                 triggerLiveConversion(currentPreedit)
@@ -1263,8 +1251,12 @@ class KarukanInputMethodService : InputMethodService() {
         val isEng = inputMode != InputMode.HIRAGANA
         inputMode = if (isEng) InputMode.HIRAGANA else InputMode.ALPHANUMERIC
         clearComposingState()
+        if (::composingTextView.isInitialized) {
+            composingTextView.text = if (isEnglishMode) "en" else "jp"
+        }
         if (::karukanInputView.isInitialized) {
             karukanInputView.setInputMode(inputMode)
+            karukanInputView.updateFloatingOverlay()
         }
     }
 
@@ -1346,6 +1338,20 @@ class KarukanInputMethodService : InputMethodService() {
     // Region: Composing Text & Conversion Pipeline
     // ---------------------------------------------------------------------------------------------
 
+    private fun getStatusText(preedit: String, extraInfo: String? = null): String {
+        val katakanaTag = if (isKatakanaMode) " [カタカナ]" else ""
+        val romajiPart = if (romajiBuffer.isNotEmpty()) " (ローマ字: $romajiBuffer)" else ""
+        return if (extraInfo != null) {
+            "かな$romajiPart: $preedit → $extraInfo$katakanaTag"
+        } else {
+            if (preedit.isEmpty()) {
+                if (isEnglishMode) "en" else "jp"
+            } else {
+                "かな$romajiPart: $preedit$katakanaTag"
+            }
+        }
+    }
+
     private fun updateComposingText() {
         requestCursorUpdates()
         val hasInput = hasActiveInput || selectedCandidateIndex >= 0
@@ -1356,7 +1362,7 @@ class KarukanInputMethodService : InputMethodService() {
             if (::engine.isInitialized && engine.isPreparing && !hasActiveInput) {
                 composingTextView.text = engine.currentLoadStatus
             } else {
-                composingTextView.text = "英数モード"
+                composingTextView.text = "en"
             }
             currentLiveCandidate = null
             currentInputConnection?.setComposingText("", 0)
@@ -1368,8 +1374,7 @@ class KarukanInputMethodService : InputMethodService() {
             if (::engine.isInitialized && engine.isPreparing) {
                 composingTextView.text = engine.currentLoadStatus
             } else {
-                val katakanaTag = if (isKatakanaMode) " [カタカナ]" else ""
-                composingTextView.text = "かな: (なし)$katakanaTag"
+                composingTextView.text = if (isEnglishMode) "en" else "jp"
             }
             currentLiveCandidate = null
             currentInputConnection?.setComposingText("", 0)
@@ -1377,6 +1382,7 @@ class KarukanInputMethodService : InputMethodService() {
             clearCandidateBar()
             return
         }
+        composingTextView.text = getStatusText(currentActiveQuery)
     }
 
     private fun cancelLiveConversion() {
@@ -1450,7 +1456,7 @@ class KarukanInputMethodService : InputMethodService() {
 
         currentCandidates = listOf(convertedText)
         selectedCandidateIndex = 0
-        composingTextView.text = "かな: $hiragana → $convertedText [1/1]"
+        composingTextView.text = getStatusText(hiragana, "$convertedText [1/1]")
         currentInputConnection?.setComposingText(convertedText, 1)
         if (::karukanInputView.isInitialized) {
             karukanInputView.updateCandidates(hiragana, currentCandidates, selectedCandidateIndex)
@@ -1597,7 +1603,7 @@ class KarukanInputMethodService : InputMethodService() {
             val selectedCand = currentCandidates[selectedCandidateIndex]
             val pureCand = selectedCand.extractPureCandidate()
             val filterTag = if (activeSourceFilter != SourceFilter.ALL) " [${getSourceFilterLabel(activeSourceFilter)}]" else ""
-            composingTextView.text = "かな: $hiragana → $pureCand  [${selectedCandidateIndex + 1}/${currentCandidates.size}]$filterTag"
+            composingTextView.text = getStatusText(hiragana, "$pureCand  [${selectedCandidateIndex + 1}/${currentCandidates.size}]$filterTag")
             currentInputConnection?.setComposingText(pureCand, 1)
             renderCandidates(hiragana, currentCandidates)
         }

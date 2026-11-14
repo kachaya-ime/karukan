@@ -22,7 +22,8 @@ class FloatingCandidateOverlay(
     private val getThemeColors: () -> ThemeColors,
     private val getAnchorView: () -> View?,
     private val isHardKeyboardConnected: () -> Boolean,
-    private val isShowFloatingWindowEnabled: () -> Boolean
+    private val isShowFloatingWindowEnabled: () -> Boolean,
+    private val isShowStatusTextEnabled: () -> Boolean
 ) {
 
     private var popupWindow: PopupWindow? = null
@@ -31,6 +32,23 @@ class FloatingCandidateOverlay(
     private var candidateScrollView: ScrollView? = null
     var candidateFlowLayout: CandidateFlowLayout? = null
         private set
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var dismissRunnable: Runnable? = null
+
+    private fun scheduleAutoDismiss() {
+        dismissRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable {
+            dismiss()
+        }
+        dismissRunnable = runnable
+        handler.postDelayed(runnable, 1200L)
+    }
+
+    private fun cancelAutoDismiss() {
+        dismissRunnable?.let { handler.removeCallbacks(it) }
+        dismissRunnable = null
+    }
 
     private var lastX: Int = Int.MIN_VALUE
     private var lastY: Int = Int.MIN_VALUE
@@ -119,23 +137,36 @@ class FloatingCandidateOverlay(
         return candidateFlowLayout!!
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun updateOverlay(
         selectedIndex: Int,
+        statusText: String?,
         isCursorAnchorValid: Boolean,
         cursorX: Float,
         cursorYBottom: Float,
         cursorYTop: Float
     ) {
-        if (!isHardKeyboardConnected() || !isShowFloatingWindowEnabled() || selectedIndex < 0) {
+        val hardKb = isHardKeyboardConnected()
+        val showWindow = isShowFloatingWindowEnabled()
+        val showStatus = isShowStatusTextEnabled() || !statusText.isNullOrEmpty()
+
+        if (!hardKb || (!showWindow && !showStatus)) {
             dismiss()
             return
         }
 
-        val hasCandidates = (candidateFlowLayout?.childCount ?: 0) > 0
+        val hasCandidates = showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
+        val hasStatus = !statusText.isNullOrEmpty()
 
-        if (!hasCandidates) {
+        if (!hasCandidates && !hasStatus) {
             dismiss()
             return
+        }
+
+        if (hasCandidates) {
+            cancelAutoDismiss()
+        } else {
+            scheduleAutoDismiss()
         }
 
         if (popupWindow == null) {
@@ -144,10 +175,26 @@ class FloatingCandidateOverlay(
 
         val statusTv = statusTextView ?: return
         val sv = candidateScrollView ?: return
+        val divView = dividerView
 
-        statusTv.visibility = View.GONE
-        sv.visibility = View.VISIBLE
-        dividerView?.visibility = View.GONE
+        if (showStatus && hasStatus) {
+            statusTv.text = statusText
+            statusTv.visibility = View.VISIBLE
+        } else {
+            statusTv.visibility = View.GONE
+        }
+
+        if (showWindow && hasCandidates) {
+            sv.visibility = View.VISIBLE
+        } else {
+            sv.visibility = View.GONE
+        }
+
+        if (showStatus && hasStatus && showWindow && hasCandidates) {
+            divView?.visibility = View.VISIBLE
+        } else {
+            divView?.visibility = View.GONE
+        }
 
         showInternal(hasCandidates, isCursorAnchorValid, cursorX, cursorYBottom, cursorYTop)
     }
@@ -236,7 +283,11 @@ class FloatingCandidateOverlay(
 
         screenY = maxOf(0, screenY)
 
-        if (popup.isShowing && lastX == screenX && lastY == screenY && lastWidth == popupWidth && lastHeight == popupHeight) {
+        if (popup.isShowing &&
+            kotlin.math.abs(lastX - screenX) < 3 &&
+            kotlin.math.abs(lastY - screenY) < 3 &&
+            kotlin.math.abs(lastWidth - popupWidth) < 3 &&
+            kotlin.math.abs(lastHeight - popupHeight) < dpToPx(16f)) {
             return
         }
 
@@ -286,6 +337,7 @@ class FloatingCandidateOverlay(
     }
 
     fun dismiss() {
+        cancelAutoDismiss()
         popupWindow?.dismiss()
         lastX = Int.MIN_VALUE
         lastY = Int.MIN_VALUE
