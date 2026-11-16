@@ -527,7 +527,9 @@ class KarukanInputMethodService : InputMethodService() {
 
             if (::karukanInputView.isInitialized) {
                 karukanInputView.updateCursorPosition(true, cursorX, cursorYBottom, cursorYTop)
-                if (isHardKeyboardConnected()) {
+                val isHardKb = isHardKeyboardConnected()
+                val showSoftFloating = settings.isShowFloatingCandidateWindowOnSoftKeyboardEnabled
+                if (isHardKb || showSoftFloating) {
                     karukanInputView.updateFloatingOverlay(selectedCandidateIndex)
                 }
             }

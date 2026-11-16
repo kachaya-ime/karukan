@@ -4,7 +4,7 @@
     app:iconSpaceReserved="false"
     >
 
-    <!-- 1. 入力設定 -->
+    <!-- 入力設定 -->
     <PreferenceCategory
         android:title="入力設定"
         app:iconSpaceReserved="false"
@@ -19,137 +19,6 @@
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true"
             />
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_auto_commit"
-            android:summary="入力中のフォーカス外れ時に未確定文字を自動確定します"
-            android:title="フォーカス移動時の自動確定"
-            app:iconSpaceReserved="false"
-            />
-
-        <Preference
-            android:key="pref_key_shortcut_management"
-            android:summary="Ctrl/Shift等のショートカットキーへのアクション割り当てを設定します"
-            android:title="キーショートカットの設定"
-            app:iconSpaceReserved="false"
-            />
-
-    </PreferenceCategory>
-
-    <!-- 2. 変換設定 -->
-    <PreferenceCategory
-        android:title="変換設定"
-        app:iconSpaceReserved="false"
-        >
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_live_conversion"
-            android:summary="入力中にリアルタイムで最適な変換候補をプレビュー表示します"
-            android:title="ライブ変換を有効にする"
-            app:iconSpaceReserved="false"
-            />
-
-        <ListPreference
-            android:defaultValue="100"
-            android:dependency="pref_live_conversion"
-            android:entries="@array/pref_live_conversion_debounce_entries"
-            android:entryValues="@array/pref_live_conversion_debounce_values"
-            android:key="pref_live_conversion_debounce_ms"
-            android:summary="キー入力後にライブ変換を開始するまでの待ち時間を設定します"
-            android:title="ライブ変換開始の遅延時間"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true"
-            />
-
-        <ListPreference
-            android:defaultValue="9"
-            android:entries="@array/pref_num_candidates_entries"
-            android:entryValues="@array/pref_num_candidates_values"
-            android:key="pref_num_candidates"
-            android:title="表示候補数"
-            app:iconSpaceReserved="false"
-            app:useSimpleSummaryProvider="true"
-            />
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_date_conversion"
-            android:summary="「きょう」「いま」等の入力時に現在日時候補を出力します"
-            android:title="日付・時刻変換を有効にする"
-            app:iconSpaceReserved="false"
-            />
-
-        <Preference
-            android:key="pref_date_phrase_management"
-            android:summary="「きょう」「いま」等の変換フレーズやフォーマットの追加・編集・削除"
-            android:title="日付・時刻変換フレーズの管理"
-            app:iconSpaceReserved="false"
-            />
-
-        <Preference
-            android:key="pref_persona_management"
-            android:summary="複数の変換ペルソナを登録・管理・有効化します"
-            android:title="変換ペルソナの管理"
-            app:iconSpaceReserved="false"
-            />
-
-    </PreferenceCategory>
-
-    <!-- 3. 表示設定 -->
-    <PreferenceCategory
-        android:title="表示設定"
-        app:iconSpaceReserved="false"
-        >
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_show_candidate_annotations"
-            android:summary="候補に種別アノテーション（📝/👤/🤖/🔄等）を表示します"
-            android:title="候補アノテーションを表示"
-            app:iconSpaceReserved="false"
-            />
-
-    </PreferenceCategory>
-
-    <!-- 4. 画面キーボード設定 -->
-    <PreferenceCategory
-        android:title="画面キーボード設定"
-        app:iconSpaceReserved="false"
-        >
-
-        <Preference
-            android:fragment="io.github.kachaya.karukan.SoftKeyboardSettingsFragment"
-            android:key="pref_soft_keyboard_settings"
-            android:summary="キーボード配列、テーマ、高さ、入力ステータスバー、操作フィードバック等"
-            android:title="画面キーボード設定"
-            app:iconSpaceReserved="false"
-            />
-
-    </PreferenceCategory>
-
-    <!-- 3. 物理キーボード設定 -->
-    <PreferenceCategory
-        android:title="物理キーボード設定"
-        app:iconSpaceReserved="false"
-        >
-
-        <Preference
-            android:fragment="io.github.kachaya.karukan.PhysicalKeyboardSettingsFragment"
-            android:key="pref_physical_keyboard_settings"
-            android:summary="物理キーボード配列、フローティング候補表示、キーショートカット設定等"
-            android:title="物理キーボード設定"
-            app:iconSpaceReserved="false"
-            />
-
-    </PreferenceCategory>
-
-    <!-- 4. 記号・文字幅設定 -->
-    <PreferenceCategory
-        android:title="記号・文字幅設定"
-        app:iconSpaceReserved="false"
-        >
 
         <ListPreference
             android:defaultValue="kuten_touten"
@@ -169,14 +38,6 @@
             android:title="括弧スタイル"
             app:iconSpaceReserved="false"
             app:useSimpleSummaryProvider="true"
-            />
-
-        <SwitchPreferenceCompat
-            android:defaultValue="true"
-            android:key="pref_bracket_cursor_inside"
-            android:summary="「」や『』等のペア括弧確定後、自動的にカーソルを括弧内に移動します"
-            android:title="ペア括弧確定時にカーソルを括弧内に移動"
-            app:iconSpaceReserved="false"
             />
 
         <ListPreference
@@ -219,9 +80,132 @@
             app:useSimpleSummaryProvider="true"
             />
 
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_bracket_cursor_inside"
+            android:summary="「」や『』等のペア括弧確定後、自動的にカーソルを括弧内に移動します"
+            android:title="ペア括弧確定時にカーソルを括弧内に移動"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_auto_commit"
+            android:summary="入力中のフォーカス外れ時に未確定文字を自動確定します"
+            android:title="フォーカス移動時の自動確定"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_key_shortcut_management"
+            android:summary="Ctrl/Shift等のショートカットキーへのアクション割り当てを設定します"
+            android:title="キーショートカットの設定"
+            app:iconSpaceReserved="false"
+            />
+
     </PreferenceCategory>
 
-    <!-- 5. 辞書・学習設定 -->
+    <!-- 変換設定 -->
+    <PreferenceCategory
+        android:title="変換設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_live_conversion"
+            android:summary="入力中にリアルタイムで最適な変換候補をプレビュー表示します"
+            android:title="ライブ変換を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <ListPreference
+            android:defaultValue="100"
+            android:dependency="pref_live_conversion"
+            android:entries="@array/pref_live_conversion_debounce_entries"
+            android:entryValues="@array/pref_live_conversion_debounce_values"
+            android:key="pref_live_conversion_debounce_ms"
+            android:summary="キー入力後にライブ変換を開始するまでの待ち時間を設定します"
+            android:title="ライブ変換開始の遅延時間"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="9"
+            android:entries="@array/pref_num_candidates_entries"
+            android:entryValues="@array/pref_num_candidates_values"
+            android:key="pref_num_candidates"
+            android:title="表示候補数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_candidate_annotations"
+            android:summary="候補に種別アノテーション（📝/👤/🤖/🔄等）を表示します"
+            android:title="候補アノテーションを表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_date_conversion"
+            android:summary="「きょう」「いま」等の入力時に現在日時候補を出力します"
+            android:title="日付・時刻変換を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_date_phrase_management"
+            android:summary="「きょう」「いま」等の変換フレーズやフォーマットの追加・編集・削除"
+            android:title="日付・時刻変換フレーズの管理"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_persona_management"
+            android:summary="複数の変換ペルソナを登録・管理・有効化します"
+            android:title="変換ペルソナの管理"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 画面キーボード設定 -->
+    <PreferenceCategory
+        android:title="画面キーボード設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.SoftKeyboardSettingsFragment"
+            android:key="pref_soft_keyboard_settings"
+            android:summary="キーボード配列、テーマ、高さ、入力ステータスバー、操作フィードバック等"
+            android:title="画面キーボード設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 物理キーボード設定 -->
+    <PreferenceCategory
+        android:title="物理キーボード設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.PhysicalKeyboardSettingsFragment"
+            android:key="pref_physical_keyboard_settings"
+            android:summary="物理キーボード配列、フローティング候補表示、キーショートカット設定等"
+            android:title="物理キーボード設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 辞書・学習設定 -->
     <PreferenceCategory
         android:title="辞書・学習設定"
         app:iconSpaceReserved="false"
@@ -265,7 +249,7 @@
 
     </PreferenceCategory>
 
-    <!-- 6. AI・エンジン詳細設定 -->
+    <!-- AI・エンジン詳細設定 -->
     <PreferenceCategory
         android:title="AI・エンジン詳細設定"
         app:iconSpaceReserved="false"
@@ -281,7 +265,7 @@
 
     </PreferenceCategory>
 
-    <!-- 7. 情報・ライセンス -->
+    <!-- 情報・ライセンス -->
     <PreferenceCategory
         android:title="情報・ライセンス"
         app:iconSpaceReserved="false"

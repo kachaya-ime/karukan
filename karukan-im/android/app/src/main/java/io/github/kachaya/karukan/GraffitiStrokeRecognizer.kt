@@ -83,7 +83,9 @@ object GraffitiStrokeRecognizer {
         val totalDx: Float = 0f,
         val totalDy: Float = 0f,
         val startRegion: GridRegion = GridRegion.CENTER,
-        val endRegion: GridRegion = GridRegion.CENTER
+        val endRegion: GridRegion = GridRegion.CENTER,
+        val startEndDistance: Float = 0f,
+        val pathLength: Float = 0f
     )
 
     private val alphaTemplates = mutableListOf<Template>()
@@ -98,17 +100,52 @@ object GraffitiStrokeRecognizer {
     // Region: Path Movement Utilities
     // ---------------------------------------------------------------------------------------------
 
+    data class StrokeMetrics(
+        val totalDx: Float,
+        val totalDy: Float,
+        val pathLength: Float
+    )
+
+    /**
+     * ストロークの各セグメントにおける移動量（水平成分 totalDx, 垂直成分 totalDy）と正規化後のPath長を同時に求めます。
+     */
+    fun computeStrokeMetrics(points: List<Point>): StrokeMetrics {
+        var totalDx = 0f
+        var totalDy = 0f
+        var pathLength = 0f
+        for (i in 0 until points.size - 1) {
+            val dx = points[i + 1].x - points[i].x
+            val dy = points[i + 1].y - points[i].y
+            totalDx += abs(dx)
+            totalDy += abs(dy)
+            pathLength += hypot(dx, dy)
+        }
+        return StrokeMetrics(totalDx, totalDy, pathLength)
+    }
+
     /**
      * ストロークの各セグメントにおける移動量の絶対値の和（水平成分 totalDx, 垂直成分 totalDy）を求めます。
      */
     fun computeTotalMovement(points: List<Point>): Pair<Float, Float> {
-        var totalDx = 0f
-        var totalDy = 0f
-        for (i in 0 until points.size - 1) {
-            totalDx += abs(points[i + 1].x - points[i].x)
-            totalDy += abs(points[i + 1].y - points[i].y)
-        }
-        return Pair(totalDx, totalDy)
+        val metrics = computeStrokeMetrics(points)
+        return Pair(metrics.totalDx, metrics.totalDy)
+    }
+
+    /**
+     * 始点と終点間の直線距離（ユークリッド距離）を求めます。
+     */
+    fun computeStartEndDistance(points: List<Point>): Float {
+        if (points.size < 2) return 0f
+        val start = points.first()
+        val end = points.last()
+        return hypot(end.x - start.x, end.y - start.y)
+    }
+
+    /**
+     * ストロークの正規化後のPath長（連続する点間のユークリッド距離の総和）を求めます。
+     */
+    fun computePathLength(points: List<Point>): Float {
+        return computeStrokeMetrics(points).pathLength
     }
 
     /**
@@ -143,96 +180,6 @@ object GraffitiStrokeRecognizer {
     // ---------------------------------------------------------------------------------------------
     // Region: Bounding Box & Rotation Calculations
     // ---------------------------------------------------------------------------------------------
-
-    data class MinBoundingBoxResult(
-        val width: Float,
-        val height: Float,
-        val area: Float,
-        val angleDeg: Int,
-        val rotatedPoints: List<Point>,
-        val rawWidth: Float = 0f,
-        val rawHeight: Float = 0f,
-        val rawArea: Float = 0f,
-        val pointCount: Int = 0,
-        val totalDx: Float = 0f,
-        val totalDy: Float = 0f,
-        val rawTotalDx: Float = 0f,
-        val rawTotalDy: Float = 0f,
-        val startRegion: GridRegion = GridRegion.CENTER,
-        val endRegion: GridRegion = GridRegion.CENTER
-    )
-
-    fun findBoundingBox(points: Collection<Point>): MinBoundingBoxResult? {
-        if (points.isEmpty()) return null
-
-        val start = points.first()
-
-        var minX = Double.MAX_VALUE
-        var maxX = -Double.MAX_VALUE
-        var minY = Double.MAX_VALUE
-        var maxY = -Double.MAX_VALUE
-
-        val rawRotatedPoints = ArrayList<Point>(points.size)
-
-        for (p in points) {
-            val dx = (p.x - start.x).toDouble()
-            val dy = (p.y - start.y).toDouble()
-            rawRotatedPoints.add(Point(dx.toFloat(), dy.toFloat()))
-
-            if (dx < minX) minX = dx
-            if (dx > maxX) maxX = dx
-            if (dy < minY) minY = dy
-            if (dy > maxY) maxY = dy
-        }
-
-        val w = (maxX - minX).toFloat()
-        val h = (maxY - minY).toFloat()
-        val rawArea = w * h
-
-        val maxAbs = max(
-            max(abs(minX), abs(maxX)),
-            max(abs(minY), abs(maxY))
-        ).toFloat()
-
-        val scale = if (maxAbs > 0f) 100f / maxAbs else 1f
-        val scaledWidth = w * scale
-        val scaledHeight = h * scale
-        val scaledArea = scaledWidth * scaledHeight
-
-        val scaledRotatedPoints = rawRotatedPoints.map {
-            Point(
-                x = it.x * scale,
-                y = it.y * scale
-            )
-        }
-
-        val (scaledDx, scaledDy) = computeTotalMovement(scaledRotatedPoints)
-        val (rawDx, rawDy) = computeTotalMovement(rawRotatedPoints)
-        val startRegion = if (scaledRotatedPoints.isNotEmpty()) getGridRegion(scaledRotatedPoints.first()) else GridRegion.CENTER
-        val endRegion = if (scaledRotatedPoints.isNotEmpty()) getGridRegion(scaledRotatedPoints.last()) else GridRegion.CENTER
-
-        return MinBoundingBoxResult(
-            width = scaledWidth,
-            height = scaledHeight,
-            area = scaledArea,
-            angleDeg = 0,
-            rotatedPoints = scaledRotatedPoints,
-            rawWidth = w,
-            rawHeight = h,
-            rawArea = rawArea,
-            pointCount = points.size,
-            totalDx = scaledDx,
-            totalDy = scaledDy,
-            rawTotalDx = rawDx,
-            rawTotalDy = rawDy,
-            startRegion = startRegion,
-            endRegion = endRegion
-        )
-    }
-
-    fun findMinBoundingBoxByRotation(points: Collection<Point>): MinBoundingBoxResult? {
-        return findBoundingBox(points)
-    }
 
     // ---------------------------------------------------------------------------------------------
     // Region: Template Matching Engine
@@ -272,6 +219,49 @@ object GraffitiStrokeRecognizer {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Region: Stroke Features & Normalization Engine
+    // ---------------------------------------------------------------------------------------------
+
+    data class StrokeFeatures(
+        val sampledPoints: List<Point>,
+        val scaledPoints: List<Point>,
+        val centeredPoints: List<Point>,
+        val startRegion: GridRegion,
+        val endRegion: GridRegion,
+        val totalDx: Float,
+        val totalDy: Float,
+        val startEndDistance: Float,
+        val pathLength: Float
+    )
+
+    /**
+     * 入力点列およびテンプレート点列から、同一アルゴリズムで統一正規化特徴量を生成します。
+     */
+    fun extractFeatures(rawPoints: List<Point>): StrokeFeatures? {
+        if (rawPoints.isEmpty()) return null
+        val sampled = samplePoints(rawPoints, DEFAULT_SAMPLING_COUNT)
+        if (sampled.isEmpty()) return null
+        val scaled = scaleToSquare(sampled, SQUARE_SIZE)
+        val centered = translateToOrigin(scaled)
+        val metrics = computeStrokeMetrics(scaled)
+        val startRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.first()) else GridRegion.CENTER
+        val endRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
+        val startEndDistance = computeStartEndDistance(scaled)
+
+        return StrokeFeatures(
+            sampledPoints = sampled,
+            scaledPoints = scaled,
+            centeredPoints = centered,
+            startRegion = startRegion,
+            endRegion = endRegion,
+            totalDx = metrics.totalDx,
+            totalDy = metrics.totalDy,
+            startEndDistance = startEndDistance,
+            pathLength = metrics.pathLength
+        )
+    }
+
     fun recognize(path: Path, bounds: RectF): RecognitionResult {
         return recognizeDetailed(path, bounds).result
     }
@@ -284,8 +274,10 @@ object GraffitiStrokeRecognizer {
     fun recognizeDetailed(rawPoints: List<Point>, bounds: RectF): DetailedRecognitionResult {
         if (rawPoints.isEmpty()) return DetailedRecognitionResult(RecognitionResult.None)
 
-        val sampledRaw = samplePoints(rawPoints, DEFAULT_SAMPLING_COUNT)
-        val targetCategory = determineTargetCategory(sampledRaw, bounds, isPunctuationMode)
+        val inputFeatures = extractFeatures(rawPoints)
+            ?: return DetailedRecognitionResult(RecognitionResult.None)
+
+        val targetCategory = determineTargetCategory(inputFeatures.sampledPoints, bounds, isPunctuationMode)
 
         var matchedPoints: List<Point>? = null
         var matchedName: String? = null
@@ -299,9 +291,9 @@ object GraffitiStrokeRecognizer {
         var top3Matches = emptyList<MatchResult>()
 
         val result = run {
-            val minBoxResult = findBoundingBox(sampledRaw) ?: return@run RecognitionResult.None
-            val maxRawDim = max(minBoxResult.rawWidth, minBoxResult.rawHeight)
-            if (sampledRaw.size < 3 || maxRawDim < 25f) {
+            val (minX, minY, maxX, maxY) = computeBoundingBox(rawPoints)
+            val maxRawDim = max(maxX - minX, maxY - minY)
+            if (rawPoints.size < 3 || maxRawDim < 25f) {
                 return@run if (targetCategory == TargetCategory.PUNCTUATION) {
                     RecognitionResult.CharResult(".")
                 } else {
@@ -309,18 +301,58 @@ object GraffitiStrokeRecognizer {
                 }
             }
 
-            val scaled = scaleToSquare(sampledRaw, SQUARE_SIZE)
-            val translated = translateToOrigin(scaled)
-            val inputEndRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
-
             val targetTemplates = when (targetCategory) {
                 TargetCategory.ALPHA -> alphaTemplates
                 TargetCategory.NUMERIC -> numericTemplates
                 TargetCategory.PUNCTUATION -> punctuationTemplates
             }
 
-            // endRegionが一致しないテンプレートは解析候補から完全に除外する
-            val candidateTemplates = targetTemplates.filter { it.endRegion == inputEndRegion }
+            val candidateTemplates = mutableListOf<Template>()
+            logI(
+                TAG,
+                "Evaluating ${targetTemplates.size} templates for category $targetCategory " +
+                        "(start=${inputFeatures.startRegion.displayName}, end=${inputFeatures.endRegion.displayName}, " +
+                        "dx=${"%.1f".format(inputFeatures.totalDx)}, dy=${"%.1f".format(inputFeatures.totalDy)}, " +
+                        "startEndDist=${"%.1f".format(inputFeatures.startEndDistance)}, " +
+                        "pathLen=${"%.1f".format(inputFeatures.pathLength)}):"
+            )
+            for (template in targetTemplates) {
+                // 縦成分のみ
+                if (inputFeatures.totalDx == 0f && template.totalDx != 0f) {
+                    continue;
+                }
+                // 横成分のみ
+                if (inputFeatures.totalDy == 0f && template.totalDy != 0f) {
+                    continue;
+                }
+                // 開始位置の比較
+                if (template.startRegion != inputFeatures.startRegion) {
+                    continue
+                }
+                // 終了位置の比較
+                if (template.endRegion != inputFeatures.endRegion) {
+                    continue
+                }
+                // Path長
+                if (abs(template.pathLength - inputFeatures.pathLength) > (SQUARE_SIZE * 0.9f)) {
+                    continue
+                }
+                // 水平方向移動量
+                if (template.totalDx != 0f) {
+                    if (abs(template.totalDx - inputFeatures.totalDx) > (SQUARE_SIZE * 0.9f)) {
+                        continue
+                    }
+                }
+                // 垂直方向移動量
+                if (template.totalDy != 0f) {
+                    if (abs(template.totalDy - inputFeatures.totalDy) > (SQUARE_SIZE * 0.9f)) {
+                        continue
+                    }
+                }
+
+                candidateTemplates.add(template)
+            }
+            logI(TAG, "Filtered candidate templates count: ${candidateTemplates.size} / ${targetTemplates.size}")
 
             val validMatches = candidateTemplates.map { template ->
                 val res = when (targetCategory) {
@@ -328,7 +360,7 @@ object GraffitiStrokeRecognizer {
                     TargetCategory.NUMERIC -> template.numericResult
                     TargetCategory.PUNCTUATION -> template.punctuationResult
                 }
-                val dist = pathDistance(translated, template.points)
+                val dist = pathDistance(inputFeatures.centeredPoints, template.points)
                 MatchResult(template, dist, res)
             }.sortedBy { it.dist }
 
@@ -344,17 +376,13 @@ object GraffitiStrokeRecognizer {
             RecognitionResult.None
         }
 
-        val scaledInput = scaleToSquare(sampledRaw, SQUARE_SIZE)
-        val (scaledDx, scaledDy) = computeTotalMovement(scaledInput)
-        val minBoxResult = findBoundingBox(sampledRaw)
-        val inputStartRegion = if (scaledInput.isNotEmpty()) getGridRegion(scaledInput.first()) else GridRegion.CENTER
-        val inputEndRegion = if (scaledInput.isNotEmpty()) getGridRegion(scaledInput.last()) else GridRegion.CENTER
-
         logI(
             TAG,
-            "Input Stroke Features -> Category: $targetCategory, PointCount: ${rawPoints.size} (Sampled: ${sampledRaw.size}), " +
-                    "Movement: (dx=${"%.1f".format(scaledDx)}, dy=${"%.1f".format(scaledDy)}), RawBounds: (w=${"%.1f".format(minBoxResult?.rawWidth ?: 0f)}, h=${"%.1f".format(minBoxResult?.rawHeight ?: 0f)}), " +
-                    "StartRegion: ${inputStartRegion.displayName}, EndRegion: ${inputEndRegion.displayName}, " +
+            "Input Stroke Features -> Category: $targetCategory, " +
+                    "Movement: (dx=${"%.1f".format(inputFeatures.totalDx)}, dy=${"%.1f".format(inputFeatures.totalDy)}), " +
+                    "StartRegion: ${inputFeatures.startRegion.displayName}, EndRegion: ${inputFeatures.endRegion.displayName}, " +
+                    "StartEndDist: ${"%.1f".format(inputFeatures.startEndDistance)}, " +
+                    "PathLen: ${"%.1f".format(inputFeatures.pathLength)}, " +
                     "MatchedTemplate: ${matchedName ?: "None"}, Result: $result"
         )
 
@@ -365,7 +393,9 @@ object GraffitiStrokeRecognizer {
                     TAG,
                     "  #${idx + 1}: ${m.template.name} -> result=${m.result}, dist=${"%.2f".format(m.dist)}, " +
                             "dx=${"%.1f".format(m.template.totalDx)}, dy=${"%.1f".format(m.template.totalDy)}, " +
-                            "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}"
+                            "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}, " +
+                            "startEndDist=${"%.1f".format(m.template.startEndDistance)}, " +
+                            "pathLen=${"%.1f".format(m.template.pathLength)}"
                 )
             }
         }
@@ -380,8 +410,8 @@ object GraffitiStrokeRecognizer {
             result = result,
             matchedTemplatePoints = matchedPoints,
             matchedTemplateName = matchedName,
-            startRegion = inputStartRegion,
-            endRegion = inputEndRegion
+            startRegion = inputFeatures.startRegion,
+            endRegion = inputFeatures.endRegion
         )
     }
 
@@ -440,22 +470,27 @@ object GraffitiStrokeRecognizer {
         val (minX, minY, maxX, maxY) = computeBoundingBox(points)
         val w = maxX - minX
         val h = maxY - minY
-        val longSide = max(w, h)
-        val shortSide = min(w, h)
 
-        val isElongated = longSide > 0f && (shortSide / longSide < 0.25f)
-
-        val scaleX: Float
-        val scaleY: Float
-
-        if (isElongated) {
-            val scale = size / longSide
-            scaleX = scale
-            scaleY = scale
-        } else {
-            scaleX = if (w > 0f) size / w else 1f
-            scaleY = if (h > 0f) size / h else 1f
+        if (w <= h * 0.25f) {
+            val scaleY = if (h > 0f) size / h else 1f
+            return points.map { p ->
+                Point(
+                    x = size / 2f,
+                    y = (p.y - minY) * scaleY
+                )
+            }
+        } else if (h <= w * 0.25f) {
+            val scaleX = if (w > 0f) size / w else 1f
+            return points.map { p ->
+                Point(
+                    x = (p.x - minX) * scaleX,
+                    y = size / 2f
+                )
+            }
         }
+
+        val scaleX = if (w > 0f) size / w else 1f
+        val scaleY = if (h > 0f) size / h else 1f
 
         return points.map { p ->
             Point(
@@ -540,28 +575,20 @@ object GraffitiStrokeRecognizer {
             return
         }
 
-        val sampled = if (rawPoints.isNotEmpty()) {
-            samplePoints(rawPoints, DEFAULT_SAMPLING_COUNT)
-        } else {
-            val path = Path()
-            PathSampler.sample(path)
-        }
-        val scaled = scaleToSquare(sampled, SQUARE_SIZE)
-        val translated = translateToOrigin(scaled)
-        val (totalDx, totalDy) = computeTotalMovement(scaled)
-        val startRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.first()) else GridRegion.CENTER
-        val endRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
+        val features = extractFeatures(rawPoints) ?: return
 
         val template = Template(
             name = name,
-            points = translated,
+            points = features.centeredPoints,
             alphaResult = alphaRes,
             numericResult = numericRes,
             punctuationResult = punctuationRes,
-            totalDx = totalDx,
-            totalDy = totalDy,
-            startRegion = startRegion,
-            endRegion = endRegion
+            totalDx = features.totalDx,
+            totalDy = features.totalDy,
+            startRegion = features.startRegion,
+            endRegion = features.endRegion,
+            startEndDistance = features.startEndDistance,
+            pathLength = features.pathLength
         )
 
         if (alphaRes != RecognitionResult.None) {
@@ -719,7 +746,9 @@ object GraffitiStrokeRecognizer {
                     TAG,
                     "[$categoryName #${idx + 1}] ${t.name} -> result=$res$charCodeStr, " +
                             "dx=${"%.1f".format(t.totalDx)}, dy=${"%.1f".format(t.totalDy)}, " +
-                            "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}"
+                            "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}, " +
+                            "startEndDist=${"%.1f".format(t.startEndDistance)}, " +
+                            "pathLen=${"%.1f".format(t.pathLength)}"
                 )
             }
         }

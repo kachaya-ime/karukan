@@ -51,14 +51,17 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
 
         var currentMode: QwertyMode = QwertyMode.NORMAL
         val sideButtons = mutableListOf<KeyButton>()
+        var graffitiAreaView: GraffitiAreaView? = null
 
-        fun updateSideButtonsMode(mode: QwertyMode) {
+        fun updateMode(mode: QwertyMode) {
+            currentMode = mode
             for (btn in sideButtons) {
                 btn.updateMode(mode, isDarkSupplier())
             }
+            graffitiAreaView?.setCtrlMode(mode == QwertyMode.CTRL)
         }
 
-        fun handleStrokeResult(result: GraffitiStrokeRecognizer.RecognitionResult) {
+        fun handleStrokeResult(result: GraffitiStrokeRecognizer.RecognitionResult, isShift: Boolean) {
             if (result is GraffitiStrokeRecognizer.RecognitionResult.None) return
             listener.onKeyFeedback()
             val isCtrlMode = currentMode == QwertyMode.CTRL
@@ -68,7 +71,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                     if (isCtrlMode) {
                         listener.onCtrlShortcut(result.char)
                     } else {
-                        listener.onKeyPress(result.char)
+                        listener.onKeyPress(result.char, isShift)
                     }
                 }
 
@@ -109,8 +112,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                 }
 
                 is GraffitiStrokeRecognizer.RecognitionResult.Ctrl -> {
-                    currentMode = if (isCtrlMode) QwertyMode.NORMAL else QwertyMode.CTRL
-                    updateSideButtonsMode(currentMode)
+                    updateMode(if (isCtrlMode) QwertyMode.NORMAL else QwertyMode.CTRL)
                     return
                 }
 
@@ -126,8 +128,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
             }
 
             if (isCtrlMode) {
-                currentMode = QwertyMode.NORMAL
-                updateSideButtonsMode(currentMode)
+                updateMode(QwertyMode.NORMAL)
             }
         }
 
@@ -195,15 +196,11 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
         }
         rootLayout.addView(leftContainer)
 
-        lateinit var graffitiAreaView: GraffitiAreaView
         graffitiAreaView = GraffitiAreaView(
             context = context,
             isDarkSupplier = isDarkSupplier,
-            onStrokeRecognized = { result ->
-                handleStrokeResult(result)
-            },
-            onStrokeHelpRequested = {
-                GraffitiHelpDialog.show(graffitiAreaView, isDarkSupplier())
+            onStrokeRecognized = { result, isShift ->
+                handleStrokeResult(result, isShift)
             }
         ).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -261,12 +258,10 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
                             dispatchKeyAction(btn.currentType)
                         }
                     }
-                    currentMode = QwertyMode.NORMAL
-                    updateSideButtonsMode(currentMode)
+                    updateMode(QwertyMode.NORMAL)
                 } else {
                     if (btn.currentType == KeyType.CTRL) {
-                        currentMode = QwertyMode.CTRL
-                        updateSideButtonsMode(currentMode)
+                        updateMode(QwertyMode.CTRL)
                     } else {
                         dispatchKeyAction(btn.currentType)
                     }
@@ -275,7 +270,7 @@ object GraffitiKeyboardLayout : KeyboardLayoutProvider {
         }
 
         activeSideButtons = sideButtons
-        updateSideButtonsMode(currentMode)
+        updateMode(currentMode)
         return rootLayout
     }
 }

@@ -30,7 +30,7 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
   - `NikoKeyboardLayout.kt`: ニコタッチ入力レイアウト & マッパー（ベクターアイコン対応絵文字キー含む）
   - `GraffitiKeyboardLayout.kt`: Palm OS Graffiti (unistroke) 手書き入力レイアウトプロバイダ
   - `GraffitiAreaView.kt`: 手書きストローク描画ビュー
-  - `GraffitiStrokeRecognizer.kt`: テンプレートマッチングによる手書きストローク文字・ジェスチャー認識エンジン（`graffiti_templates.json`）
+  - `GraffitiStrokeRecognizer.kt`: テンプレートマッチングによる手書きストローク文字・ジェスチャー認識エンジン（`graffiti_templates.json`, テンプレート回転・正規化特徴量仕様は [GRAFFITI_TEMPLATES_FEATURES.md](GRAFFITI_TEMPLATES_FEATURES.md) を参照）
   - `GraffitiHelpDialog.kt`: 手書き認識のヘルプ・テンプレート一覧ダイアログ
   - `KeyEventMapper.kt`: 物理キーボード KeyEvent 変換マッパー
   - `KeyAction.kt`: キーボードキーアクション定義

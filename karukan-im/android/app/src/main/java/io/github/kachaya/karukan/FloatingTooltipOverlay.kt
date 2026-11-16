@@ -24,6 +24,7 @@ class FloatingTooltipOverlay(
     private val context: Context,
     private val dpToPx: (Float) -> Int,
     private val getAnchorView: () -> View?,
+    private val getInputView: () -> View? = { null },
     private val defaultAutoDismissDelayMs: Long = 1000L
 ) {
 
@@ -112,6 +113,7 @@ class FloatingTooltipOverlay(
             isFocusable = false
             isClippingEnabled = false
             elevation = dpToPx(6f).toFloat()
+            animationStyle = android.R.style.Animation
         }
     }
 
@@ -149,6 +151,24 @@ class FloatingTooltipOverlay(
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
 
+        val inputView = getInputView()
+        val inputViewLoc = IntArray(2)
+        val inputViewTopY: Int
+        if (inputView != null && inputView.isShown) {
+            inputView.getLocationOnScreen(inputViewLoc)
+            inputViewTopY = if (inputViewLoc[1] > 0) inputViewLoc[1] else (screenHeight - dpToPx(280f))
+        } else {
+            val anchor = getAnchorView()
+            if (anchor != null && anchor.isShown) {
+                anchor.getLocationOnScreen(inputViewLoc)
+                inputViewTopY = if (inputViewLoc[1] > 0) inputViewLoc[1] else (screenHeight - dpToPx(280f))
+            } else {
+                inputViewTopY = screenHeight - dpToPx(280f)
+            }
+        }
+
+        val maxBottomY = minOf(inputViewTopY - dpToPx(8f), screenHeight - dpToPx(8f))
+
         contentView.measure(
             View.MeasureSpec.makeMeasureSpec(screenWidth - dpToPx(32f), View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(screenHeight, View.MeasureSpec.AT_MOST)
@@ -168,12 +188,14 @@ class FloatingTooltipOverlay(
                 screenX = screenX.coerceIn(dpToPx(16f), maxOf(dpToPx(16f), screenWidth - popupWidth - dpToPx(16f)))
             }
 
-            screenY = cursorYBottom.toInt() + dpToPx(4f)
-            if (screenY + popupHeight > screenHeight - dpToPx(8f)) {
+            val preferredY = cursorYBottom.toInt() + dpToPx(4f)
+            if (preferredY + popupHeight <= maxBottomY) {
+                screenY = preferredY
+            } else {
                 screenY = if (!cursorYTop.isNaN()) {
                     cursorYTop.toInt() - popupHeight - dpToPx(4f)
                 } else {
-                    screenHeight - popupHeight - dpToPx(8f)
+                    cursorYBottom.toInt() - popupHeight - dpToPx(4f)
                 }
             }
         } else {
@@ -188,7 +210,7 @@ class FloatingTooltipOverlay(
             }
         }
 
-        screenY = maxOf(0, screenY)
+        screenY = maxOf(dpToPx(8f), minOf(screenY, maxBottomY - popupHeight))
 
         if (popup.isShowing &&
             kotlin.math.abs(lastX - screenX) < 3 &&

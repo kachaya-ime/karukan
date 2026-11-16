@@ -57,25 +57,21 @@ data class ThemeColors(
         private val baseTextLight = Color.parseColor("#E8EAED")
         private val baseTextDark = Color.parseColor("#202124")
 
-        // 事前生成済みテーマカラーキャッシュ
-        private var cachedDarkColors: ThemeColors? = null
-        private var cachedLightColors: ThemeColors? = null
-
         /**
-         * isDark の判定結果に応じた ThemeColors を取得（事前計算キャッシュを返却）
+         * isDark の判定結果に応じた ThemeColors を取得
          */
         fun from(isDark: Boolean): ThemeColors {
             return if (isDark) {
-                cachedDarkColors ?: createDarkTheme().also { cachedDarkColors = it }
+                createDarkTheme()
             } else {
-                cachedLightColors ?: createLightTheme().also { cachedLightColors = it }
+                createLightTheme()
             }
         }
 
         private fun createDarkTheme(): ThemeColors {
             val bg = baseDarkBg
             val candidateBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.16f)
+            val candidateSelectedBg = ColorUtils.blendARGB(ColorUtils.blendARGB(bg, Color.WHITE, 0.18f), baseAccentGreen, 0.14f)
             val toolbarBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.08f)
 
             return ThemeColors(

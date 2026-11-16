@@ -48,6 +48,14 @@
             />
 
         <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_show_floating_candidate_window_on_soft_keyboard"
+            android:summary="画面キーボード使用時にカーソル位置の近くに変換候補を表示します"
+            android:title="画面キーボード時のフローティング候補表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="pref_vibration_enabled"
             android:summary="キーをタップした際に振動フィードバックを発生させます"

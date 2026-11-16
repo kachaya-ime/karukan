@@ -89,8 +89,10 @@ class KarukanInputView @JvmOverloads constructor(
             dpToPx = { dp -> dpToPx(dp) },
             getThemeColors = { getThemeColors() },
             getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
+            getInputView = { this },
             isHardKeyboardConnected = { listener?.isHardKeyboardConnected() == true },
-            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true }
+            isShowFloatingWindowEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowEnabled == true },
+            isShowFloatingWindowOnSoftKeyboardEnabled = { listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true }
         )
     }
 
@@ -98,7 +100,8 @@ class KarukanInputView @JvmOverloads constructor(
         FloatingTooltipOverlay(
             context = context,
             dpToPx = { dp -> dpToPx(dp) },
-            getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView }
+            getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
+            getInputView = { this }
         )
     }
 
@@ -181,6 +184,47 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
+    private fun updateToolbarContent() {
+        if (!::toolbarContainer.isInitialized) return
+        toolbarContainer.removeAllViews()
+        val colors = getThemeColors()
+
+        val btnSettings = TextView(context).apply {
+            text = "⚙️ 設定"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(colors.candidateText)
+            setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                listener?.openSettingsActivity()
+            }
+        }
+        toolbarContainer.addView(btnSettings)
+
+        if (keyboardLayoutSetting == "graffiti") {
+            val spacer = View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1.0f)
+            }
+            toolbarContainer.addView(spacer)
+
+            val btnHelp = TextView(context).apply {
+                text = "🖊 ヘルプ"
+                textSize = 14f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(colors.candidateText)
+                setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    GraffitiHelpDialog.show(this, listener?.isDarkTheme() == true)
+                }
+            }
+            toolbarContainer.addView(btnHelp)
+        }
+    }
+
     private fun buildViewHierarchy() {
         val colors = getThemeColors()
         updateThemeColors()
@@ -209,19 +253,7 @@ class KarukanInputView @JvmOverloads constructor(
             visibility = VISIBLE
         }
 
-        val btnSettings = TextView(context).apply {
-            text = "⚙️ 設定"
-            textSize = 14f
-            gravity = android.view.Gravity.CENTER
-            setTextColor(colors.candidateText)
-            setPadding(dpToPx(12f), dpToPx(6f), dpToPx(12f), dpToPx(6f))
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                listener?.openSettingsActivity()
-            }
-        }
-        toolbarContainer.addView(btnSettings)
+        updateToolbarContent()
 
         // 2b. 1行変換候補バー領域 (文字入力中・変換候補存在時に表示)
         candidateBarContainer = LinearLayout(context).apply {
@@ -378,10 +410,12 @@ class KarukanInputView @JvmOverloads constructor(
     fun setupKeyboardLayout(layoutName: String, forceRebuild: Boolean = false) {
         if (!forceRebuild && ::mainKeyboardContainer.isInitialized && keyboardLayoutSetting == layoutName) {
             updateThemeColors()
+            updateToolbarContent()
             return
         }
         this.keyboardLayoutSetting = layoutName
         updateThemeColors()
+        updateToolbarContent()
 
         val activeListener = listener ?: return
         val builder = KeyboardLayoutBuilder(
@@ -437,6 +471,8 @@ class KarukanInputView @JvmOverloads constructor(
         val colors = getThemeColors()
         val showAnnotations = listener?.getSettings()?.isShowCandidateAnnotationsEnabled ?: true
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        val showSoftFloating = listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true
+        val useFloating = isHardKb || (!isHardKb && showSoftFloating)
 
         if (hiragana.isEmpty() || candidates.isEmpty()) {
             collapseCandidates()
@@ -455,7 +491,7 @@ class KarukanInputView @JvmOverloads constructor(
             return
         }
 
-        if (isHardKb) {
+        if (useFloating) {
             showToolbar()
             val floatingFlow = floatingOverlay.getOrCreateCandidateFlowLayout()
             CandidateRenderer.render(
@@ -634,7 +670,9 @@ class KarukanInputView @JvmOverloads constructor(
             candidateFlowLayout.removeAllViews()
         }
         floatingOverlay.candidateFlowLayout?.removeAllViews()
-        if (listener?.isHardKeyboardConnected() == true) {
+        val isHardKb = listener?.isHardKeyboardConnected() == true
+        val showSoftFloating = listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true
+        if (isHardKb || showSoftFloating) {
             updateFloatingTooltipOverlay(modeText)
         }
     }
@@ -743,6 +781,8 @@ class KarukanInputView @JvmOverloads constructor(
         }
 
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        val showSoftFloating = listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true
+        val useFloating = isHardKb || (!isHardKb && showSoftFloating)
         val isIntegrated = listener?.isIntegratedHardKeyboardConnected() ?: false
         if (isHardKb && !isIntegrated) {
             mainKeyboardContainer.visibility = GONE
@@ -751,19 +791,19 @@ class KarukanInputView @JvmOverloads constructor(
         }
 
         val isStatusBarEnabled = listener?.getSettings()?.isShowInputStatusBarEnabled ?: true
-        val statusVisibility = if (isHardKb || !isStatusBarEnabled) GONE else VISIBLE
+        val statusVisibility = if (useFloating || !isStatusBarEnabled) GONE else VISIBLE
 
         if (::composingTextView.isInitialized) {
             composingTextView.visibility = statusVisibility
         }
 
-        if (isHardKb || lastCandidates.isEmpty()) {
+        if (useFloating || lastCandidates.isEmpty()) {
             showToolbar()
         } else {
             showCandidateBar()
         }
 
-        if (!isHardKb) {
+        if (!useFloating) {
             dismissFloatingCandidates()
         }
     }

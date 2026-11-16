@@ -20,8 +20,10 @@ class FloatingCandidateOverlay(
     private val dpToPx: (Float) -> Int,
     private val getThemeColors: () -> ThemeColors,
     private val getAnchorView: () -> View?,
+    private val getInputView: () -> View? = { null },
     private val isHardKeyboardConnected: () -> Boolean,
-    private val isShowFloatingWindowEnabled: () -> Boolean
+    private val isShowFloatingWindowEnabled: () -> Boolean,
+    private val isShowFloatingWindowOnSoftKeyboardEnabled: () -> Boolean
 ) {
 
     private var popupWindow: PopupWindow? = null
@@ -87,6 +89,7 @@ class FloatingCandidateOverlay(
             isFocusable = false
             isClippingEnabled = false
             elevation = dpToPx(8f).toFloat()
+            animationStyle = android.R.style.Animation
         }
     }
 
@@ -106,9 +109,11 @@ class FloatingCandidateOverlay(
         cursorYTop: Float
     ) {
         val hardKb = isHardKeyboardConnected()
+        val showSoftFloating = isShowFloatingWindowOnSoftKeyboardEnabled()
         val showWindow = isShowFloatingWindowEnabled()
 
-        val hasCandidates = hardKb && showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
+        val shouldShowFloating = hardKb || showSoftFloating
+        val hasCandidates = shouldShowFloating && showWindow && ((candidateFlowLayout?.childCount ?: 0) > 0)
 
         if (!hasCandidates) {
             dismiss()
@@ -137,6 +142,24 @@ class FloatingCandidateOverlay(
         val displayMetrics = context.resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
+
+        val inputView = getInputView()
+        val inputViewLoc = IntArray(2)
+        val inputViewTopY: Int
+        if (inputView != null && inputView.isShown) {
+            inputView.getLocationOnScreen(inputViewLoc)
+            inputViewTopY = if (inputViewLoc[1] > 0) inputViewLoc[1] else (screenHeight - dpToPx(280f))
+        } else {
+            val anchor = getAnchorView()
+            if (anchor != null && anchor.isShown) {
+                anchor.getLocationOnScreen(inputViewLoc)
+                inputViewTopY = if (inputViewLoc[1] > 0) inputViewLoc[1] else (screenHeight - dpToPx(280f))
+            } else {
+                inputViewTopY = screenHeight - dpToPx(280f)
+            }
+        }
+
+        val maxBottomY = minOf(inputViewTopY - dpToPx(8f), screenHeight - dpToPx(8f))
 
         val singleRowHeight = dpToPx(34f)
         val rowGap = dpToPx(6f)
@@ -175,12 +198,14 @@ class FloatingCandidateOverlay(
             screenX = dpToPx(16f)
             screenX = screenX.coerceIn(dpToPx(16f), maxOf(dpToPx(16f), screenWidth - popupWidth - dpToPx(16f)))
 
-            screenY = cursorYBottom.toInt() + dpToPx(4f)
-            if (screenY + popupHeight > screenHeight - dpToPx(8f)) {
+            val preferredY = cursorYBottom.toInt() + dpToPx(4f)
+            if (preferredY + popupHeight <= maxBottomY) {
+                screenY = preferredY
+            } else {
                 screenY = if (!cursorYTop.isNaN()) {
                     cursorYTop.toInt() - popupHeight - dpToPx(4f)
                 } else {
-                    screenHeight - popupHeight - dpToPx(8f)
+                    cursorYBottom.toInt() - popupHeight - dpToPx(4f)
                 }
             }
         } else {
@@ -195,7 +220,7 @@ class FloatingCandidateOverlay(
             }
         }
 
-        screenY = maxOf(0, screenY)
+        screenY = maxOf(dpToPx(8f), minOf(screenY, maxBottomY - popupHeight))
 
         if (popup.isShowing &&
             kotlin.math.abs(lastX - screenX) < 3 &&

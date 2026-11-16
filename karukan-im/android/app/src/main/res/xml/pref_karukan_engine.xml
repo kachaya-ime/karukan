@@ -43,7 +43,7 @@
             app:useSimpleSummaryProvider="true" />
 
         <ListPreference
-            android:defaultValue="300"
+            android:defaultValue="100"
             android:entries="@array/pref_max_latency_entries"
             android:entryValues="@array/pref_max_latency_values"
             android:key="pref_max_latency_ms"

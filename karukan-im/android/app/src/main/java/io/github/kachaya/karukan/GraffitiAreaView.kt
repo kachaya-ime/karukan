@@ -19,8 +19,7 @@ import android.view.View
 class GraffitiAreaView(
     context: Context,
     private val isDarkSupplier: () -> Boolean,
-    private val onStrokeRecognized: (GraffitiStrokeRecognizer.RecognitionResult) -> Unit,
-    private val onStrokeHelpRequested: () -> Unit
+    private val onStrokeRecognized: (GraffitiStrokeRecognizer.RecognitionResult, Boolean) -> Unit
 ) : View(context) {
 
     // ---------------------------------------------------------------------------------------------
@@ -30,6 +29,7 @@ class GraffitiAreaView(
     private val currentPoints = mutableListOf<GraffitiStrokeRecognizer.Point>()
     private var isShiftMode: Boolean = false
     private var isCapsMode: Boolean = false
+    private var isCtrlMode: Boolean = false
 
     private val strokePath = Path()
     private val recognitionPath = Path()
@@ -62,15 +62,6 @@ class GraffitiAreaView(
         textAlign = Paint.Align.LEFT
     }
 
-    private val helpButtonBounds = RectF()
-    private val helpButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-    private val helpTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 56f
-        textAlign = Paint.Align.CENTER
-    }
-
     init {
         isClickable = true
         isFocusable = true
@@ -80,7 +71,15 @@ class GraffitiAreaView(
         GraffitiStrokeRecognizer.isPunctuationMode = false
         isShiftMode = false
         isCapsMode = false
+        isCtrlMode = false
         invalidate()
+    }
+
+    fun setCtrlMode(enabled: Boolean) {
+        if (isCtrlMode != enabled) {
+            isCtrlMode = enabled
+            invalidate()
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -112,19 +111,15 @@ class GraffitiAreaView(
         } else if (isShiftMode) {
             modeText += "[SHIFT] "
         }
+        if (isCtrlMode) {
+            modeText += "[CTRL] "
+        }
         if (GraffitiStrokeRecognizer.isPunctuationMode) {
             modeText += "[PUNC •] "
         }
         if (modeText.isNotEmpty()) {
             canvas.drawText(modeText, 24f, 44f, modeIndicatorPaint)
         }
-
-        val btnW = 112f
-        val btnH = 112f
-        helpButtonBounds.set(width - btnW - 16f, 16f, width - 16f, 16f + btnH)
-        helpButtonPaint.color = colors.btnHelpBg
-        helpTextPaint.color = colors.textColor
-        canvas.drawText("?", helpButtonBounds.centerX(), helpButtonBounds.centerY() + 20f, helpTextPaint)
 
         if (currentPoints.isNotEmpty()) {
             strokePaint.color = colors.graffitiStroke
@@ -147,11 +142,6 @@ class GraffitiAreaView(
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (helpButtonBounds.contains(x, y)) {
-                    onStrokeHelpRequested()
-                    return true
-                }
-
                 currentPoints.clear()
                 strokePath.reset()
                 strokePath.moveTo(x, y)
@@ -225,11 +215,12 @@ class GraffitiAreaView(
 
             is GraffitiStrokeRecognizer.RecognitionResult.CharResult -> {
                 var char = result.char
-                if (isCapsMode || isShiftMode) {
+                val isShiftActive = isCapsMode || isShiftMode
+                if (isShiftActive) {
                     char = char.uppercase()
                     isShiftMode = false
                 }
-                onStrokeRecognized(GraffitiStrokeRecognizer.RecognitionResult.CharResult(char))
+                onStrokeRecognized(GraffitiStrokeRecognizer.RecognitionResult.CharResult(char), isShiftActive)
             }
 
             is GraffitiStrokeRecognizer.RecognitionResult.None -> {
@@ -237,7 +228,7 @@ class GraffitiAreaView(
             }
 
             else -> {
-                onStrokeRecognized(result)
+                onStrokeRecognized(result, false)
             }
         }
     }
