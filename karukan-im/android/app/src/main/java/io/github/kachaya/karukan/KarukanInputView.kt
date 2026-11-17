@@ -37,6 +37,7 @@ class KarukanInputView @JvmOverloads constructor(
         fun getEngine(): KarukanEngine
         fun onCandidateSelected(hiragana: String, candidate: String, index: Int)
         fun openSettingsActivity()
+        fun commitEmojiDirectly(emoji: String)
     }
 
     var listener: Listener? = null
@@ -59,7 +60,7 @@ class KarukanInputView @JvmOverloads constructor(
     lateinit var composingTextView: TextView
         private set
 
-    private lateinit var candidateSlotContainer: FrameLayout
+    private lateinit var topBarContainer: FrameLayout
     private lateinit var toolbarContainer: LinearLayout
     private lateinit var candidateBarContainer: LinearLayout
     private lateinit var candidateBarContentLayout: LinearLayout
@@ -79,8 +80,12 @@ class KarukanInputView @JvmOverloads constructor(
     lateinit var mainKeyboardContainer: View
         private set
     private var keyboardLayoutBuilder: KeyboardLayoutBuilder? = null
-    private lateinit var emojiPaletteContainer: LinearLayout
-    private lateinit var emojiPaletteController: EmojiPaletteController
+
+    var isEmojiPaletteVisible: Boolean = false
+        private set
+    private var emojiPaletteController: EmojiPaletteController? = null
+    private var emojiPaletteContainer: View? = null
+    private var emojiHeaderView: View? = null
 
     // フローティングオーバーレイ (物理キーボード接続時用)
     private val floatingOverlay by lazy {
@@ -240,7 +245,7 @@ class KarukanInputView @JvmOverloads constructor(
 
         // 2. ツールバー / 1行変換候補バー 重ね合わせスロット容器
         val slotHeight = getKeyHeight()
-        candidateSlotContainer = FrameLayout(context).apply {
+        topBarContainer = FrameLayout(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, slotHeight)
         }
 
@@ -250,7 +255,6 @@ class KarukanInputView @JvmOverloads constructor(
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dpToPx(4f), 0, dpToPx(4f), 0)
             setBackgroundColor(colors.toolbarBg)
-            visibility = VISIBLE
         }
 
         updateToolbarContent()
@@ -261,7 +265,6 @@ class KarukanInputView @JvmOverloads constructor(
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(dpToPx(4f), 0, dpToPx(4f), 0)
             setBackgroundColor(colors.bg)
-            visibility = GONE
         }
 
         candidateScrollView = HorizontalScrollView(context).apply {
@@ -300,15 +303,6 @@ class KarukanInputView @JvmOverloads constructor(
             LayoutParams(slotHeight, LayoutParams.MATCH_PARENT)
         )
 
-        candidateSlotContainer.addView(
-            toolbarContainer,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        )
-        candidateSlotContainer.addView(
-            candidateBarContainer,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        )
-
         // 3. 複数行候補展開領域
         candidateExpandedContainer = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -336,24 +330,11 @@ class KarukanInputView @JvmOverloads constructor(
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         )
 
-        // 4. 絵文字・記号パレットコンテナ
-        val activeEngine = listener?.getEngine() ?: KarukanEngine(context)
-        emojiPaletteController = EmojiPaletteController(
-            context = context,
-            engine = activeEngine,
-            isDarkThemeSupplier = { listener?.isDarkTheme() == true },
-            keyboardHeightPxSupplier = { listener?.getKeyboardHeightPx() ?: dpToPx(240f) },
-            onEmojiSelected = { emoji -> listener?.onKeyPress(emoji) },
-            onCloseRequested = { hideEmojiPalette() }
-        )
-        emojiPaletteContainer = emojiPaletteController.createView()
-
         addView(composingTextView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        addView(candidateSlotContainer, LayoutParams(LayoutParams.MATCH_PARENT, getKeyHeight()))
+        addView(topBarContainer, LayoutParams(LayoutParams.MATCH_PARENT, getKeyHeight()))
         addView(candidateExpandedContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        addView(emojiPaletteContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
-        showToolbar()
+        updateTopBarContent()
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -367,24 +348,110 @@ class KarukanInputView @JvmOverloads constructor(
         return totalH / provider.rowCount
     }
 
-    private fun updateCandidateSlotHeight() {
-        if (!::candidateSlotContainer.isInitialized) return
+    private fun updateTopBarHeight() {
+        if (!::topBarContainer.isInitialized) return
         val kh = getKeyHeight()
-        val lp = candidateSlotContainer.layoutParams
+        val lp = topBarContainer.layoutParams
         if (lp != null && lp.height != kh) {
             lp.height = kh
-            candidateSlotContainer.layoutParams = lp
+            topBarContainer.layoutParams = lp
         }
     }
 
-    private fun showToolbar() {
-        updateThemeColors()
-        updateCandidateSlotHeight()
-        if (::toolbarContainer.isInitialized) {
-            toolbarContainer.visibility = VISIBLE
+    /**
+     * トップバーの表示状態を一括決定・更新する一元化メソッド。
+     * - 絵文字パレット表示中 → 絵文字カテゴリーバー
+     * - 文字入力キーボード表示中 & 入力中 (インライン候補あり) → 1行変換候補バー
+     * - 文字入力キーボード表示中 & 未入力状態 (またはフローティング候補時) → 設定ツールバー
+     */
+    fun updateTopBarContent() {
+        val isHardKb = listener?.isHardKeyboardConnected() ?: false
+        val showSoftFloating = listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true
+        val useFloating = isHardKb || (!isHardKb && showSoftFloating)
+
+        if (isEmojiPaletteVisible && emojiHeaderView != null) {
+            showEmojiHeaderInternal()
+        } else if (!useFloating && lastCandidates.isNotEmpty()) {
+            showCandidateBarInternal()
+        } else {
+            showToolbarInternal()
         }
-        if (::candidateBarContainer.isInitialized) {
-            candidateBarContainer.visibility = GONE
+    }
+
+    private fun getOrCreateEmojiPaletteContainer(): View {
+        if (emojiPaletteContainer != null) return emojiPaletteContainer!!
+        val activeListener = listener
+        val activeEngine = activeListener?.getEngine() ?: KarukanEngine(context)
+        val controller = EmojiPaletteController(
+            context = context,
+            engine = activeEngine,
+            isDarkThemeSupplier = { activeListener?.isDarkTheme() == true },
+            keyboardHeightPxSupplier = { activeListener?.getKeyboardHeightPx() ?: dpToPx(260f) },
+            keyButtonHeightSupplier = { (activeListener?.getKeyboardHeightPx() ?: dpToPx(260f)) / 5 },
+            bottomActionSpecs = listOf(
+                KeySpec("×", KeyType.NORMAL),
+                KeySpec("←", KeyType.DPAD_LEFT, repeatable = true),
+                KeySpec("↓", KeyType.DPAD_DOWN, repeatable = true),
+                KeySpec("↑", KeyType.DPAD_UP, repeatable = true),
+                KeySpec("→", KeyType.DPAD_RIGHT, repeatable = true),
+                KeySpec("⌫", KeyType.BACKSPACE, repeatable = true),
+                KeySpec("", KeyType.ENTER, R.drawable.outline_send_24)
+            ),
+            createKeyButton = { spec ->
+                val isDark = activeListener?.isDarkTheme() == true
+                val rowHeight = (activeListener?.getKeyboardHeightPx() ?: dpToPx(260f)) / 5
+                KeyButton(
+                    context = context,
+                    spec = spec,
+                    keyHeight = rowHeight,
+                    keyTextColor = getThemeColors().keyText,
+                    isDark = isDark,
+                    onFeedback = { activeListener?.onKeyFeedback() }
+                ).apply {
+                    updateBackgroundType(KeyBackgroundType.ACTION, isDark)
+                }
+            },
+            setupRepeatableTouchListener = { btn ->
+                btn.setOnClickListener {
+                    when (btn.currentType) {
+                        KeyType.NORMAL -> toggleEmojiPalette()
+                        KeyType.DPAD_LEFT -> activeListener?.onDpadLeft()
+                        KeyType.DPAD_DOWN -> activeListener?.onDpadDown()
+                        KeyType.DPAD_UP -> activeListener?.onDpadUp()
+                        KeyType.DPAD_RIGHT -> activeListener?.onDpadRight()
+                        KeyType.BACKSPACE -> activeListener?.onBackspace()
+                        KeyType.ENTER -> commitSelectedEmoji()
+                        else -> {}
+                    }
+                }
+            },
+            onEmojiSelected = { emoji -> activeListener?.commitEmojiDirectly(emoji) },
+            onCloseRequested = { toggleEmojiPalette() },
+            onLeft = { activeListener?.onDpadLeft() },
+            onDown = { activeListener?.onDpadDown() },
+            onUp = { activeListener?.onDpadUp() },
+            onRight = { activeListener?.onDpadRight() },
+            onBackspace = { activeListener?.onBackspace() },
+            onEnter = { commitSelectedEmoji() },
+            onFeedback = { activeListener?.onKeyFeedback() }
+        )
+        this.emojiPaletteController = controller
+        val containerView = controller.createView()
+        val headerView = controller.createHeaderView()
+        this.emojiHeaderView = headerView
+        this.emojiPaletteContainer = containerView
+        return containerView
+    }
+
+    private fun showToolbarInternal() {
+        updateThemeColors()
+        updateTopBarHeight()
+        topBarContainer.removeAllViews()
+        if (::toolbarContainer.isInitialized) {
+            topBarContainer.addView(
+                toolbarContainer,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            )
         }
         if (::expandButton.isInitialized) {
             expandButton.visibility = GONE
@@ -392,14 +459,15 @@ class KarukanInputView @JvmOverloads constructor(
         requestLayout()
     }
 
-    private fun showCandidateBar() {
+    private fun showCandidateBarInternal() {
         updateThemeColors()
-        updateCandidateSlotHeight()
-        if (::toolbarContainer.isInitialized) {
-            toolbarContainer.visibility = GONE
-        }
+        updateTopBarHeight()
+        topBarContainer.removeAllViews()
         if (::candidateBarContainer.isInitialized) {
-            candidateBarContainer.visibility = VISIBLE
+            topBarContainer.addView(
+                candidateBarContainer,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            )
         }
         if (::expandButton.isInitialized) {
             expandButton.visibility = VISIBLE
@@ -407,10 +475,33 @@ class KarukanInputView @JvmOverloads constructor(
         requestLayout()
     }
 
+    private fun showEmojiHeaderInternal() {
+        updateThemeColors()
+        updateTopBarHeight()
+        topBarContainer.removeAllViews()
+        if (emojiHeaderView != null) {
+            (emojiHeaderView!!.parent as? ViewGroup)?.removeView(emojiHeaderView)
+            topBarContainer.addView(
+                emojiHeaderView!!,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            )
+        }
+        if (::expandButton.isInitialized) {
+            expandButton.visibility = GONE
+        }
+        requestLayout()
+    }
+
+    fun onEmojiHeaderCreated(headerView: View) {
+        emojiHeaderView = headerView
+        updateTopBarContent()
+    }
+
     fun setupKeyboardLayout(layoutName: String, forceRebuild: Boolean = false) {
         if (!forceRebuild && ::mainKeyboardContainer.isInitialized && keyboardLayoutSetting == layoutName) {
             updateThemeColors()
             updateToolbarContent()
+            updateTopBarContent()
             return
         }
         this.keyboardLayoutSetting = layoutName
@@ -439,7 +530,7 @@ class KarukanInputView @JvmOverloads constructor(
 
         val keyboardView = builder.createContainerForLayout(layoutName)
         swapKeyboardContainer(keyboardView)
-        updateCandidateSlotHeight()
+        updateTopBarHeight()
         requestLayout()
         invalidate()
     }
@@ -453,7 +544,8 @@ class KarukanInputView @JvmOverloads constructor(
             removeView(mainKeyboardContainer)
         }
         mainKeyboardContainer = newContainer
-        addView(newContainer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        val lp = newContainer.layoutParams ?: LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+        addView(newContainer, lp)
         updateKeyboardLayoutVisibility()
         requestLayout()
         invalidate()
@@ -476,7 +568,6 @@ class KarukanInputView @JvmOverloads constructor(
 
         if (hiragana.isEmpty() || candidates.isEmpty()) {
             collapseCandidates()
-            showToolbar()
             candidateBarContentLayout.removeAllViews()
             if (::candidateScrollView.isInitialized) {
                 candidateScrollView.scrollTo(0, 0)
@@ -487,12 +578,14 @@ class KarukanInputView @JvmOverloads constructor(
             if (floatingOverlay.candidateFlowLayout != null) {
                 floatingOverlay.candidateFlowLayout?.removeAllViews()
             }
+            updateTopBarContent()
             updateFloatingOverlay(selectedIndex)
             return
         }
 
+        updateTopBarContent()
+
         if (useFloating) {
-            showToolbar()
             val floatingFlow = floatingOverlay.getOrCreateCandidateFlowLayout()
             CandidateRenderer.render(
                 container = floatingFlow,
@@ -512,8 +605,6 @@ class KarukanInputView @JvmOverloads constructor(
                 floatingOverlay.scrollToSelectedCandidate(selectedIndex)
             }
         } else {
-            showCandidateBar()
-
             CandidateRenderer.render(
                 container = candidateBarContentLayout,
                 candidates = candidates,
@@ -607,14 +698,12 @@ class KarukanInputView @JvmOverloads constructor(
         }
     }
 
-    fun clearCandidateBar(clearCacheText: Boolean = true) {
+    fun clearCandidateBar() {
         collapseCandidates()
-        if (clearCacheText) {
-            lastHiragana = ""
-            lastCandidates = emptyList()
-            lastSelectedIndex = -1
-        }
-        showToolbar()
+        lastHiragana = ""
+        lastCandidates = emptyList()
+        lastSelectedIndex = -1
+        updateTopBarContent()
         candidateBarContentLayout.removeAllViews()
         if (::candidateScrollView.isInitialized) {
             candidateScrollView.scrollTo(0, 0)
@@ -629,6 +718,20 @@ class KarukanInputView @JvmOverloads constructor(
     // ---------------------------------------------------------------------------------------------
     // Region: Mode Management & Panel Expand
     // ---------------------------------------------------------------------------------------------
+
+    fun updateEditorInfo(info: android.view.inputmethod.EditorInfo?) {
+        if (::mainKeyboardContainer.isInitialized && mainKeyboardContainer is ViewGroup) {
+            (mainKeyboardContainer as ViewGroup).children.forEach { row ->
+                if (row is ViewGroup) {
+                    row.children.forEach { btn ->
+                        if (btn is KeyButton) {
+                            btn.updateEditorInfo(info)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fun setInputMode(inputMode: InputMode) {
         this.inputModeState = inputMode
@@ -653,7 +756,7 @@ class KarukanInputView @JvmOverloads constructor(
             InputMode.SYMBOL -> "sym"
         }
         if (::composingTextView.isInitialized) {
-            composingTextView.text = modeText
+            composingTextView.text = ""
         }
         collapseCandidates()
         if (inputMode != InputMode.HIRAGANA) {
@@ -661,7 +764,7 @@ class KarukanInputView @JvmOverloads constructor(
             lastCandidates = emptyList()
             lastSelectedIndex = -1
         }
-        showToolbar()
+        updateTopBarContent()
         candidateBarContentLayout.removeAllViews()
         if (::candidateScrollView.isInitialized) {
             candidateScrollView.scrollTo(0, 0)
@@ -694,10 +797,6 @@ class KarukanInputView @JvmOverloads constructor(
     fun expandCandidates() {
         if (isCandidateExpanded || lastCandidates.isEmpty()) return
         isCandidateExpanded = true
-
-        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
-            emojiPaletteController.hide(mainKeyboardContainer)
-        }
 
         val kbHeight = listener?.getKeyboardHeightPx() ?: 0
         if (kbHeight > 0 && ::candidateExpandedContainer.isInitialized) {
@@ -742,13 +841,6 @@ class KarukanInputView @JvmOverloads constructor(
         requestLayout()
     }
 
-    fun hideEmojiPalette() {
-        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized && emojiPaletteController.isVisible) {
-            emojiPaletteController.hide(mainKeyboardContainer)
-            requestLayout()
-        }
-    }
-
     fun resetKeyboardState() {
         hideEmojiPalette()
         collapseCandidates()
@@ -758,38 +850,79 @@ class KarukanInputView @JvmOverloads constructor(
 
     fun toggleEmojiPalette() {
         collapseCandidates()
-        if (::emojiPaletteController.isInitialized && ::mainKeyboardContainer.isInitialized) {
-            val wasVisible = emojiPaletteController.isVisible
-            val isHardKb = listener?.isHardKeyboardConnected() ?: false
-            emojiPaletteController.toggle(
-                mainKeyboardContainer,
-                isHardKeyboard = isHardKb,
-                symbolMode = (inputModeState != InputMode.HIRAGANA)
-            )
-            if (wasVisible) {
-                updateKeyboardLayoutVisibility()
-            }
-            requestLayout()
+        isEmojiPaletteVisible = !isEmojiPaletteVisible
+        updateKeyboardLayoutVisibility()
+    }
+
+    fun hideEmojiPalette() {
+        if (isEmojiPaletteVisible) {
+            isEmojiPaletteVisible = false
+            updateKeyboardLayoutVisibility()
         }
+    }
+
+    fun selectNextEmojiCategory() {
+        emojiPaletteController?.selectNextCategory()
+    }
+
+    fun selectPreviousEmojiCategory() {
+        emojiPaletteController?.selectPreviousCategory()
+    }
+
+    fun moveEmojiSelection(dx: Int, dy: Int) {
+        emojiPaletteController?.moveGridSelection(dx, dy)
+    }
+
+    fun commitSelectedEmoji() {
+        emojiPaletteController?.commitSelectedEmoji()
     }
 
     fun updateKeyboardLayoutVisibility() {
         if (!::mainKeyboardContainer.isInitialized) return
         if (isCandidateExpanded) {
             mainKeyboardContainer.visibility = GONE
+            emojiPaletteContainer?.visibility = GONE
             return
+        }
+
+        if (isEmojiPaletteVisible) {
+            mainKeyboardContainer.visibility = GONE
+            val palette = getOrCreateEmojiPaletteContainer()
+            val isHardKb = listener?.isHardKeyboardConnected() == true
+            val fullKbHeight = listener?.getKeyboardHeightPx() ?: (if (mainKeyboardContainer.height > 0) mainKeyboardContainer.height else dpToPx(260f))
+            val singleRowHeight = fullKbHeight / 5
+            val targetHeight = if (isHardKb) singleRowHeight * 4 else fullKbHeight
+
+            var lp = palette.layoutParams
+            if (lp == null) {
+                lp = LayoutParams(LayoutParams.MATCH_PARENT, targetHeight)
+            } else if (lp.height != targetHeight) {
+                lp.height = targetHeight
+            }
+            palette.layoutParams = lp
+
+            if (palette.parent == null) {
+                addView(palette, lp)
+            }
+            palette.visibility = VISIBLE
+            emojiPaletteController?.show(
+                isHardKeyboard = isHardKb,
+                symbolMode = false
+            )
+        } else {
+            emojiPaletteContainer?.visibility = GONE
+            val isHardKb = listener?.isHardKeyboardConnected() ?: false
+            val isIntegrated = listener?.isIntegratedHardKeyboardConnected() ?: false
+            if (isHardKb && !isIntegrated) {
+                mainKeyboardContainer.visibility = GONE
+            } else {
+                mainKeyboardContainer.visibility = VISIBLE
+            }
         }
 
         val isHardKb = listener?.isHardKeyboardConnected() ?: false
         val showSoftFloating = listener?.getSettings()?.isShowFloatingCandidateWindowOnSoftKeyboardEnabled == true
         val useFloating = isHardKb || (!isHardKb && showSoftFloating)
-        val isIntegrated = listener?.isIntegratedHardKeyboardConnected() ?: false
-        if (isHardKb && !isIntegrated) {
-            mainKeyboardContainer.visibility = GONE
-        } else {
-            mainKeyboardContainer.visibility = VISIBLE
-        }
-
         val isStatusBarEnabled = listener?.getSettings()?.isShowInputStatusBarEnabled ?: true
         val statusVisibility = if (useFloating || !isStatusBarEnabled) GONE else VISIBLE
 
@@ -797,11 +930,7 @@ class KarukanInputView @JvmOverloads constructor(
             composingTextView.visibility = statusVisibility
         }
 
-        if (useFloating || lastCandidates.isEmpty()) {
-            showToolbar()
-        } else {
-            showCandidateBar()
-        }
+        updateTopBarContent()
 
         if (!useFloating) {
             dismissFloatingCandidates()

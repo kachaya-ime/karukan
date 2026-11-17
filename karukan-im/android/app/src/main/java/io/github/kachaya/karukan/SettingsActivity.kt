@@ -18,6 +18,8 @@ import androidx.preference.PreferenceFragmentCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Karukan IME の設定画面アクティビティ
@@ -101,6 +103,18 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
+    private val exportSettingsLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri != null) {
+            exportSettingsToUri(uri)
+        }
+    }
+
+    private val importSettingsLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            importSettingsFromUri(uri)
+        }
+    }
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.pref_karukan, rootKey)
 
@@ -158,6 +172,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("pref_key_shortcut_management")?.setOnPreferenceClickListener {
             val intent = Intent(requireContext(), KeyShortcutListActivity::class.java)
             startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_export_settings")?.setOnPreferenceClickListener {
+            exportSettingsLauncher.launch("karukan_settings_backup.json")
+            true
+        }
+
+        findPreference<Preference>("pref_import_settings")?.setOnPreferenceClickListener {
+            importSettingsLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
             true
         }
     }
@@ -251,6 +275,85 @@ class SettingsFragment : PreferenceFragmentCompat() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "${getString(R.string.import_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun exportSettingsToUri(uri: Uri) {
+        val context = requireContext()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                val allEntries = prefs.all
+                val jsonObject = JSONObject()
+                for ((key, value) in allEntries) {
+                    if (value is Set<*>) {
+                        val jsonArray = JSONArray()
+                        for (item in value) {
+                            jsonArray.put(item)
+                        }
+                        jsonObject.put(key, jsonArray)
+                    } else {
+                        jsonObject.put(key, value)
+                    }
+                }
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(jsonObject.toString(2).toByteArray(Charsets.UTF_8))
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.export_settings_success, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.export_settings_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun importSettingsFromUri(uri: Uri) {
+        val context = requireContext()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } ?: throw IllegalStateException("ファイルを開けませんでした")
+
+                val jsonObject = JSONObject(jsonString)
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                val editor = prefs.edit()
+                editor.clear()
+
+                val keys = jsonObject.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (jsonObject.isNull(key)) continue
+                    val value = jsonObject.get(key)
+                    when (value) {
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Double -> editor.putFloat(key, value.toFloat())
+                        is String -> editor.putString(key, value)
+                        is JSONArray -> {
+                            val set = mutableSetOf<String>()
+                            for (i in 0 until value.length()) {
+                                set.add(value.getString(i))
+                            }
+                            editor.putStringSet(key, set)
+                        }
+                    }
+                }
+                editor.apply()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.import_settings_success, Toast.LENGTH_SHORT).show()
+                    activity?.recreate()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.import_settings_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }

@@ -7,7 +7,7 @@ data class KarukanSettings(
     // 基本変換設定
     val modelName: String = "jinen-v2-xsmall-Q8_0.gguf",
     val isLiveConversionEnabled: Boolean = true,
-    val liveConversionDebounceMs: Int = 100,
+    val liveConversionDebounceMs: Int = 0,
     val isShowCandidateAnnotationsEnabled: Boolean = true,
     val numCandidates: Int = 9,
     val punctuationStyle: String = "kuten_touten",
@@ -53,7 +53,7 @@ data class KarukanSettings(
     val isShowFloatingStatusTextEnabled: Boolean = false,
     val isShowPhysicalKeyboardSuggestCandidatesEnabled: Boolean = true,
     val keyboardHeight: String = "medium",
-    val keyboardTheme: String = "dark",
+    val keyboardTheme: String = "system",
     val physicalKeyboardLayout: String = "jis109",
 
     // カスタムキーショートカット設定 JSON

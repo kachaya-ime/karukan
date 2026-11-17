@@ -63,9 +63,12 @@ interface KeyboardLayoutProvider {
     /** レイアウト識別名 ("qwerty", "tablet", "builtin", "niko", "graffiti" 等) */
     val layoutId: String
 
-    /** 高さ計算等に使用するキーボード行数 (例: Standard=5, Graffiti=4) */
+    /** 高さ計算等に使用するキーボード行数 (例: Standard=5, Builtin=2, Graffiti=4) */
     val rowCount: Int
         get() = 5
+
+    /** 指定された Context (AssetManager) から動的にキーボード行数を取得します */
+    fun getRowCount(context: Context): Int = rowCount
 
     /** キーボードコンテナ (LinearLayout) を構築します */
     fun createContainer(params: KeyboardCreateParams): LinearLayout

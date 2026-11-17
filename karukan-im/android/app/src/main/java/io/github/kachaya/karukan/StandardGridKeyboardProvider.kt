@@ -8,9 +8,13 @@ import android.widget.LinearLayout
  */
 class StandardGridKeyboardProvider(
     override val layoutId: String,
-    override val rowCount: Int = 5,
-    private val layoutSpecSupplier: () -> List<List<KeySpec>>
+    private val layoutSpecSupplier: (android.content.Context) -> List<List<KeySpec>>
 ) : KeyboardLayoutProvider {
+
+    override fun getRowCount(context: android.content.Context): Int {
+        val count = layoutSpecSupplier(context).size
+        return if (count > 0) count else 5
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Region: Properties & Setup
@@ -39,7 +43,7 @@ class StandardGridKeyboardProvider(
         }
 
         val allButtons = mutableListOf<KeyButton>()
-        val layoutSpec = layoutSpecSupplier()
+        val layoutSpec = layoutSpecSupplier(context)
 
         for (rowSpec in layoutSpec) {
             val rowLayout = LinearLayout(context).apply {

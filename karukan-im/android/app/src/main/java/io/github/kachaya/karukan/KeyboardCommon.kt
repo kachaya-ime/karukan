@@ -22,6 +22,49 @@ import androidx.core.graphics.toColorInt
 import androidx.core.view.ViewCompat
 
 // -------------------------------------------------------------------------------------------------
+// Region: Key Icon Resolver
+// -------------------------------------------------------------------------------------------------
+
+object KeyIconResolver {
+    fun getDrawableResId(
+        context: Context,
+        type: KeyType,
+        editorInfo: android.view.inputmethod.EditorInfo?,
+        defaultResId: Int = 0
+    ): Int {
+        if (defaultResId != 0 && type != KeyType.ENTER) {
+            return defaultResId
+        }
+        return when (type) {
+            KeyType.BACKSPACE -> R.drawable.outline_backspace_24
+            KeyType.SPACE -> R.drawable.outline_space_bar_24
+            KeyType.ENTER -> getEnterKeyDrawableResId(editorInfo)
+            else -> defaultResId
+        }
+    }
+
+    fun getEnterKeyDrawableResId(editorInfo: android.view.inputmethod.EditorInfo?): Int {
+        if (editorInfo == null) return R.drawable.outline_keyboard_return_24
+
+        val inputType = editorInfo.inputType
+        val isMultiline = (inputType and android.view.inputmethod.EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+
+        if (isMultiline) {
+            return R.drawable.outline_keyboard_return_24
+        }
+
+        return when (editorInfo.imeOptions and android.view.inputmethod.EditorInfo.IME_MASK_ACTION) {
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH -> R.drawable.outline_search_24
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEND -> R.drawable.outline_send_24
+            android.view.inputmethod.EditorInfo.IME_ACTION_GO -> R.drawable.outline_arrow_circle_right_24
+            android.view.inputmethod.EditorInfo.IME_ACTION_NEXT -> R.drawable.outline_navigate_next_24
+            android.view.inputmethod.EditorInfo.IME_ACTION_DONE -> R.drawable.outline_done_24
+            else -> R.drawable.outline_keyboard_return_24
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
 // Region: Enums & Types
 // ---------------------------------------------------------------------------------------------
 
@@ -457,6 +500,8 @@ class KeyButton(
     }
 
     private var isGuideMode: Boolean = false
+    var activeDrawableResId: Int = KeyIconResolver.getDrawableResId(context, currentType, null, spec.drawableResId)
+        private set
 
     init {
         isClickable = true
@@ -490,6 +535,14 @@ class KeyButton(
         }
     }
 
+    fun updateEditorInfo(info: android.view.inputmethod.EditorInfo?) {
+        val newResId = KeyIconResolver.getDrawableResId(context, currentType, info, spec.drawableResId)
+        if (activeDrawableResId != newResId) {
+            activeDrawableResId = newResId
+            invalidate()
+        }
+    }
+
     fun setGuideText(guideText: String) {
         text = guideText
         isGuideMode = true
@@ -507,8 +560,9 @@ class KeyButton(
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (spec.drawableResId != 0 && !isGuideMode) {
-            drawDrawable(canvas)
+        val effectiveResId = if (activeDrawableResId != 0) activeDrawableResId else spec.drawableResId
+        if (effectiveResId != 0 && !isGuideMode) {
+            drawDrawable(canvas, effectiveResId)
             return
         }
 
@@ -524,8 +578,7 @@ class KeyButton(
         }
     }
 
-    private fun drawDrawable(canvas: Canvas) {
-        val resId = spec.drawableResId
+    private fun drawDrawable(canvas: Canvas, resId: Int) {
         if (resId == 0) return
 
         val drawable = androidx.core.content.ContextCompat.getDrawable(context, resId)?.mutate() ?: return

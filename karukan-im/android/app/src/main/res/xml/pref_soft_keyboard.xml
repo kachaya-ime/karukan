@@ -20,7 +20,7 @@
             />
 
         <ListPreference
-            android:defaultValue="dark"
+            android:defaultValue="system"
             android:entries="@array/pref_keyboard_theme_entries"
             android:entryValues="@array/pref_keyboard_theme_values"
             android:key="pref_keyboard_theme"

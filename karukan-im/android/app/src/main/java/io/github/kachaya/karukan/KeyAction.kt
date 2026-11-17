@@ -64,4 +64,7 @@ sealed interface KeyAction {
 
     // Ctrl ショートカットアクション
     data class CtrlShortcut(val key: String) : KeyAction
+
+    // 直接コミットアクション
+    data class DirectCommit(val text: String) : KeyAction
 }

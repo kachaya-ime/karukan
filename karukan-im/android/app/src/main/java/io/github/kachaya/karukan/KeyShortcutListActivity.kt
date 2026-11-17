@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -180,23 +181,17 @@ class KeyShortcutAdapter(
 
         if (item.isReserved) {
             holder.tvStatusBadge.text = "固定"
-            if (isDark) {
-                badgeBg.setColor(0x3C4043.toInt())
-                holder.tvStatusBadge.setTextColor(0xFF9AA0A6.toInt())
-            } else {
-                badgeBg.setColor(0xFFE0E0E0.toInt())
-                holder.tvStatusBadge.setTextColor(0xFF5F6368.toInt())
-            }
+            val bgColorRes = if (isDark) R.color.badge_fixed_bg_dark else R.color.badge_fixed_bg
+            val textColorRes = if (isDark) R.color.badge_fixed_text_dark else R.color.badge_fixed_text
+            badgeBg.setColor(ContextCompat.getColor(context, bgColorRes))
+            holder.tvStatusBadge.setTextColor(ContextCompat.getColor(context, textColorRes))
             holder.itemView.alpha = 0.75f
         } else {
             holder.tvStatusBadge.text = "変更可能"
-            if (isDark) {
-                badgeBg.setColor(0x3300BCD4.toInt())
-                holder.tvStatusBadge.setTextColor(0xFF80DEEA.toInt())
-            } else {
-                badgeBg.setColor(0xFFE0F7FA.toInt())
-                holder.tvStatusBadge.setTextColor(0xFF01579B.toInt())
-            }
+            val bgColorRes = if (isDark) R.color.badge_mutable_bg_dark else R.color.badge_mutable_bg
+            val textColorRes = if (isDark) R.color.badge_mutable_text_dark else R.color.badge_mutable_text
+            badgeBg.setColor(ContextCompat.getColor(context, bgColorRes))
+            holder.tvStatusBadge.setTextColor(ContextCompat.getColor(context, textColorRes))
             holder.itemView.alpha = 1.0f
         }
         holder.tvStatusBadge.background = badgeBg

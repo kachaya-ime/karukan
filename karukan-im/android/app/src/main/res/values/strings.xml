@@ -21,4 +21,10 @@
     <string name="export_failed">学習データのバックアップに失敗しました</string>
     <string name="import_success">学習データを復元しました</string>
     <string name="import_failed">学習データの復元に失敗しました</string>
+    <string name="export_settings_title">設定のバックアップ</string>
+    <string name="import_settings_title">設定の復元</string>
+    <string name="export_settings_success">設定をバックアップしました</string>
+    <string name="export_settings_failed">設定のバックアップに失敗しました</string>
+    <string name="import_settings_success">設定を復元しました</string>
+    <string name="import_settings_failed">設定の復元に失敗しました</string>
 </resources>

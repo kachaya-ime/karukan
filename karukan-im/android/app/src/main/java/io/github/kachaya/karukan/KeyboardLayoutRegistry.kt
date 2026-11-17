@@ -14,20 +14,17 @@ object KeyboardLayoutRegistry {
 
     val qwertyProvider: KeyboardLayoutProvider = StandardGridKeyboardProvider(
         layoutId = "qwerty",
-        rowCount = 5,
-        layoutSpecSupplier = { QwertyKeyboardLayout.getLayoutSpec() }
+        layoutSpecSupplier = { context -> loadJsonLayoutSpec(context, "qwerty") }
     )
 
     val tabletProvider: KeyboardLayoutProvider = StandardGridKeyboardProvider(
         layoutId = "tablet",
-        rowCount = 5,
-        layoutSpecSupplier = { TabletKeyboardLayout.getLayoutSpec() }
+        layoutSpecSupplier = { context -> loadJsonLayoutSpec(context, "tablet") }
     )
 
     val builtinProvider: KeyboardLayoutProvider = StandardGridKeyboardProvider(
         layoutId = "builtin",
-        rowCount = 2,
-        layoutSpecSupplier = { BuiltinKeyboardLayout.getLayoutSpec() }
+        layoutSpecSupplier = { context -> loadJsonLayoutSpec(context, "builtin") }
     )
 
     val nikoProvider: KeyboardLayoutProvider = NikoKeyboardLayout
@@ -47,6 +44,13 @@ object KeyboardLayoutRegistry {
     // ---------------------------------------------------------------------------------------------
 
     /**
+     * JSON ファイルから指定されたレイアウト仕様を読み込みます。
+     */
+    fun loadJsonLayoutSpec(context: android.content.Context, layoutName: String): List<List<KeySpec>> {
+        return JsonKeyboardLayoutParser.parseFromAsset(context, "layouts/${layoutName}_layout.json")
+    }
+
+    /**
      * 指定されたレイアウト名に対応する KeyboardLayoutProvider を取得します。
      *
      * @param layoutName レイアウト名 ("qwerty", "tablet", "niko", "builtin", "graffiti" 等)
@@ -59,14 +63,16 @@ object KeyboardLayoutRegistry {
     /**
      * 指定されたレイアウト名に対応する基本レイアウト仕様（List<List<KeySpec>>）を取得します。
      */
-    fun getLayoutSpec(layoutName: String, isHiragana: Boolean = true, hasInput: Boolean = true): List<List<KeySpec>> {
-        return when (layoutName.lowercase(Locale.getDefault())) {
-            "builtin" -> BuiltinKeyboardLayout.getLayoutSpec()
-            "tablet" -> TabletKeyboardLayout.getLayoutSpec()
-            "niko" -> NikoKeyboardLayout.getLayoutSpec(hasInput, isHiragana)
-            "qwerty" -> QwertyKeyboardLayout.getLayoutSpec()
-            else -> QwertyKeyboardLayout.getLayoutSpec()
+    fun getLayoutSpec(layoutName: String, isHiragana: Boolean = true, hasInput: Boolean = true, context: android.content.Context? = null): List<List<KeySpec>> {
+        val normalized = layoutName.lowercase(Locale.getDefault())
+        if (normalized == "niko") {
+            return NikoKeyboardLayout.getLayoutSpec(hasInput, isHiragana)
         }
+        if (context != null) {
+            val targetName = if (normalized in listOf("qwerty", "tablet", "builtin")) normalized else "qwerty"
+            return loadJsonLayoutSpec(context, targetName)
+        }
+        return emptyList()
     }
 
     /**

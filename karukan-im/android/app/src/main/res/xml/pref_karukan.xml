@@ -120,7 +120,7 @@
             />
 
         <ListPreference
-            android:defaultValue="100"
+            android:defaultValue="0"
             android:dependency="pref_live_conversion"
             android:entries="@array/pref_live_conversion_debounce_entries"
             android:entryValues="@array/pref_live_conversion_debounce_values"
@@ -260,6 +260,28 @@
             android:key="pref_engine_settings"
             android:summary="推論スレッド数、文脈利用、チャンク、ビームサーチ、ハルシネーション保護等の詳細設定"
             android:title="karukan-engine 内部動作設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 設定のバックアップと復元 -->
+    <PreferenceCategory
+        android:title="設定のバックアップと復元"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:key="pref_export_settings"
+            android:summary="全設定項目をJSONファイル（.json）としてバックアップします"
+            android:title="設定のバックアップ"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_import_settings"
+            android:summary="バックアップファイル（.json）から設定を復元します"
+            android:title="設定の復元"
             app:iconSpaceReserved="false"
             />
 

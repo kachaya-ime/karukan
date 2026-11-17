@@ -50,10 +50,10 @@ data class ThemeColors(
     val graffitiIndicator: Int
 ) {
     companion object {
-        private val baseAccentGreen = Color.parseColor("#00897B")
+        private val baseAccentGreenMuted = Color.parseColor("#4E6B55")
+        private val baseAccentGreenDeep = Color.parseColor("#38503E")
         private val baseDarkBg = Color.parseColor("#202124")
         private val baseLightBg = Color.parseColor("#F8F9FA")
-        private val baseAccentBlue = Color.parseColor("#1A73E8")
         private val baseTextLight = Color.parseColor("#E8EAED")
         private val baseTextDark = Color.parseColor("#202124")
 
@@ -71,7 +71,7 @@ data class ThemeColors(
         private fun createDarkTheme(): ThemeColors {
             val bg = baseDarkBg
             val candidateBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(ColorUtils.blendARGB(bg, Color.WHITE, 0.18f), baseAccentGreen, 0.14f)
+            val candidateSelectedBg = ColorUtils.blendARGB(ColorUtils.blendARGB(bg, Color.WHITE, 0.18f), baseAccentGreenMuted, 0.20f)
             val toolbarBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.08f)
 
             return ThemeColors(
@@ -89,14 +89,14 @@ data class ThemeColors(
                 actionKeyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
                 keyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
                 actionKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.32f),
-                activeKeyBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.70f),
-                activeKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, baseAccentBlue, 0.85f),
+                activeKeyBg = ColorUtils.blendARGB(baseDarkBg, baseAccentGreenDeep, 0.75f),
+                activeKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, baseAccentGreenDeep, 0.90f),
                 keyText = Color.WHITE,
                 keySubText = Color.parseColor("#9AA0A6"),
                 activeKeyText = baseTextDark,
                 disabledBg = baseDarkBg,
 
-                activeAccentText = Color.parseColor("#8AB4F8"),
+                activeAccentText = Color.parseColor("#89A890"),
                 strokeBorderColor = Color.parseColor("#5F6368"),
                 dividerColor = Color.parseColor("#4A4D51"),
                 btnCloseBg = Color.parseColor("#5F6368"),
@@ -104,7 +104,7 @@ data class ThemeColors(
 
                 graffitiBg = Color.parseColor("#1F2023"),
                 graffitiGuideText = Color.parseColor("#444950"),
-                graffitiStroke = Color.parseColor("#8AB4F8"),
+                graffitiStroke = Color.parseColor("#89A890"),
                 graffitiIndicator = Color.parseColor("#F28B82")
             )
         }
@@ -112,8 +112,8 @@ data class ThemeColors(
         private fun createLightTheme(): ThemeColors {
             val bg = Color.parseColor("#ECEFF1")
             val candidateBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreen, 0.08f)
-            val candidateSelectedText = ColorUtils.blendARGB(baseAccentGreen, Color.BLACK, 0.50f)
+            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreenMuted, 0.12f)
+            val candidateSelectedText = ColorUtils.blendARGB(baseAccentGreenMuted, Color.BLACK, 0.40f)
             val toolbarBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f)
 
             return ThemeColors(
@@ -131,14 +131,14 @@ data class ThemeColors(
                 actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),
                 keyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
                 actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.22f),
-                activeKeyBg = baseAccentBlue,
-                activeKeyPressedBg = ColorUtils.blendARGB(baseAccentBlue, Color.BLACK, 0.20f),
+                activeKeyBg = baseAccentGreenMuted,
+                activeKeyPressedBg = ColorUtils.blendARGB(baseAccentGreenMuted, Color.BLACK, 0.20f),
                 keyText = baseTextDark,
                 keySubText = Color.parseColor("#70757A"),
                 activeKeyText = Color.WHITE,
                 disabledBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f),
 
-                activeAccentText = baseAccentBlue,
+                activeAccentText = baseAccentGreenMuted,
                 strokeBorderColor = Color.parseColor("#DADCE0"),
                 dividerColor = Color.parseColor("#E0E0E0"),
                 btnCloseBg = Color.parseColor("#DADCE0"),
@@ -146,7 +146,7 @@ data class ThemeColors(
 
                 graffitiBg = Color.parseColor("#F1F3F4"),
                 graffitiGuideText = Color.parseColor("#D0D4D9"),
-                graffitiStroke = baseAccentBlue,
+                graffitiStroke = baseAccentGreenMuted,
                 graffitiIndicator = Color.parseColor("#D93025")
             )
         }

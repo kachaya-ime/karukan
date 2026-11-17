@@ -264,6 +264,9 @@ class KarukanInputMethodService : InputMethodService() {
         if (!restarting && ::karukanInputView.isInitialized) {
             karukanInputView.resetKeyboardState()
         }
+        if (::karukanInputView.isInitialized) {
+            karukanInputView.updateEditorInfo(attribute)
+        }
         val effectiveLayout = getEffectiveKeyboardLayout()
         if (pendingInputViewReload || currentEffectiveKeyboardLayout != effectiveLayout) {
             pendingInputViewReload = false
@@ -553,6 +556,7 @@ class KarukanInputMethodService : InputMethodService() {
         override fun getEngine(): KarukanEngine = engine
         override fun getSettings(): KarukanSettings = settings
         override fun openSettingsActivity() = this@KarukanInputMethodService.openSettingsActivity()
+        override fun commitEmojiDirectly(emoji: String) = this@KarukanInputMethodService.commitEmojiDirectly(emoji)
         override fun onCandidateSelected(hiragana: String, candidate: String, index: Int) {
             this@KarukanInputMethodService.selectedCandidateIndex = index
             this@KarukanInputMethodService.onCandidateSelected(hiragana, candidate)
@@ -806,6 +810,7 @@ class KarukanInputMethodService : InputMethodService() {
             is KeyAction.CtrlShortcut -> {
                 if (!handleCtrlShortcut(action.key)) return false
             }
+            is KeyAction.DirectCommit -> currentInputConnection?.commitText(action.text, 1)
         }
         return true
     }
@@ -833,6 +838,10 @@ class KarukanInputMethodService : InputMethodService() {
         }
 
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
+            if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+                karukanInputView.commitSelectedEmoji()
+                return true
+            }
             if (selectedCandidateIndex >= 0 && selectedCandidateIndex in currentCandidates.indices) {
                 onCommitKey()
                 return true
@@ -1144,6 +1153,13 @@ class KarukanInputMethodService : InputMethodService() {
         }
     }
 
+    fun commitEmojiDirectly(emoji: String) {
+        if (hasActiveInput) {
+            commitCurrentHiragana()
+        }
+        currentInputConnection?.commitText(emoji, 1)
+    }
+
     private fun onDeleteForward() {
         if (selectedCandidateIndex >= 0) {
             onEscape()
@@ -1255,6 +1271,10 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onEscape() {
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            karukanInputView.hideEmojiPalette()
+            return
+        }
         if (selectedCandidateIndex >= 0 || (::karukanInputView.isInitialized && karukanInputView.isCandidateExpanded)) {
             selectedCandidateIndex = -1
             collapseCandidates()
@@ -1269,6 +1289,14 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onTabKey(isShift: Boolean = false) {
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            if (isShift) {
+                karukanInputView.selectPreviousEmojiCategory()
+            } else {
+                karukanInputView.selectNextEmojiCategory()
+            }
+            return
+        }
         if (selectedCandidateIndex >= 0) {
             if (isShift) onPreviousCandidate() else onNextCandidate()
         } else if (hasActiveInput) {
@@ -1298,6 +1326,10 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onDpadLeft(isShift: Boolean = false) {
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            karukanInputView.moveEmojiSelection(-1, 0)
+            return
+        }
         if (selectedCandidateIndex >= 0) {
             onEscape()
         }
@@ -1312,6 +1344,10 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onDpadRight(isShift: Boolean = false) {
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            karukanInputView.moveEmojiSelection(1, 0)
+            return
+        }
         if (selectedCandidateIndex >= 0) {
             onEscape()
         }
@@ -1326,8 +1362,10 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onDpadUp(isShift: Boolean = false) {
-
-
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            karukanInputView.moveEmojiSelection(0, -1)
+            return
+        }
         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP, 0, metaState))
@@ -1335,6 +1373,10 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun onDpadDown(isShift: Boolean = false) {
+        if (::karukanInputView.isInitialized && karukanInputView.isEmojiPaletteVisible) {
+            karukanInputView.moveEmojiSelection(0, 1)
+            return
+        }
         val metaState = if (isShift) KeyEvent.META_SHIFT_ON else 0
         val eventTime = SystemClock.uptimeMillis()
         currentInputConnection?.sendKeyEvent(KeyEvent(eventTime, eventTime, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN, 0, metaState))
@@ -1596,7 +1638,7 @@ class KarukanInputMethodService : InputMethodService() {
         if (isHardKb && !isSuggestEnabled && selectedCandidateIndex < 0) {
             currentCandidates = emptyList()
             if (::karukanInputView.isInitialized) {
-                karukanInputView.clearCandidateBar(isEnglishMode)
+                karukanInputView.clearCandidateBar()
                 karukanInputView.dismissFloatingCandidates()
             }
             return
@@ -1624,7 +1666,7 @@ class KarukanInputMethodService : InputMethodService() {
 
     private fun clearCandidateBar() {
         if (::karukanInputView.isInitialized) {
-            karukanInputView.clearCandidateBar(isEnglishMode)
+            karukanInputView.clearCandidateBar()
         }
     }
 

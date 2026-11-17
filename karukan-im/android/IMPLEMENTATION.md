@@ -13,20 +13,20 @@ Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、
   - `CandidateRenderer.kt`: 入力ビュー内候補（水平バー・展開フロー）およびフローティング候補一覧のビュー生成・描画・スタイリング共通レンダラー
   - `FloatingCandidateOverlay.kt`: 物理キーボード接続時、カーソル位置追従PopupWindowフローティング表示の独立オーバーレイ管理
   - `FloatingTooltipOverlay.kt`: 物理キーボード接続時、カーソル位置追従で任意の文字列メッセージやツールチップを短時間表示する汎用オーバーレイヘルパー
+  - `FloatingStatusOverlay.kt`: 非推奨・削除済み（キーボードステータスオーバーレイ）
 - **エンジンブリッジ・設定管理**:
   - `KarukanEngine.kt`: JNI ブリッジ、GGUF モデル切り替え、Native 辞書・設定・推論制御 (`Companion.calculateOptimalNThreads()` 等)
   - `EngineAssetPreparer.kt`: HuggingFace GGUF モデル、Tokenizer、システム辞書 (`dict.tgz` / `dict.bin`) アセットの非同期解凍・コピープリペアドライバ
   - `PreferencesManager.kt`: `SharedPreferences` の読み込みと設定 (`KarukanSettings`) 生成
   - `KarukanSettings.kt`: 設定データクラス（変換・パフォーマンス・学習・拡張設定・UI・キーショートカット）
   - `ThemeColors.kt`: テーマカラー管理
+  - `LogUtils.kt`: デバッグ用ログ出力ユーティリティ
 - **キーボードUI・マッパー・手書き認識**:
   - `KeyboardCommon.kt`: キーボード共通UIモデル、スタイル、イベント定義
   - `KeyboardLayoutBuilder.kt`: ソフトキーボードレイアウト構築オーケストレーター
   - `KeyboardLayoutRegistry.kt`: レイアウトプロバイダレジストリ（`qwerty`, `tablet`, `niko`, `builtin`, `graffiti`）
-  - `StandardGridKeyboardProvider.kt`: 標準グリッド型レイアウトプロバイダ
-  - `QwertyKeyboardLayout.kt`: QWERTY キーボードレイアウト定義（ベクターアイコン対応絵文字キー含む）
-  - `TabletKeyboardLayout.kt`: タブレットキーボードレイアウト定義
-  - `BuiltinKeyboardLayout.kt`: 内蔵物理キーボード（Unihertz Titan等）向け特殊記号グリッドレイアウト
+  - `JsonKeyboardLayoutParser.kt`: JSON設定ファイル (`assets/layouts/*.json`) からの画面キーボード定義パース・キャッシュ制御
+  - `StandardGridKeyboardProvider.kt`: 2次元 `KeySpec` テーブルから標準グリッド配置キーボードを構築・動作制御する共通プロバイダ (`qwerty`, `tablet`, `builtin` で共通利用)
   - `NikoKeyboardLayout.kt`: ニコタッチ入力レイアウト & マッパー（ベクターアイコン対応絵文字キー含む）
   - `GraffitiKeyboardLayout.kt`: Palm OS Graffiti (unistroke) 手書き入力レイアウトプロバイダ
   - `GraffitiAreaView.kt`: 手書きストローク描画ビュー
@@ -70,9 +70,10 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | `nativeInit` | `init { ... }` (初期化) | AIモデル (`.gguf`) のロードと初期化 |
 | `nativeLoadSystemDict` | `loadSystemDict()` | システム辞書 (`dict.bin`) のロード |
 | `nativeLoadUserDicts` | `loadUserDicts()` | ユーザー辞書・追加辞書のロード |
-| `nativeUpdateEngineConfig` | `updateEngineConfig(settings)` | 全設定の一括更新 (推論スレッド数, ストラテジー, チャンク, ビームサーチ, ペルソナ, 記号・幅スタイル, 最大学習数) |
-| `nativeConvert` | `convert(query, maxCandidates, context, queryId)` | かな漢字変換の候補生成（日付・ユーザー辞書・AIモデル・カタカナ・絵文字・システム辞書・学習履歴の結合とキャンセル判定） |
+| `nativeUpdateEngineConfig` | `updateEngineConfig(settings)` | 全設定の一括更新 (推論スレッド数, ストラテジー, チャンク, ビームサーチ, ペルソナ, 記号・幅スタイル, 最大学習数, 最大学習見出し長) |
+| `nativeConvert` | `convert(query, maxCandidates, context, queryId, sourceFilter)` | かな漢字変換の候補生成（日付・ユーザー辞書・AIモデル・カタカナ・絵文字・システム辞書・学習履歴の結合、ソースフィルタリングおよびキャンセル判定） |
 | `nativeCancelQuery` | `cancelQuery(queryId)` | ライブ変換（リアルタイム推論）のキャンセル |
+| `nativeResetEngine` | `resetEngine()` | エンジンインスタンスのリセット |
 | `nativeRecordLearning` | `recordLearning(reading, surface)` | 選択された変換候補の学習履歴への記録 |
 | `nativeRemoveLearning` | `removeLearningEntry(reading, surface)` | 学習履歴から特定のエントリを削除 |
 | `nativeSaveLearning` | `backupLearningToStream` | 学習履歴のバックアップ（TSVファイルストリーム出力） |
@@ -80,6 +81,9 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | `nativeClearLearning` | `clearLearning()` | メモリ上の学習キャッシュのクリア |
 | `nativeRomajiToHiragana` | `romajiToHiragana(query)` | ローマ字→ひらがな変換 |
 | `nativeRomajiToHiraganaFlush` | `romajiToHiraganaFlush(query)` | ローマ字→ひらがな変換のフラッシュ（末尾の未確定ローマ字の確定処理） |
+| `nativeToHankakuKatakana` | `toHankakuKatakana(input)` | 全角カタカナ→半角カタカナ変換 |
+| `nativeToZenkakuAlphanumeric` | `toZenkakuAlphanumeric(input)` | 半角英数→全角英数変換 |
+| `nativeSetDateConfigJson` | `setDateConfigJson(json)` | 日付・時刻フレーズ設定 (JSON) のNative側への伝達 |
 
 ### 設定更新 (`nativeUpdateEngineConfig`) で伝達されるパラメータ
 
@@ -87,7 +91,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 
 - **推論パラメータ**: `nThreads`, `strategy`, `maxLatencyMs`, `chunkChars`, `chunkSymbols`, `chunkDigits`, `chunkAlphabets`, `beamWidth`, `beamChars`, `persona`, `useContext`, `contextChars`
 - **記号・文字幅スタイル**: `punctuationStyle`, `bracketStyle`, `slashStyle`, `spaceStyle`, `kanaSymbolWidth`, `asciiWidth`, `digitWidth`
-- **変換学習設定**: `maxLearningEntries`, `isLearningEnabled`, `isDateConversionEnabled`
+- **変換学習設定**: `maxLearningEntries`, `maxLearningSurfaceChars`, `isLearningEnabled`, `isDateConversionEnabled`
 
 ---
 
@@ -112,7 +116,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **Ctrl + B** | カーソル左移動 | 入力中・候補選択中のみ動作（未入力時は OS/アプリ標準の太字設定等へ委譲） | 共通仕様 |
 | **Ctrl + C** | コピー | 編集領域のテキストコピー (`copyEditingArea` -> `InputConnection.copy`) | 共通仕様 |
 | **Ctrl + D** | *未割当* | 常時 OS / アプリ標準機能へ委ねる（IME側では消費しない） | - |
-| **Ctrl + E** | *未割当* | 常時 OS / アプリ標準機能へ委ねる（IME側では消費しない） | - |
+| **Ctrl + E** | 😃絵文字パレットオープン | 絵文字・記号パレットを開く (`toggle_emoji_palette`) | 共通仕様 |
 | **Ctrl + F** | カーソル右移動 | 入力中・候補選択中のみ動作（未入力時は OS/アプリ標準検索等へ委譲） | 共通仕様 |
 | **Ctrl + G** | キャンセル | 変換・候補選択のキャンセル (`onEscape`) | 共通仕様 |
 | **Ctrl + H** | 文字削除 | 前の1文字を削除 (`onBackspace`) | 共通仕様 |
@@ -167,6 +171,7 @@ JIS 109キーボード特有の物理キー（スキャンコード対応）の�
 | **Ctrl + A** | 行頭へ移動 | 行頭へ移動 | 全選択 | **全選択** | モバイル向け割り当て |
 | **Ctrl + B** | カーソル左移動 | カーソル左移動 | カーソル左移動 | **カーソル左移動** | Emacsバインド共通 |
 | **Ctrl + C** | OS標準 | OS標準 | OS標準 | **コピー** | モバイル標準コピー |
+| **Ctrl + E** | - | - | - | **絵文字パレット** | Android独自 |
 | **Ctrl + F** | カーソル右移動 | カーソル右移動 | カーソル右移動 | **カーソル右移動** | Emacsバインド共通 |
 | **Ctrl + G** | キャンセル | キャンセル | キャンセル | **キャンセル** | 共通キャンセル |
 | **Ctrl + H** | 1文字削除 | 1文字削除 | 1文字削除 | **1文字削除** | Emacsバインド共通 |
@@ -184,3 +189,19 @@ JIS 109キーボード特有の物理キー（スキャンコード対応）の�
 | **Ctrl + Z** | OS標準 | OS標準 | OS標準 | **Undo** | モバイル標準Undo |
 | **Ctrl + 1〜9** | 候補番号選択 | 候補番号選択 | 候補番号選択 | **候補番号選択** | Karukan共通機能 |
 | **Ctrl + Space** | モード切替 | モード切替 | モード切替 | **モード切替** | モード切替 |
+
+---
+
+## 6. 手書きストローク認識エンジン仕様 (Graffiti Stroke Recognition Engine)
+
+Palm OS Graffiti (unistroke) 手書き入力エリア (`GraffitiAreaView`) におけるジェスチャー認識は、固定的な単純テンプレートマッチングではなく、**機械学習型・高次元特徴量ベースの重み付き k-NN 分類器**を採用しています。
+
+### 主な技術仕様
+1. **アセットテンプレートのロード (`graffiti_templates.json`)**:
+   - アセット内の `graffiti_templates.json` からベーステンプレートおよび各回転角（0°, 90°, 180°, 270°）の回転バリエーション仕様をパースし、メモリ上にトレーニングサンプル群（ALPHA, NUMERIC, PUNCTUATION）としてインデックス化。
+2. **高次元特徴量ベクトルの抽出 (Feature Extraction & Vectorization)**:
+   - 入力・テンプレートストロークの軌跡全体を 32等分（`DEFAULT_SAMPLING_COUNT = 32`）にリサンプルし、正方形サイズにスケーリングおよび原点中心へ平行移動した正規化ポイント（64次元の $(x, y)$ 座標）を取得。
+   - さらに、グローバル形状メトリクス（パス長 `pathLength`、始点・終点間のユークリッド距離 `startEndDistance`、水平・垂直方向の総移動量 `totalDx`, `totalDy`）を統合した高次元特徴量ベクトル (`FloatArray`) を生成し、一筆書きの「途中経過（カーブ・形状・方向）」のすべてを厳密に評価。
+3. **重み付き k-Nearest Neighbors (k-NN, $k=5$) 分類**:
+   - 入力ストロークと各トレーニングサンプルの特徴量ベクトル間ユークリッド距離を計算し、上位 $k=5$ 個の近傍候補を選出（デバッグ用に上位5候補を `logI` 出力）。
+   - 距離の近さに応じた逆距離重み付け（Inverse Distance Weighting）により各文字・機能クラスのスコアを算出して最適候補を判定。

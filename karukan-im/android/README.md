@@ -14,6 +14,7 @@ Android 向け Karukan IME フロントエンドモジュールです。
   - QWERTY ソフトウェアキーボード（ローマ字入力対応、ワンタップ記号切替）
   - タブレットレイアウト（フルキーボード型）
   - ビルトインキーボード（内蔵物理キーボード向け記号補助レイアウト）
+  - *(※上記標準グリッドレイアウトは `JsonKeyboardLayoutParser` により `assets/layouts/*.json` から動的構築)*
   - ニコタッチ入力（12キー配列、通常・数字専用モード）
   - グラフィティ手書き入力（Palm OS Graffiti unistroke 手書き認識・テンプレートマッチング）
   - 絵文字・記号パレット (`EmojiPaletteController`, ViewPager2 によるカテゴリ別グリッド描画)
@@ -96,3 +97,13 @@ android/
   - **グラフィティ手書き入力 (Graffiti)**: Palm OS の Graffiti (unistroke) 手書き認識仕様に基づいています。
   - **商標について**: 「Palm」「Palm V」「Graffiti®」および「Graffiti® for Android™」は、該当する権利者（株式会社ACCESS等）の商標または登録商標です。
   - **アプリアイコン (Android Robot)**: Android ロボットは、Google が作成および提供している作品から複製または変更したものであり、クリエイティブ・コモンズ 3.0 表示ライセンス (CC BY 3.0) に記載された条件に従って使用しています。
+
+## 免責事項
+
+Palm、Palm OS、および Graffiti はそれぞれの権利者に帰属する
+商標または登録商標です。
+
+本アプリは Palm、PalmSource、ACCESS の公式製品ではありません。
+本アプリは独自実装であり、これらの企業との提携・認証・承認を
+受けているものではありません。
+

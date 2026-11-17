@@ -54,7 +54,7 @@ class PreferencesManager(
         val settings = KarukanSettings(
             modelName = prefs.getStringNonNull("pref_model_name", "jinen-v2-xsmall-Q8_0.gguf"),
             isLiveConversionEnabled = prefs.getBoolean("pref_live_conversion", true),
-            liveConversionDebounceMs = prefs.getIntFromString("pref_live_conversion_debounce_ms", 100),
+            liveConversionDebounceMs = prefs.getIntFromString("pref_live_conversion_debounce_ms", 0),
             isShowCandidateAnnotationsEnabled = prefs.getBoolean("pref_show_candidate_annotations", true),
             numCandidates = prefs.getIntFromString("pref_num_candidates", 9),
             punctuationStyle = prefs.getStringNonNull("pref_punctuation", "kuten_touten"),
@@ -96,7 +96,7 @@ class PreferencesManager(
             isShowPhysicalKeyboardSuggestCandidatesEnabled = prefs.getBoolean("pref_show_physical_keyboard_suggest_candidates", true),
             isAutoCommitEnabled = prefs.getBoolean("pref_auto_commit", true),
             keyboardHeight = prefs.getStringNonNull("pref_keyboard_height", "medium"),
-            keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "dark"),
+            keyboardTheme = prefs.getStringNonNull("pref_keyboard_theme", "system"),
             physicalKeyboardLayout = prefs.getStringNonNull("pref_physical_keyboard_layout", "jis109"),
             keyShortcutsJson = prefs.getStringNonNull("pref_key_shortcuts_json", "")
         )

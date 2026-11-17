@@ -11,10 +11,20 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * Palm OS の Graffiti 1 (unistroke) ジェスチャ認識エンジン。
- * stroke_help1.png (英字), stroke_help2.png (数字・制御), stroke_help3.png (記号・修飾) のストローク定義に準拠。
+ * ベーステンプレート (graffiti_templates.json) から高次元特徴量ベクトルを抽出し、
+ * 機械学習型・重み付き k-NN 分類器（Feature-based Weighted k-NN）により高精度な認識を行います。
+ *
+ * 免責事項：
+ * Palm、Palm OS、および Graffiti はそれぞれの権利者に帰属する
+ * 商標または登録商標です。
+ *
+ * 本アプリは Palm、PalmSource、ACCESS の公式製品ではありません。
+ * 本アプリは独自実装であり、これらの企業との提携・認証・承認を
+ * 受けているものではありません。
  */
 object GraffitiStrokeRecognizer {
 
@@ -74,30 +84,29 @@ object GraffitiStrokeRecognizer {
     private const val SQUARE_SIZE = 100f
     private const val DEFAULT_SAMPLING_COUNT = 32
 
-    private data class Template(
+    // ---------------------------------------------------------------------------------------------
+    // Region: ML Training Sample & Feature Model
+    // ---------------------------------------------------------------------------------------------
+
+    class TrainingSample(
         val name: String,
-        val points: List<Point>,
         val alphaResult: RecognitionResult,
         val numericResult: RecognitionResult,
         val punctuationResult: RecognitionResult,
-        val totalDx: Float = 0f,
-        val totalDy: Float = 0f,
-        val startRegion: GridRegion = GridRegion.CENTER,
-        val endRegion: GridRegion = GridRegion.CENTER,
-        val startEndDistance: Float = 0f,
-        val pathLength: Float = 0f
+        val points: List<Point>, // Centered points for drawing/debugging
+        val featureVector: FloatArray
     )
 
-    private val alphaTemplates = mutableListOf<Template>()
-    private val numericTemplates = mutableListOf<Template>()
-    private val punctuationTemplates = mutableListOf<Template>()
+    private val alphaTrainingSamples = mutableListOf<TrainingSample>()
+    private val numericTrainingSamples = mutableListOf<TrainingSample>()
+    private val punctuationTrainingSamples = mutableListOf<TrainingSample>()
     private var isTemplatesLoaded = false
 
     /** Punctuation Shift (記号入力) モードの状態 */
     var isPunctuationMode: Boolean = false
 
     // ---------------------------------------------------------------------------------------------
-    // Region: Path Movement Utilities
+    // Region: Stroke Metrics & Feature Extraction
     // ---------------------------------------------------------------------------------------------
 
     data class StrokeMetrics(
@@ -106,9 +115,6 @@ object GraffitiStrokeRecognizer {
         val pathLength: Float
     )
 
-    /**
-     * ストロークの各セグメントにおける移動量（水平成分 totalDx, 垂直成分 totalDy）と正規化後のPath長を同時に求めます。
-     */
     fun computeStrokeMetrics(points: List<Point>): StrokeMetrics {
         var totalDx = 0f
         var totalDy = 0f
@@ -123,17 +129,6 @@ object GraffitiStrokeRecognizer {
         return StrokeMetrics(totalDx, totalDy, pathLength)
     }
 
-    /**
-     * ストロークの各セグメントにおける移動量の絶対値の和（水平成分 totalDx, 垂直成分 totalDy）を求めます。
-     */
-    fun computeTotalMovement(points: List<Point>): Pair<Float, Float> {
-        val metrics = computeStrokeMetrics(points)
-        return Pair(metrics.totalDx, metrics.totalDy)
-    }
-
-    /**
-     * 始点と終点間の直線距離（ユークリッド距離）を求めます。
-     */
     fun computeStartEndDistance(points: List<Point>): Float {
         if (points.size < 2) return 0f
         val start = points.first()
@@ -141,18 +136,6 @@ object GraffitiStrokeRecognizer {
         return hypot(end.x - start.x, end.y - start.y)
     }
 
-    /**
-     * ストロークの正規化後のPath長（連続する点間のユークリッド距離の総和）を求めます。
-     */
-    fun computePathLength(points: List<Point>): Float {
-        return computeStrokeMetrics(points).pathLength
-    }
-
-    /**
-     * 正規化後の座標 (0..squareSize, 0..squareSize) における点の 3x3 グリッド領域を取得します。
-     * 分割比率は 3:4:3 (端 30%, 中央 40%, 端 30%) です。
-     * （左上, 中央上, 右上, 左中央, 中央, 右中央, 左下, 中央下, 右下）
-     */
     fun getGridRegion(p: Point, squareSize: Float = SQUARE_SIZE): GridRegion {
         val col = when {
             p.x < squareSize * 0.3f -> 0
@@ -177,13 +160,179 @@ object GraffitiStrokeRecognizer {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Region: Bounding Box & Rotation Calculations
-    // ---------------------------------------------------------------------------------------------
+    data class StrokeFeatures(
+        val sampledPoints: List<Point>,
+        val scaledPoints: List<Point>,
+        val centeredPoints: List<Point>,
+        val startRegion: GridRegion,
+        val endRegion: GridRegion,
+        val totalDx: Float,
+        val totalDy: Float,
+        val startEndDistance: Float,
+        val pathLength: Float
+    )
+
+    fun extractFeatures(rawPoints: List<Point>): StrokeFeatures? {
+        if (rawPoints.isEmpty()) return null
+        val sampled = samplePoints(rawPoints, DEFAULT_SAMPLING_COUNT)
+        if (sampled.isEmpty()) return null
+        val scaled = scaleToSquare(sampled, SQUARE_SIZE)
+        val centered = translateToOrigin(scaled)
+        val metrics = computeStrokeMetrics(scaled)
+        val startRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.first()) else GridRegion.CENTER
+        val endRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
+        val startEndDistance = computeStartEndDistance(scaled)
+
+        return StrokeFeatures(
+            sampledPoints = sampled,
+            scaledPoints = scaled,
+            centeredPoints = centered,
+            startRegion = startRegion,
+            endRegion = endRegion,
+            totalDx = metrics.totalDx,
+            totalDy = metrics.totalDy,
+            startEndDistance = startEndDistance,
+            pathLength = metrics.pathLength
+        )
+    }
+
+    /**
+     * 機械学習用高次元特徴量ベクトル (Feature Vector) を生成します。
+     * 正規化した点座標 (64次元) + グローバル形状メトリクス (pathLength, startEndDistance, totalDx, totalDy)
+     */
+    fun extractFeatureVector(rawPoints: List<Point>): FloatArray? {
+        val features = extractFeatures(rawPoints) ?: return null
+        val pts = features.centeredPoints
+        val vec = FloatArray(pts.size * 2 + 4)
+        for (i in pts.indices) {
+            vec[i * 2] = pts[i].x / SQUARE_SIZE
+            vec[i * 2 + 1] = pts[i].y / SQUARE_SIZE
+        }
+        val offset = pts.size * 2
+        vec[offset] = features.pathLength / SQUARE_SIZE
+        vec[offset + 1] = features.startEndDistance / SQUARE_SIZE
+        vec[offset + 2] = features.totalDx / SQUARE_SIZE
+        vec[offset + 3] = features.totalDy / SQUARE_SIZE
+        return vec
+    }
+
+    fun featureDistance(v1: FloatArray, v2: FloatArray): Float {
+        if (v1.size != v2.size) return Float.MAX_VALUE
+        var sum = 0f
+        for (i in v1.indices) {
+            val diff = v1[i] - v2[i]
+            sum += diff * diff
+        }
+        return sqrt(sum)
+    }
 
     // ---------------------------------------------------------------------------------------------
-    // Region: Template Matching Engine
+    // Region: Recognition Engine (Weighted k-NN Classifier)
     // ---------------------------------------------------------------------------------------------
+
+    fun recognize(path: Path, bounds: RectF): RecognitionResult {
+        return recognizeDetailed(path, bounds).result
+    }
+
+    fun recognizeDetailed(path: Path, bounds: RectF): DetailedRecognitionResult {
+        val rawPoints = PathSampler.sample(path)
+        return recognizeDetailed(rawPoints, bounds)
+    }
+
+    fun recognizeDetailed(rawPoints: List<Point>, bounds: RectF): DetailedRecognitionResult {
+        if (rawPoints.isEmpty()) return DetailedRecognitionResult(RecognitionResult.None)
+
+        val inputFeatures = extractFeatures(rawPoints)
+            ?: return DetailedRecognitionResult(RecognitionResult.None)
+        val inputFeatureVector = extractFeatureVector(rawPoints)
+            ?: return DetailedRecognitionResult(RecognitionResult.None)
+
+        val targetCategory = determineTargetCategory(inputFeatures.sampledPoints, bounds, isPunctuationMode)
+
+        val (minX, minY, maxX, maxY) = computeBoundingBox(rawPoints)
+        val maxRawDim = max(maxX - minX, maxY - minY)
+        if (rawPoints.size < 3 || maxRawDim < 25f) {
+            val defaultRes = if (targetCategory == TargetCategory.PUNCTUATION) {
+                RecognitionResult.CharResult(".")
+            } else {
+                RecognitionResult.PunctuationShift
+            }
+            if (defaultRes is RecognitionResult.PunctuationShift) {
+                this.isPunctuationMode = !this.isPunctuationMode
+            } else if (defaultRes != RecognitionResult.None) {
+                this.isPunctuationMode = false
+            }
+            return DetailedRecognitionResult(defaultRes)
+        }
+
+        val trainingSamples = when (targetCategory) {
+            TargetCategory.ALPHA -> alphaTrainingSamples
+            TargetCategory.NUMERIC -> numericTrainingSamples
+            TargetCategory.PUNCTUATION -> punctuationTrainingSamples
+        }
+
+        // 全トレーニングサンプルを対象に機械学習型特徴量マッチング（k-NN）を実行（事前フィルタリングなしで柔軟性とロバスト性を最大化）
+        val candidates = trainingSamples
+
+        data class ScoredMatch(
+            val sample: TrainingSample,
+            val dist: Float,
+            val result: RecognitionResult
+        )
+
+        val scoredMatches = candidates.map { sample ->
+            val res = when (targetCategory) {
+                TargetCategory.ALPHA -> sample.alphaResult
+                TargetCategory.NUMERIC -> sample.numericResult
+                TargetCategory.PUNCTUATION -> sample.punctuationResult
+            }
+            val dist = featureDistance(inputFeatureVector, sample.featureVector)
+            ScoredMatch(sample, dist, res)
+        }.sortedBy { it.dist }
+
+        val top5 = scoredMatches.take(5) // k-NN (k=5)
+        logI(TAG, "Top 5 Matching Templates:")
+        top5.forEachIndexed { idx, match ->
+            logI(TAG, "  #${idx + 1}: template=${match.sample.name}, result=${match.result}, dist=${"%.3f".format(match.dist)}")
+        }
+
+        // 重み付き投票 (Weighted k-NN)
+        val classScores = mutableMapOf<RecognitionResult, Float>()
+        for ((idx, match) in top5.withIndex()) {
+            if (match.result == RecognitionResult.None) continue
+            val weight = 1.0f / (match.dist + 0.001f)
+            val score = weight * (6 - idx) // 上位ほどボーナス
+            classScores[match.result] = (classScores[match.result] ?: 0f) + score
+        }
+
+        val bestResultEntry = classScores.maxByOrNull { it.value }
+        val bestResult = bestResultEntry?.key ?: RecognitionResult.None
+
+        val bestMatchSample = top5.firstOrNull { it.result == bestResult }?.sample
+            ?: top5.firstOrNull()?.sample
+
+        logI(
+            TAG,
+            "ML Recognition -> Category: $targetCategory, " +
+                    "BestResult: $bestResult (Score: ${bestResultEntry?.value ?: 0f}), " +
+                    "MatchedTemplate: ${bestMatchSample?.name ?: "None"}, " +
+                    "Candidates: ${candidates.size}/${trainingSamples.size}"
+        )
+
+        if (bestResult is RecognitionResult.PunctuationShift) {
+            this.isPunctuationMode = !this.isPunctuationMode
+        } else if (bestResult != RecognitionResult.None) {
+            this.isPunctuationMode = false
+        }
+
+        return DetailedRecognitionResult(
+            result = bestResult,
+            matchedTemplatePoints = bestMatchSample?.points,
+            matchedTemplateName = bestMatchSample?.name,
+            startRegion = inputFeatures.startRegion,
+            endRegion = inputFeatures.endRegion
+        )
+    }
 
     fun determineTargetCategory(rawPoints: List<Point>, bounds: RectF, isPunctuationMode: Boolean): TargetCategory {
         if (isPunctuationMode) {
@@ -219,202 +368,6 @@ object GraffitiStrokeRecognizer {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Region: Stroke Features & Normalization Engine
-    // ---------------------------------------------------------------------------------------------
-
-    data class StrokeFeatures(
-        val sampledPoints: List<Point>,
-        val scaledPoints: List<Point>,
-        val centeredPoints: List<Point>,
-        val startRegion: GridRegion,
-        val endRegion: GridRegion,
-        val totalDx: Float,
-        val totalDy: Float,
-        val startEndDistance: Float,
-        val pathLength: Float
-    )
-
-    /**
-     * 入力点列およびテンプレート点列から、同一アルゴリズムで統一正規化特徴量を生成します。
-     */
-    fun extractFeatures(rawPoints: List<Point>): StrokeFeatures? {
-        if (rawPoints.isEmpty()) return null
-        val sampled = samplePoints(rawPoints, DEFAULT_SAMPLING_COUNT)
-        if (sampled.isEmpty()) return null
-        val scaled = scaleToSquare(sampled, SQUARE_SIZE)
-        val centered = translateToOrigin(scaled)
-        val metrics = computeStrokeMetrics(scaled)
-        val startRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.first()) else GridRegion.CENTER
-        val endRegion = if (scaled.isNotEmpty()) getGridRegion(scaled.last()) else GridRegion.CENTER
-        val startEndDistance = computeStartEndDistance(scaled)
-
-        return StrokeFeatures(
-            sampledPoints = sampled,
-            scaledPoints = scaled,
-            centeredPoints = centered,
-            startRegion = startRegion,
-            endRegion = endRegion,
-            totalDx = metrics.totalDx,
-            totalDy = metrics.totalDy,
-            startEndDistance = startEndDistance,
-            pathLength = metrics.pathLength
-        )
-    }
-
-    fun recognize(path: Path, bounds: RectF): RecognitionResult {
-        return recognizeDetailed(path, bounds).result
-    }
-
-    fun recognizeDetailed(path: Path, bounds: RectF): DetailedRecognitionResult {
-        val rawPoints = PathSampler.sample(path)
-        return recognizeDetailed(rawPoints, bounds)
-    }
-
-    fun recognizeDetailed(rawPoints: List<Point>, bounds: RectF): DetailedRecognitionResult {
-        if (rawPoints.isEmpty()) return DetailedRecognitionResult(RecognitionResult.None)
-
-        val inputFeatures = extractFeatures(rawPoints)
-            ?: return DetailedRecognitionResult(RecognitionResult.None)
-
-        val targetCategory = determineTargetCategory(inputFeatures.sampledPoints, bounds, isPunctuationMode)
-
-        var matchedPoints: List<Point>? = null
-        var matchedName: String? = null
-
-        data class MatchResult(
-            val template: Template,
-            val dist: Float,
-            val result: RecognitionResult
-        )
-
-        var top3Matches = emptyList<MatchResult>()
-
-        val result = run {
-            val (minX, minY, maxX, maxY) = computeBoundingBox(rawPoints)
-            val maxRawDim = max(maxX - minX, maxY - minY)
-            if (rawPoints.size < 3 || maxRawDim < 25f) {
-                return@run if (targetCategory == TargetCategory.PUNCTUATION) {
-                    RecognitionResult.CharResult(".")
-                } else {
-                    RecognitionResult.PunctuationShift
-                }
-            }
-
-            val targetTemplates = when (targetCategory) {
-                TargetCategory.ALPHA -> alphaTemplates
-                TargetCategory.NUMERIC -> numericTemplates
-                TargetCategory.PUNCTUATION -> punctuationTemplates
-            }
-
-            val candidateTemplates = mutableListOf<Template>()
-            logI(
-                TAG,
-                "Evaluating ${targetTemplates.size} templates for category $targetCategory " +
-                        "(start=${inputFeatures.startRegion.displayName}, end=${inputFeatures.endRegion.displayName}, " +
-                        "dx=${"%.1f".format(inputFeatures.totalDx)}, dy=${"%.1f".format(inputFeatures.totalDy)}, " +
-                        "startEndDist=${"%.1f".format(inputFeatures.startEndDistance)}, " +
-                        "pathLen=${"%.1f".format(inputFeatures.pathLength)}):"
-            )
-            for (template in targetTemplates) {
-                // 縦成分のみ
-                if (inputFeatures.totalDx == 0f && template.totalDx != 0f) {
-                    continue;
-                }
-                // 横成分のみ
-                if (inputFeatures.totalDy == 0f && template.totalDy != 0f) {
-                    continue;
-                }
-                // 開始位置の比較
-                if (template.startRegion != inputFeatures.startRegion) {
-                    continue
-                }
-                // 終了位置の比較
-                if (template.endRegion != inputFeatures.endRegion) {
-                    continue
-                }
-                // Path長
-                if (abs(template.pathLength - inputFeatures.pathLength) > (SQUARE_SIZE * 0.9f)) {
-                    continue
-                }
-                // 水平方向移動量
-                if (template.totalDx != 0f) {
-                    if (abs(template.totalDx - inputFeatures.totalDx) > (SQUARE_SIZE * 0.9f)) {
-                        continue
-                    }
-                }
-                // 垂直方向移動量
-                if (template.totalDy != 0f) {
-                    if (abs(template.totalDy - inputFeatures.totalDy) > (SQUARE_SIZE * 0.9f)) {
-                        continue
-                    }
-                }
-
-                candidateTemplates.add(template)
-            }
-            logI(TAG, "Filtered candidate templates count: ${candidateTemplates.size} / ${targetTemplates.size}")
-
-            val validMatches = candidateTemplates.map { template ->
-                val res = when (targetCategory) {
-                    TargetCategory.ALPHA -> template.alphaResult
-                    TargetCategory.NUMERIC -> template.numericResult
-                    TargetCategory.PUNCTUATION -> template.punctuationResult
-                }
-                val dist = pathDistance(inputFeatures.centeredPoints, template.points)
-                MatchResult(template, dist, res)
-            }.sortedBy { it.dist }
-
-            top3Matches = validMatches.take(3)
-
-            val bestMatch = validMatches.firstOrNull()
-            if (bestMatch != null) {
-                matchedPoints = bestMatch.template.points
-                matchedName = bestMatch.template.name
-                return@run bestMatch.result
-            }
-
-            RecognitionResult.None
-        }
-
-        logI(
-            TAG,
-            "Input Stroke Features -> Category: $targetCategory, " +
-                    "Movement: (dx=${"%.1f".format(inputFeatures.totalDx)}, dy=${"%.1f".format(inputFeatures.totalDy)}), " +
-                    "StartRegion: ${inputFeatures.startRegion.displayName}, EndRegion: ${inputFeatures.endRegion.displayName}, " +
-                    "StartEndDist: ${"%.1f".format(inputFeatures.startEndDistance)}, " +
-                    "PathLen: ${"%.1f".format(inputFeatures.pathLength)}, " +
-                    "MatchedTemplate: ${matchedName ?: "None"}, Result: $result"
-        )
-
-        if (top3Matches.isNotEmpty()) {
-            logI(TAG, "Top 3 Similar Templates:")
-            top3Matches.forEachIndexed { idx, m ->
-                logI(
-                    TAG,
-                    "  #${idx + 1}: ${m.template.name} -> result=${m.result}, dist=${"%.2f".format(m.dist)}, " +
-                            "dx=${"%.1f".format(m.template.totalDx)}, dy=${"%.1f".format(m.template.totalDy)}, " +
-                            "startRegion=${m.template.startRegion.displayName}, endRegion=${m.template.endRegion.displayName}, " +
-                            "startEndDist=${"%.1f".format(m.template.startEndDistance)}, " +
-                            "pathLen=${"%.1f".format(m.template.pathLength)}"
-                )
-            }
-        }
-
-        if (result is RecognitionResult.PunctuationShift) {
-            this.isPunctuationMode = !this.isPunctuationMode
-        } else if (result != RecognitionResult.None) {
-            this.isPunctuationMode = false
-        }
-
-        return DetailedRecognitionResult(
-            result = result,
-            matchedTemplatePoints = matchedPoints,
-            matchedTemplateName = matchedName,
-            startRegion = inputFeatures.startRegion,
-            endRegion = inputFeatures.endRegion
-        )
-    }
-
     private fun mapStringToResult(str: String): RecognitionResult {
         return when (str) {
             "space" -> RecognitionResult.Space
@@ -436,10 +389,6 @@ object GraffitiStrokeRecognizer {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Region: $1 Recognizer Geometry Calculations
-    // ---------------------------------------------------------------------------------------------
-
     private fun computeBoundingBox(points: List<Point>): FloatArray {
         var minX = Float.MAX_VALUE
         var minY = Float.MAX_VALUE
@@ -452,16 +401,6 @@ object GraffitiStrokeRecognizer {
             maxY = max(maxY, p.y)
         }
         return floatArrayOf(minX, minY, maxX, maxY)
-    }
-
-    private fun centroid(points: List<Point>): Point {
-        var cx = 0f
-        var cy = 0f
-        for (p in points) {
-            cx += p.x
-            cy += p.y
-        }
-        return Point(cx / points.size, cy / points.size)
     }
 
     private fun scaleToSquare(points: List<Point>, size: Float): List<Point> {
@@ -501,19 +440,9 @@ object GraffitiStrokeRecognizer {
     }
 
     private fun translateToOrigin(points: List<Point>): List<Point> {
-        val c = centroid(points)
-        return points.map { Point(it.x - c.x, it.y - c.y) }
-    }
-
-    private fun pathDistance(pts1: List<Point>, pts2: List<Point>): Float {
-        if (pts1.isEmpty() || pts2.isEmpty()) return Float.MAX_VALUE
-
-        var d = 0f
-        val count = min(pts1.size, pts2.size)
-        for (i in 0 until count) {
-            d += hypot(pts1[i].x - pts2[i].x, pts1[i].y - pts2[i].y)
-        }
-        return d / count
+        val cx = points.map { it.x }.average().toFloat()
+        val cy = points.map { it.y }.average().toFloat()
+        return points.map { Point(it.x - cx, it.y - cy) }
     }
 
     fun samplePoints(points: List<Point>, count: Int = DEFAULT_SAMPLING_COUNT): List<Point> {
@@ -554,10 +483,10 @@ object GraffitiStrokeRecognizer {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Region: SVG Path Parsing & Asset Loading
+    // Region: Template & ML Model Loading Engine
     // ---------------------------------------------------------------------------------------------
 
-    internal fun addTemplate(
+    internal fun addTrainingSample(
         name: String = "",
         rawPoints: List<Point>,
         alpha: String = "none",
@@ -576,29 +505,25 @@ object GraffitiStrokeRecognizer {
         }
 
         val features = extractFeatures(rawPoints) ?: return
+        val featureVector = extractFeatureVector(rawPoints) ?: return
 
-        val template = Template(
+        val sample = TrainingSample(
             name = name,
-            points = features.centeredPoints,
             alphaResult = alphaRes,
             numericResult = numericRes,
             punctuationResult = punctuationRes,
-            totalDx = features.totalDx,
-            totalDy = features.totalDy,
-            startRegion = features.startRegion,
-            endRegion = features.endRegion,
-            startEndDistance = features.startEndDistance,
-            pathLength = features.pathLength
+            points = features.centeredPoints,
+            featureVector = featureVector
         )
 
         if (alphaRes != RecognitionResult.None) {
-            alphaTemplates.add(template)
+            alphaTrainingSamples.add(sample)
         }
         if (numericRes != RecognitionResult.None) {
-            numericTemplates.add(template)
+            numericTrainingSamples.add(sample)
         }
         if (punctuationRes != RecognitionResult.None) {
-            punctuationTemplates.add(template)
+            punctuationTrainingSamples.add(sample)
         }
     }
 
@@ -625,7 +550,7 @@ object GraffitiStrokeRecognizer {
         }
     }
 
-    internal fun addRotatedTemplates(
+    internal fun addRotatedTrainingSamples(
         baseName: String,
         basePoints: List<Point>,
         specs: List<RotationResultSpec>
@@ -634,7 +559,7 @@ object GraffitiStrokeRecognizer {
         for (angleDeg in 0 until 360 step 90) {
             val spec = specMap[angleDeg] ?: RotationResultSpec(angleDeg, "none", "none", "none")
             val rotated = rotatePoints(basePoints, angleDeg)
-            addTemplate(
+            addTrainingSample(
                 name = "${baseName}_$angleDeg",
                 rawPoints = rotated,
                 alpha = spec.alpha,
@@ -643,7 +568,6 @@ object GraffitiStrokeRecognizer {
             )
         }
     }
-
 
     fun parseSvgPath(pathData: String): Path {
         return PathParser.createPathFromPathData(pathData)
@@ -660,10 +584,18 @@ object GraffitiStrokeRecognizer {
         }
     }
 
+    fun reloadTemplates(context: Context) {
+        isTemplatesLoaded = false
+        alphaTrainingSamples.clear()
+        numericTrainingSamples.clear()
+        punctuationTrainingSamples.clear()
+        loadTemplatesFromContext(context)
+    }
+
     fun loadTemplatesFromJsonString(jsonString: String) {
-        alphaTemplates.clear()
-        numericTemplates.clear()
-        punctuationTemplates.clear()
+        alphaTrainingSamples.clear()
+        numericTrainingSamples.clear()
+        punctuationTrainingSamples.clear()
         isTemplatesLoaded = false
         val rootArray = JSONArray(jsonString)
         for (i in 0 until rootArray.length()) {
@@ -698,63 +630,18 @@ object GraffitiStrokeRecognizer {
                 }
             }
 
-            addRotatedTemplates(name, points, specs)
+            addRotatedTrainingSamples(name, points, specs)
         }
 
         isTemplatesLoaded = true
-        logRotatedTemplates()
+        logTrainingModelSummary()
     }
 
-    fun logRotatedTemplates() {
-        val totalCount = alphaTemplates.size + numericTemplates.size + punctuationTemplates.size
-        logI(TAG, "Categorized Rotated Templates List (Total Entries: $totalCount):")
-        logI(TAG, "  ALPHA templates: ${alphaTemplates.size} entries")
-        logI(TAG, "  NUMERIC templates: ${numericTemplates.size} entries")
-        logI(TAG, "  PUNCTUATION templates: ${punctuationTemplates.size} entries")
-
-        fun getSortKey(res: RecognitionResult): String {
-            return when (res) {
-                is RecognitionResult.CharResult -> res.char
-                RecognitionResult.Space -> " "
-                RecognitionResult.Backspace -> "\b"
-                RecognitionResult.Return -> "\n"
-                RecognitionResult.Tab -> "\t"
-                RecognitionResult.Shift -> "[Shift]"
-                RecognitionResult.Caps -> "[Caps]"
-                RecognitionResult.Ctrl -> "[Ctrl]"
-                RecognitionResult.PunctuationShift -> "[PuncShift]"
-                RecognitionResult.DpadLeft -> "[DpadLeft]"
-                RecognitionResult.DpadRight -> "[DpadRight]"
-                RecognitionResult.DpadUp -> "[DpadUp]"
-                RecognitionResult.DpadDown -> "[DpadDown]"
-                RecognitionResult.Cancel -> "[Cancel]"
-                RecognitionResult.Menu -> "[Menu]"
-                RecognitionResult.Ext -> "[Ext]"
-                RecognitionResult.None -> "[None]"
-            }
-        }
-
-        fun logCategory(categoryName: String, list: List<Template>, getResult: (Template) -> RecognitionResult) {
-            val sortedList = list.sortedWith(compareBy({ getSortKey(getResult(it)) }, { it.name }))
-            logI(TAG, "--- $categoryName (${sortedList.size}) ---")
-            sortedList.forEachIndexed { idx, t ->
-                val res = getResult(t)
-                val charCodeStr = if (res is RecognitionResult.CharResult && res.char.isNotEmpty()) {
-                    " (code=${res.char[0].code})"
-                } else ""
-                logI(
-                    TAG,
-                    "[$categoryName #${idx + 1}] ${t.name} -> result=$res$charCodeStr, " +
-                            "dx=${"%.1f".format(t.totalDx)}, dy=${"%.1f".format(t.totalDy)}, " +
-                            "startRegion=${t.startRegion.displayName}, endRegion=${t.endRegion.displayName}, " +
-                            "startEndDist=${"%.1f".format(t.startEndDistance)}, " +
-                            "pathLen=${"%.1f".format(t.pathLength)}"
-                )
-            }
-        }
-
-        logCategory("ALPHA", alphaTemplates) { it.alphaResult }
-        logCategory("NUMERIC", numericTemplates) { it.numericResult }
-        logCategory("PUNCTUATION", punctuationTemplates) { it.punctuationResult }
+    fun logTrainingModelSummary() {
+        val totalCount = alphaTrainingSamples.size + numericTrainingSamples.size + punctuationTrainingSamples.size
+        logI(TAG, "ML Training Model Summary (Total Samples: $totalCount):")
+        logI(TAG, "  ALPHA training samples: ${alphaTrainingSamples.size} entries")
+        logI(TAG, "  NUMERIC training samples: ${numericTrainingSamples.size} entries")
+        logI(TAG, "  PUNCTUATION training samples: ${punctuationTrainingSamples.size} entries")
     }
 }

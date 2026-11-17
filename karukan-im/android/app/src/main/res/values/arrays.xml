@@ -16,9 +16,9 @@
 
     <!-- ライブ変換開始の遅延時間 -->
     <string-array name="pref_live_conversion_debounce_entries">
-        <item>0 ms (即時推論)</item>
+        <item>0 ms (即時推論 / デフォルト)</item>
         <item>50 ms</item>
-        <item>100 ms (デフォルト)</item>
+        <item>100 ms</item>
         <item>150 ms</item>
         <item>200 ms</item>
         <item>300 ms</item>
@@ -260,7 +260,7 @@
         <item>タブレット入力 (US配列)</item>
         <item>ニコタッチ入力 (12キー)</item>
         <item>Graffiti 風入力 (Palm unistroke)</item>
-        <item>内蔵キーボード (Titan / Clicks 等)</item>
+        <item>物理キーボード一体型（内蔵）端末</item>
     </string-array>
     <string-array name="pref_keyboard_layout_values">
         <item>qwerty</item>
@@ -284,27 +284,25 @@
 
     <!-- キーボードテーマ -->
     <string-array name="pref_keyboard_theme_entries">
-        <item>ダーク (デフォルト)</item>
+        <item>システム設定に追従 (デフォルト)</item>
+        <item>ダーク</item>
         <item>ライト</item>
-        <item>システム設定に追従</item>
     </string-array>
     <string-array name="pref_keyboard_theme_values">
+        <item>system</item>
         <item>dark</item>
         <item>light</item>
-        <item>system</item>
     </string-array>
 
     <!-- 物理キーボード配列 -->
     <string-array name="pref_physical_keyboard_layout_entries">
         <item>JIS 109 キーボード (標準)</item>
         <item>標準 US キーボード (補正なし)</item>
-        <item>Unihertz Titan</item>
-        <item>Clicks Communicator</item>
+        <item>物理キーボード一体型（内蔵）端末</item>
     </string-array>
     <string-array name="pref_physical_keyboard_layout_values">
         <item>jis109</item>
         <item>us</item>
-        <item>titan</item>
-        <item>clicks</item>
+        <item>builtin</item>
     </string-array>
 </resources>
