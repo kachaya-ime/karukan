@@ -1,106 +1,17 @@
-# Karukan Android 実装仕様書 (Implementation Guide)
+# Karukan Android 実装仕様・キーバインド詳細 (Implementation Details & Shortcuts)
 
-Karukan IME Android 移植版 (`karukan-im/android`) のモジュール構造、JNI 連携、キーボード処理、辞書管理、手書き認識（Graffiti）、およびライフサイクル制御などの実装情報です。
+本ドキュメントでは、Android 向け Karukan IME フロントエンドモジュール (`karukan-im/android`) における、キーボードショートカット（物理キー・ファンクションキー・Ctrl/Shiftコンビネーション）、他プラットフォームとのキーバインド比較、および手書きストローク認識エンジンの実装詳細について記述します。
 
----
-
-## 1. アプリ・コンポーネント構成
-
-- **入力サービス・表示ビュー**:
-  - `KarukanInputMethodService.kt`: IME ライフサイクル管理（ウィンドウ非表示、入力ビュー終了・開始時のキーボード状態リセット）、キーイベント処理、ライブ変換・確定制御
-  - `KarukanInputView.kt`: キーボード表示、候補インライン表示、フローティング候補表示の親ビュー。絵文字・記号パレットおよび候補展開の管理 (`resetKeyboardState()`, `hideEmojiPalette()`)
-  - `CandidateFlowLayout.kt`: 候補一覧のフローレイアウト管理
-  - `CandidateRenderer.kt`: 入力ビュー内候補（水平バー・展開フロー）およびフローティング候補一覧のビュー生成・描画・スタイリング共通レンダラー
-  - `FloatingCandidateOverlay.kt`: 物理キーボード接続時、カーソル位置追従PopupWindowフローティング表示の独立オーバーレイ管理
-  - `FloatingTooltipOverlay.kt`: 物理キーボード接続時、カーソル位置追従で任意の文字列メッセージやツールチップを短時間表示する汎用オーバーレイヘルパー
-  - `FloatingStatusOverlay.kt`: 非推奨・削除済み（キーボードステータスオーバーレイ）
-- **エンジンブリッジ・設定管理**:
-  - `KarukanEngine.kt`: JNI ブリッジ、GGUF モデル切り替え、Native 辞書・設定・推論制御 (`Companion.calculateOptimalNThreads()` 等)
-  - `EngineAssetPreparer.kt`: HuggingFace GGUF モデル、Tokenizer、システム辞書 (`dict.tgz` / `dict.bin`) アセットの非同期解凍・コピープリペアドライバ
-  - `PreferencesManager.kt`: `SharedPreferences` の読み込みと設定 (`KarukanSettings`) 生成
-  - `KarukanSettings.kt`: 設定データクラス（変換・パフォーマンス・学習・拡張設定・UI・キーショートカット）
-  - `ThemeColors.kt`: テーマカラー管理
-  - `LogUtils.kt`: デバッグ用ログ出力ユーティリティ
-- **キーボードUI・マッパー・手書き認識**:
-  - `KeyboardCommon.kt`: キーボード共通UIモデル、スタイル、イベント定義
-  - `KeyboardLayoutBuilder.kt`: ソフトキーボードレイアウト構築オーケストレーター
-  - `KeyboardLayoutRegistry.kt`: レイアウトプロバイダレジストリ（`qwerty`, `tablet`, `niko`, `builtin`, `graffiti`）
-  - `JsonKeyboardLayoutParser.kt`: JSON設定ファイル (`assets/layouts/*.json`) からの画面キーボード定義パース・キャッシュ制御
-  - `StandardGridKeyboardProvider.kt`: 2次元 `KeySpec` テーブルから標準グリッド配置キーボードを構築・動作制御する共通プロバイダ (`qwerty`, `tablet`, `builtin` で共通利用)
-  - `NikoKeyboardLayout.kt`: ニコタッチ入力レイアウト & マッパー（ベクターアイコン対応絵文字キー含む）
-  - `GraffitiKeyboardLayout.kt`: Palm OS Graffiti (unistroke) 手書き入力レイアウトプロバイダ
-  - `GraffitiAreaView.kt`: 手書きストローク描画ビュー
-  - `GraffitiStrokeRecognizer.kt`: テンプレートマッチングによる手書きストローク文字・ジェスチャー認識エンジン（`graffiti_templates.json`, テンプレート回転・正規化特徴量仕様は [GRAFFITI_TEMPLATES_FEATURES.md](GRAFFITI_TEMPLATES_FEATURES.md) を参照）
-  - `GraffitiHelpDialog.kt`: 手書き認識のヘルプ・テンプレート一覧ダイアログ
-  - `KeyEventMapper.kt`: 物理キーボード KeyEvent 変換マッパー
-  - `KeyAction.kt`: キーボードキーアクション定義
-  - `EmojiPaletteController.kt`: ViewPager2 + RecyclerView を用いた絵文字・記号パレット制御（カテゴリ別タブ・グリッド描画、通常/シンボルモード対応）
-- **辞書・学習管理・拡張設定・アクティビティ**:
-  - `UserDictFileManager.kt`: TSVユーザー辞書エントリのCRUD、追加辞書インポート、プリセット辞書の切り替え・削除マネージャー
-  - `CandidateFilterManager.kt`: AIモデル・ユーザー辞書・学習履歴・リライターのソース絞り込みフィルターおよび絵文字検索候補マネージャー
-  - `TextTransformUtils.kt`: アノテーション除去 (`extractPureCandidate`)、全角/半角カタカナ・英数変換、ペア括弧判定ユーティリティ
-  - `DictUtils.kt`: 辞書ファイルサイズ表記・Uriファイル名・進捗表示ダイアログユーティリティ
-  - `SettingsActivity.kt`: 設定画面 (`PreferenceFragmentCompat`)
-  - `UserDictContentActivity.kt`: ユーザー辞書・追加辞書編集アクティビティ
-  - `PresetDictActivity.kt`: プリセット辞書管理アクティビティ
-  - `LearningListActivity.kt`: 学習履歴表示・編集アクティビティ
-  - `PersonaListActivity.kt`: AIペルソナ管理アクティビティ (`PersonaItem`)
-  - `DatePhraseListActivity.kt`: 日付・時刻フレーズ設定アクティビティ (`DateConfigData`)
-  - `KeyShortcutListActivity.kt`: キーボードショートカットカスタマイズアクティビティ (`KeyShortcutItem`)
+（※アーキテクチャ設計については [DESIGN.md](DESIGN.md)、機能仕様および JNI インターフェースについては [SPECIFICATION.md](SPECIFICATION.md)、エンドユーザー向け操作手順については [MANUAL.md](MANUAL.md) を参照してください。）
 
 ---
 
-## 2. IME ライフサイクルとキーボード状態管理
-
-Karukan IME では、IME のライフサイクルイベントに応じてキーボードの表示状態（メインキーボード、絵文字・記号パレット、候補展開ビューなど）を制御する仕組みを備えています。
-
-- **`onWindowHidden()`**: IME ウィンドウが非表示になった際、`KarukanInputView.resetKeyboardState()` を呼び出してパレットや展開候補を非表示状態にします。
-- **`onFinishInputView(boolean finishingInput)`**: 入力ビューが終了する際、キーボード表示状態を標準のメインキーボードに復元します。
-- **`onFinishInput()`**: 入力セッションの終了時にオーバーレイやパレットを閉じます。
-- **`onStartInputView(EditorInfo attribute, boolean restarting)`**: 新しい入力セッションの開始時にキーボード状態をリセットし、メインキーボードとパレット等の重畳表示を防止します。
-
----
-
-## 3. JNI (Rust / Native) 連携仕様
-
-JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotlin層 (`KarukanEngine.kt`) のメソッドは 1 対 1 で対応しています。
-
-| JNI関数名 (`src/lib.rs`) | Kotlin側メソッド (`KarukanEngine.kt`) | 主な機能・役割 |
-|---|---|---|
-| `nativeInit` | `init { ... }` (初期化) | AIモデル (`.gguf`) のロードと初期化 |
-| `nativeLoadSystemDict` | `loadSystemDict()` | システム辞書 (`dict.bin`) のロード |
-| `nativeLoadUserDicts` | `loadUserDicts()` | ユーザー辞書・追加辞書のロード |
-| `nativeUpdateEngineConfig` | `updateEngineConfig(settings)` | 全設定の一括更新 (推論スレッド数, ストラテジー, チャンク, ビームサーチ, ペルソナ, 記号・幅スタイル, 最大学習数, 最大学習見出し長) |
-| `nativeConvert` | `convert(query, maxCandidates, context, queryId, sourceFilter)` | かな漢字変換の候補生成（日付・ユーザー辞書・AIモデル・カタカナ・絵文字・システム辞書・学習履歴の結合、ソースフィルタリングおよびキャンセル判定） |
-| `nativeCancelQuery` | `cancelQuery(queryId)` | ライブ変換（リアルタイム推論）のキャンセル |
-| `nativeResetEngine` | `resetEngine()` | エンジンインスタンスのリセット |
-| `nativeRecordLearning` | `recordLearning(reading, surface)` | 選択された変換候補の学習履歴への記録 |
-| `nativeRemoveLearning` | `removeLearningEntry(reading, surface)` | 学習履歴から特定のエントリを削除 |
-| `nativeSaveLearning` | `backupLearningToStream` | 学習履歴のバックアップ（TSVファイルストリーム出力） |
-| `nativeLoadLearning` | `restoreLearningFromStream` | 学習履歴の復元（TSVファイルを内部学習辞書へ上書きコピーし、ネイティブパースによりカウント・タイムスタンプをロスレスで読み込み） |
-| `nativeClearLearning` | `clearLearning()` | メモリ上の学習キャッシュのクリア |
-| `nativeRomajiToHiragana` | `romajiToHiragana(query)` | ローマ字→ひらがな変換 |
-| `nativeRomajiToHiraganaFlush` | `romajiToHiraganaFlush(query)` | ローマ字→ひらがな変換のフラッシュ（末尾の未確定ローマ字の確定処理） |
-| `nativeToHankakuKatakana` | `toHankakuKatakana(input)` | 全角カタカナ→半角カタカナ変換 |
-| `nativeToZenkakuAlphanumeric` | `toZenkakuAlphanumeric(input)` | 半角英数→全角英数変換 |
-| `nativeSetDateConfigJson` | `setDateConfigJson(json)` | 日付・時刻フレーズ設定 (JSON) のNative側への伝達 |
-
-### 設定更新 (`nativeUpdateEngineConfig`) で伝達されるパラメータ
-
-`KarukanSettings` の各種設定値は `nativeUpdateEngineConfig` 1 つの JNI 関数を介して Native 側に一括伝達されます。
-
-- **推論パラメータ**: `nThreads`, `strategy`, `maxLatencyMs`, `chunkChars`, `chunkSymbols`, `chunkDigits`, `chunkAlphabets`, `beamWidth`, `beamChars`, `persona`, `useContext`, `contextChars`
-- **記号・文字幅スタイル**: `punctuationStyle`, `bracketStyle`, `slashStyle`, `spaceStyle`, `kanaSymbolWidth`, `asciiWidth`, `digitWidth`
-- **変換学習設定**: `maxLearningEntries`, `maxLearningSurfaceChars`, `isLearningEnabled`, `isDateConversionEnabled`
-
----
-
-## 4. ショートカットキー・物理キーボード対応仕様 (Keyboard Shortcuts)
+## 1. ショートカットキー・物理キーボード対応仕様 (Keyboard Shortcuts)
 
 他フロントエンド（fcitx5 / macOS）との互換性を持つ物理キーボードおよびソフトキーボードのショートカット仕様です。
 設定画面の「キーショートカットの設定」から、ユーザーがキーの組み合わせとアクションを自由に変更・定義・未割り当て化できます。（※Android標準の編集ショートカット Ctrl+A, C, V, X, Z は安全のため予約済みとして固定されています）
 
-### ファンクションキー変換 (Function Keys)
+### 1.1. ファンクションキー変換 (Function Keys)
 | キー | 機能 | 動作・処理 |
 |---|---|---|
 | **F6** | ひらがな変換 | 入力中の文字列をひらがなへ変換（未確定表示） |
@@ -109,7 +20,7 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **F9** | 全角英数変換 | 入力中の文字列を全角英数へ変換（連続押下で小文字/大文字/頭大文字トグル、未確定表示） |
 | **F10** | 半角英数変換 | 入力中の文字列を半角英数へ変換（連続押下で小文字/大文字/頭大文字トグル、未確定表示） |
 
-### Ctrl キーショートカット (Ctrl Shortcuts)
+### 1.2. Ctrl キーショートカット (Ctrl Shortcuts)
 | ショートカット | 機能 | 動作・制御条件 | 仕様区分 |
 |---|---|---|---|
 | **Ctrl + A** | 全選択 | 編集領域のテキスト全選択 (`selectAllEditingArea` -> `InputConnection.selectAll`) | 共通仕様 |
@@ -142,15 +53,15 @@ JNI層 (`src/lib.rs`) で提供されている全ネイティブ関数と、Kotl
 | **Ctrl + Backspace / Delete** | 候補学習削除 | 選択中の変換候補を学習辞書から削除 (`onDeleteSelectedCandidate`) | 共通仕様 |
 | **Ctrl + Space** | モード切替 | 日本語(ひらがな) / 英語(英数) モードのトグル切替 (`onToggleLanguageMode`) | 共通仕様 |
 
-### Shift キー組み合わせ操作 (Shift Combinations)
+### 1.3. Shift キー組み合わせ操作 (Shift Combinations)
 | ショートカット | 機能 | 動作・処理 |
 |---|---|---|
 | **Shift + ← / → / ↑ / ↓** | テキスト範囲選択 | 選択範囲を変更する KeyEvent を送信 (`sendKeyEvent` with `META_SHIFT_ON`) |
 | **Shift + Tab** | 逆方向移動 / 前候補 | 候補選択時は前候補選択、非入力時は逆方向フォーカス移動 |
 | **Shift + Space** | 全角スペース / 前候補 | 入力中/変換時: 前候補選択 (`onPreviousCandidate`) / 非入力時: 全角スペースを入力 (`onFullWidthSpace`) |
 
-### JIS 109キーボード物理キー仕様 (JIS 109 Physical Keyboard Keys)
-JIS 109キーボード特有の物理キー（スキャンコード対応）の動作仕様です。最近のWindows標準IME等の挙動に準拠しています。
+### 1.4. JIS 109キーボード物理キー仕様 (JIS 109 Physical Keyboard Keys)
+JIS 109キーボード特有の物理キー（スキャンコード対応）の動作仕様です。
 
 | キー | 機能 | 動作・処理 |
 |---|---|---|
@@ -162,7 +73,7 @@ JIS 109キーボード特有の物理キー（スキャンコード対応）の�
 
 ---
 
-## 5. 他の Karukan フロントエンドとの動作仕様比較 (Cross-Platform Frontend Comparison)
+## 2. 他の Karukan フロントエンドとの動作仕様比較 (Cross-Platform Frontend Comparison)
 
 `karukan-im` リポジトリ内の各フロントエンド（`karukan-im/fcitx5`, `karukan-im/macos`, `karukan-im/windows`）と `karukan-im/android` のキーバインド・アクション比較です。
 
@@ -192,7 +103,7 @@ JIS 109キーボード特有の物理キー（スキャンコード対応）の�
 
 ---
 
-## 6. 手書きストローク認識エンジン仕様 (Graffiti Stroke Recognition Engine)
+## 3. 手書きストローク認識エンジン仕様 (Graffiti Stroke Recognition Engine)
 
 Palm OS Graffiti (unistroke) 手書き入力エリア (`GraffitiAreaView`) におけるジェスチャー認識は、固定的な単純テンプレートマッチングではなく、**機械学習型・高次元特徴量ベースの重み付き k-NN 分類器**を採用しています。
 

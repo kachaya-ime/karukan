@@ -5,8 +5,10 @@ Android 向け Karukan IME フロントエンドモジュールです。
 
 ## ドキュメント
 
-- [実装仕様書 (IMPLEMENTATION.md)](IMPLEMENTATION.md) - JNI (Rust) 連携仕様、コンポーネント構成、手書き認識（Graffiti）、および物理キーボードショートカット一覧
-- [ユーザーマニュアル (MANUAL.md)](MANUAL.md) - 各種キーボードレイアウト（QWERTY、タブレット、ニコタッチ、ビルトイン、グラフィティ手書き）、設定、辞書管理、AIペルソナ、バックアップ・復元の手順
+- [アーキテクチャ設計書 (DESIGN.md)](DESIGN.md) - 全体設計、レイヤー構成、データフロー、スレッドモデル、およびメモリ管理
+- [機能・インターフェース仕様書 (SPECIFICATION.md)](SPECIFICATION.md) - 入力方式、変換・推論、学習・辞書、および JNI インターフェース一覧
+- [実装仕様・キーバインド詳細 (IMPLEMENTATION.md)](IMPLEMENTATION.md) - 物理キーボードショートカット、他プラットフォーム比較、および手書き認識（Graffiti）エンジン詳細
+- [ユーザーマニュアル (MANUAL.md)](MANUAL.md) - 各種キーボードレイアウト、設定、辞書管理、AIペルソナ、バックアップ・復元の手順
 
 ## 機能仕様
 
