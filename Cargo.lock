@@ -1798,6 +1798,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "karukan-im-windows"
+version = "0.1.1"
+dependencies = [
+ "chrono",
+ "karukan-engine",
+ "karukan-im",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
 name = "konst"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
