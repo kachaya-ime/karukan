@@ -27,7 +27,27 @@ use super::edit_session::{capture_surrounding_text, EditSession, EDIT_SESSION_FL
 
 const VK_IME_ON_CODE: u16 = 0x16;
 const VK_IME_OFF_CODE: u16 = 0x1A;
+pub(crate) const VK_KANJI_CODE: u16 = 0x19;
+pub(crate) const VK_OEM_AUTO_CODE: u16 = 0xF3;
+pub(crate) const VK_OEM_ENLW_CODE: u16 = 0xF4;
+pub(crate) const VK_OEM_3_CODE: u16 = 0xC0;
 const VK_DBE_HIRAGANA_CODE: u16 = 0xF2;
+
+pub(crate) fn is_ime_toggle_key(vk: u16, modifiers: &KeyModifiers) -> bool {
+    if modifiers.super_key {
+        return false;
+    }
+    if modifiers.alt_key && vk == VK_OEM_3_CODE {
+        return true;
+    }
+    if vk == VK_KANJI_CODE {
+        return true;
+    }
+    if !modifiers.alt_key && (vk == VK_OEM_AUTO_CODE || vk == VK_OEM_ENLW_CODE) {
+        return true;
+    }
+    false
+}
 
 pub(crate) fn is_ime_open_key(vk: u16, modifiers: &KeyModifiers) -> bool {
     if modifiers.alt_key || modifiers.super_key {
@@ -47,6 +67,73 @@ pub(crate) fn is_ime_close_key(vk: u16, modifiers: &KeyModifiers) -> bool {
         return false;
     }
     is_english_mode_key(vk)
+}
+
+pub(crate) fn close_ime(
+    thread_mgr: &ITfThreadMgr,
+    client_id: u32,
+    thread_id: u32,
+    context: Option<&ITfContext>,
+    composition: &Rc<RefCell<Option<ITfComposition>>>,
+    candidate_popup: &Rc<RefCell<CandidatePopup>>,
+    engine: &Arc<Mutex<InputMethodEngine>>,
+) -> windows::core::Result<()> {
+    if let Some(context) = context {
+        let session: ITfEditSession = EditSession {
+            context: context.clone(),
+            actions: vec![EngineAction::HideCandidates, EngineAction::HideAuxText],
+            composition: composition.clone(),
+            candidate_popup: candidate_popup.clone(),
+            end_composition: true,
+            reset_engine: Some(engine.clone()),
+        }
+        .into();
+        unsafe {
+            let _ = context.RequestEditSession(thread_id, &session, EDIT_SESSION_FLAGS);
+        }
+    }
+    let _ = set_input_mode_conversion(thread_mgr, client_id, TF_CONVERSIONMODE_ALPHANUMERIC);
+    set_ime_openclose(thread_mgr, client_id, false)?;
+    if let Ok(mut eng) = engine.lock() {
+        eng.set_surrounding_context("", "");
+    }
+    Ok(())
+}
+
+pub(crate) fn open_ime(thread_mgr: &ITfThreadMgr, client_id: u32) -> windows::core::Result<()> {
+    set_ime_openclose(thread_mgr, client_id, true)?;
+    let _ = set_input_mode_conversion(
+        thread_mgr,
+        client_id,
+        TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
+    );
+    Ok(())
+}
+
+pub(crate) fn toggle_ime(
+    thread_mgr: &ITfThreadMgr,
+    client_id: u32,
+    thread_id: u32,
+    context: Option<&ITfContext>,
+    composition: &Rc<RefCell<Option<ITfComposition>>>,
+    candidate_popup: &Rc<RefCell<CandidatePopup>>,
+    engine: &Arc<Mutex<InputMethodEngine>>,
+) -> windows::core::Result<()> {
+    let is_open = get_ime_openclose(thread_mgr).unwrap_or(true);
+    if is_open {
+        close_ime(
+            thread_mgr,
+            client_id,
+            thread_id,
+            context,
+            composition,
+            candidate_popup,
+            engine,
+        )?;
+    } else {
+        open_ime(thread_mgr, client_id)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn convert_function_key(text: &str, vk: u16) -> String {
@@ -174,6 +261,11 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
         let vk = wparam.0 as u16;
         let modifiers = current_modifiers();
 
+        // 0. 半角/全角などのトグルキー
+        if is_ime_toggle_key(vk, &modifiers) {
+            return Ok(BOOL(1));
+        }
+
         // 1. 直接入力（英数）切り替えキー（無変換、英数など）
         if is_ime_close_key(vk, &modifiers) {
             return Ok(BOOL(1));
@@ -244,7 +336,10 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
     ) -> windows::core::Result<BOOL> {
         let vk = wparam.0 as u16;
         let modifiers = current_modifiers();
-        if is_ime_close_key(vk, &modifiers) || is_ime_open_key(vk, &modifiers) {
+        if is_ime_toggle_key(vk, &modifiers)
+            || is_ime_close_key(vk, &modifiers)
+            || is_ime_open_key(vk, &modifiers)
+        {
             return Ok(BOOL(1));
         }
         Ok(BOOL(0))
@@ -259,31 +354,31 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
         let vk = wparam.0 as u16;
         let modifiers = current_modifiers();
 
-        // 1. 直接入力（英数）切り替えキー（無変換、英数など）
-        if is_ime_close_key(vk, &modifiers) {
-            if let Some(context) = context.as_ref() {
-                let session: ITfEditSession = EditSession {
-                    context: context.clone(),
-                    actions: vec![EngineAction::HideCandidates, EngineAction::HideAuxText],
-                    composition: self.composition.clone(),
-                    candidate_popup: self.candidate_popup.clone(),
-                    end_composition: true,
-                    reset_engine: Some(self.engine.clone()),
-                }
-                .into();
-                unsafe {
-                    let _ = context.RequestEditSession(self.thread_id, &session, EDIT_SESSION_FLAGS);
-                }
-            }
-            let _ = set_input_mode_conversion(
+        // 0. 半角/全角などのトグルキー
+        if is_ime_toggle_key(vk, &modifiers) {
+            toggle_ime(
                 &self.thread_mgr,
                 self.client_id,
-                TF_CONVERSIONMODE_ALPHANUMERIC,
-            );
-            set_ime_openclose(&self.thread_mgr, self.client_id, false)?;
-            if let Ok(mut engine) = self.engine.lock() {
-                engine.set_surrounding_context("", "");
-            }
+                self.thread_id,
+                context.as_ref(),
+                &self.composition,
+                &self.candidate_popup,
+                &self.engine,
+            )?;
+            return Ok(BOOL(1));
+        }
+
+        // 1. 直接入力（英数）切り替えキー（無変換、英数など）
+        if is_ime_close_key(vk, &modifiers) {
+            close_ime(
+                &self.thread_mgr,
+                self.client_id,
+                self.thread_id,
+                context.as_ref(),
+                &self.composition,
+                &self.candidate_popup,
+                &self.engine,
+            )?;
             return Ok(BOOL(1));
         }
 
@@ -291,12 +386,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
         let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
         if !is_open {
             if is_ime_open_key(vk, &modifiers) {
-                set_ime_openclose(&self.thread_mgr, self.client_id, true)?;
-                let _ = set_input_mode_conversion(
-                    &self.thread_mgr,
-                    self.client_id,
-                    TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
-                );
+                open_ime(&self.thread_mgr, self.client_id)?;
                 return Ok(BOOL(1));
             }
             return Ok(BOOL(0));
@@ -491,7 +581,10 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
     ) -> windows::core::Result<BOOL> {
         let vk = wparam.0 as u16;
         let modifiers = current_modifiers();
-        if is_ime_close_key(vk, &modifiers) || is_ime_open_key(vk, &modifiers) {
+        if is_ime_toggle_key(vk, &modifiers)
+            || is_ime_close_key(vk, &modifiers)
+            || is_ime_open_key(vk, &modifiers)
+        {
             return Ok(BOOL(1));
         }
         Ok(BOOL(0))
@@ -499,9 +592,25 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
 
     fn OnPreservedKey(
         &self,
-        _context: Ref<ITfContext>,
-        _guid: *const GUID,
+        context: Ref<ITfContext>,
+        guid: *const GUID,
     ) -> windows::core::Result<BOOL> {
+        if guid.is_null() {
+            return Ok(BOOL(0));
+        }
+        let guid = unsafe { *guid };
+        if guid == crate::GUID_PRESERVEDKEY_TOGGLE {
+            toggle_ime(
+                &self.thread_mgr,
+                self.client_id,
+                self.thread_id,
+                context.as_ref(),
+                &self.composition,
+                &self.candidate_popup,
+                &self.engine,
+            )?;
+            return Ok(BOOL(1));
+        }
         Ok(BOOL(0))
     }
 }
@@ -509,12 +618,40 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
 #[cfg(test)]
 mod tests {
     use super::{
-        control_keysym, is_english_mode_key, is_ime_close_key, is_ime_open_key,
+        control_keysym, is_english_mode_key, is_ime_close_key, is_ime_open_key, is_ime_toggle_key,
+        VK_KANJI_CODE, VK_OEM_3_CODE, VK_OEM_AUTO_CODE, VK_OEM_ENLW_CODE,
     };
     use karukan_im::core::keycode::KeyModifiers;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         VK_CONVERT, VK_DBE_ALPHANUMERIC, VK_KANA, VK_NONCONVERT,
     };
+
+    #[test]
+    fn ime_toggle_keys_recognized() {
+        let no_mods = KeyModifiers::default();
+        let alt_mod = KeyModifiers {
+            alt_key: true,
+            ..Default::default()
+        };
+        let super_mod = KeyModifiers {
+            super_key: true,
+            ..Default::default()
+        };
+
+        // 半角/全角キー (0xF3 / 0xF4)
+        assert!(is_ime_toggle_key(VK_OEM_AUTO_CODE, &no_mods));
+        assert!(is_ime_toggle_key(VK_OEM_ENLW_CODE, &no_mods));
+        assert!(!is_ime_toggle_key(VK_OEM_AUTO_CODE, &super_mod));
+
+        // 漢字キー / Alt + 半角全角 (0x19)
+        assert!(is_ime_toggle_key(VK_KANJI_CODE, &no_mods));
+        assert!(is_ime_toggle_key(VK_KANJI_CODE, &alt_mod));
+        assert!(!is_ime_toggle_key(VK_KANJI_CODE, &super_mod));
+
+        // Alt + `~` (0xC0)
+        assert!(is_ime_toggle_key(VK_OEM_3_CODE, &alt_mod));
+        assert!(!is_ime_toggle_key(VK_OEM_3_CODE, &no_mods));
+    }
 
     #[test]
     fn ime_open_and_close_keys_recognized() {

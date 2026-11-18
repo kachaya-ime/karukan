@@ -9,11 +9,12 @@ use windows::Win32::Foundation::E_POINTER;
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfClientId, ITfCompartmentEventSink, ITfKeyEventSink,
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor,
-    ITfTextInputProcessor_Impl, ITfThreadMgr,
+    ITfTextInputProcessor_Impl, ITfThreadMgr, TF_MOD_ALT, TF_MOD_IGNORE_ALL_MODIFIER,
+    TF_PRESERVEDKEY,
 };
 
 use crate::{
-    CLSID_KARUKAN_TIP, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION,
+    CLSID_KARUKAN_TIP, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_PRESERVEDKEY_TOGGLE,
     TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_NATIVE, TF_CONVERSIONMODE_ROMAN,
 };
 
@@ -22,8 +23,17 @@ use super::compartment::{
     set_ime_openclose, set_input_mode_conversion, CompartmentSink,
 };
 use super::init_logging;
-use super::key_handler::KeyHandler;
+use super::key_handler::{
+    KeyHandler, VK_KANJI_CODE, VK_OEM_3_CODE, VK_OEM_AUTO_CODE, VK_OEM_ENLW_CODE,
+};
 use super::lang_bar::LangBarButton;
+
+const PRESERVED_TOGGLE_KEYS: [(u32, u32); 4] = [
+    (VK_KANJI_CODE as u32, TF_MOD_IGNORE_ALL_MODIFIER),
+    (VK_OEM_AUTO_CODE as u32, TF_MOD_IGNORE_ALL_MODIFIER),
+    (VK_OEM_ENLW_CODE as u32, TF_MOD_IGNORE_ALL_MODIFIER),
+    (VK_OEM_3_CODE as u32, TF_MOD_ALT),
+];
 
 pub(crate) fn spawn_settings_app() {
     let local_app_data = std::env::var_os("LOCALAPPDATA");
@@ -104,6 +114,19 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         unsafe {
             keystroke_mgr.AdviseKeyEventSink(thread_id, &key_sink, true)?;
         }
+        for (vkey, modifiers) in PRESERVED_TOGGLE_KEYS {
+            let prekey = TF_PRESERVEDKEY {
+                uVKey: vkey,
+                uModifiers: modifiers,
+            };
+            if let Err(error) = unsafe {
+                keystroke_mgr.PreserveKey(client_id, &GUID_PRESERVEDKEY_TOGGLE, &prekey, &[])
+            } {
+                tracing::warn!(
+                    "failed to preserve toggle key ({vkey:#x}, {modifiers:#x}): {error}"
+                );
+            }
+        }
         let lang_bar_sink = Rc::new(RefCell::new(None));
         let sink: ITfCompartmentEventSink = CompartmentSink {
             engine: engine.clone(),
@@ -168,6 +191,15 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             self.thread_id.borrow_mut().take(),
             self.keystroke_mgr.borrow_mut().take(),
         ) {
+            for (vkey, modifiers) in PRESERVED_TOGGLE_KEYS {
+                let prekey = TF_PRESERVEDKEY {
+                    uVKey: vkey,
+                    uModifiers: modifiers,
+                };
+                let _ = unsafe {
+                    keystroke_mgr.UnpreserveKey(&GUID_PRESERVEDKEY_TOGGLE, &prekey)
+                };
+            }
             if let Err(error) = unsafe { keystroke_mgr.UnadviseKeyEventSink(thread_id) } {
                 tracing::warn!("failed to unadvise Karukan key sink: {error}");
             }

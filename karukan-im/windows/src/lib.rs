@@ -7,6 +7,9 @@ pub const CLSID_KARUKAN_TIP: windows_core::GUID =
 pub const GUID_KARUKAN_PROFILE: windows_core::GUID =
     windows_core::GUID::from_u128(0x9d8e6e3a_8f6d_45d3_a0b1_9b1e391f01a1);
 #[cfg(windows)]
+pub const GUID_PRESERVEDKEY_TOGGLE: windows_core::GUID =
+    windows_core::GUID::from_u128(0x7d7a2c6e_4d65_4ab8_8f30_4a1f2c83f81c);
+#[cfg(windows)]
 pub const GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT: windows_core::GUID =
     windows_core::GUID::from_u128(0x25504fb4_7bab_4bc1_9c69_cf81890f0ef5);
 #[cfg(windows)]

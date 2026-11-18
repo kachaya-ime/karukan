@@ -12,16 +12,22 @@ mod app {
     use chrono::{DateTime, Local};
     use karukan_im::config::Settings;
     use toml::Value;
-    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, GetSysColorBrush, UpdateWindow};
+    use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{
+        BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect,
+        GetSysColorBrush, SelectObject, SetBkMode, SetTextColor, TextOutW, UpdateWindow,
+        COLOR_WINDOW, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
+        HBRUSH, HDC, HFONT, HGDIOBJ, PAINTSTRUCT, TRANSPARENT,
+    };
     use windows::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Controls::{
-        ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, LVCF_TEXT, LVCF_WIDTH,
-        LVCFMT_LEFT, LVCOLUMNW, LVIF_TEXT, LVIS_SELECTED, LVITEMW, LVM_DELETEALLITEMS,
-        LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETCOLUMNW, LVM_SETCOLUMNWIDTH,
+        DRAWITEMSTRUCT, MEASUREITEMSTRUCT, SetWindowTheme, ICC_LISTVIEW_CLASSES,
+        INITCOMMONCONTROLSEX, InitCommonControlsEx, LVCF_TEXT, LVCF_WIDTH, LVCFMT_LEFT,
+        LVCOLUMNW, LVIF_TEXT, LVIS_SELECTED, LVITEMW, LVM_DELETEALLITEMS, LVM_GETNEXTITEM,
+        LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETCOLUMNW, LVM_SETCOLUMNWIDTH,
         LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMTEXTW, LVN_COLUMNCLICK, LVN_ITEMCHANGED,
         LVNI_SELECTED, LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL,
         NMLISTVIEW, SetScrollInfo,
@@ -31,16 +37,34 @@ mod app {
         CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW, ES_AUTOHSCROLL,
         ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, ES_WANTRETURN, GetClientRect, GetMessageW,
         GetScrollInfo, GetWindowTextLengthW, GetWindowTextW, IDYES, LB_ADDSTRING, LB_GETCURSEL,
-        LB_SETCURSEL, LBN_SELCHANGE, LBS_NOTIFY, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO,
-        MSG, MessageBoxW, MoveWindow, PostQuitMessage, RegisterClassW, SB_LINEDOWN, SB_LINEUP,
-        SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO,
-        SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SendMessageW, SetWindowTextW, ShowWindow,
+        LB_SETCURSEL, LBN_SELCHANGE, LBS_HASSTRINGS, LBS_NOINTEGRALHEIGHT, LBS_NOTIFY,
+        LBS_OWNERDRAWFIXED, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO, MSG, MessageBoxW,
+        MoveWindow, PostQuitMessage, RegisterClassW, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN,
+        SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_ALL,
+        SIF_PAGE, SIF_POS, SIF_RANGE, SendMessageW, SetWindowTextW, ShowWindow,
         TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
-        WM_CTLCOLORSTATIC, WM_DESTROY, WM_MOUSEWHEEL, WM_NOTIFY, WM_SIZE, WM_VSCROLL, WNDCLASSW,
-        WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_GROUP, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
-        WS_VSCROLL,
+        WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_MEASUREITEM,
+        WM_MOUSEWHEEL, WM_NOTIFY, WM_PAINT, WM_SIZE, WM_VSCROLL, WNDCLASSW, WS_BORDER, WS_CHILD,
+        WS_CLIPCHILDREN, WS_GROUP, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WS_VSCROLL,
     };
     use windows::core::{PCWSTR, PWSTR, w};
+
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: HWND,
+            dwAttribute: u32,
+            pvAttribute: *const c_void,
+            cbAttribute: u32,
+        ) -> windows::core::HRESULT;
+    }
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+    const ODS_SELECTED_FLAG: u32 = 0x0001;
+    const SIDEBAR_ITEM_HEIGHT: i32 = 40;
+    const SIDEBAR_WIDTH: i32 = 200;
+    const CONTENT_MARGIN: i32 = 20;
+    const DIVIDER_GAP: i32 = 24;
 
     const CLASS_NAME: windows::core::PCWSTR = w!("KarukanSettingsWindow");
     const SETTINGS_PANEL_CLASS: windows::core::PCWSTR = w!("KarukanSettingsPanel");
@@ -67,7 +91,37 @@ mod app {
     const USER_COMMENT_LABEL_ID: usize = 1024;
     const LICENSE_TEXT_ID: usize = 1025;
     const SETTING_CONTROL_ID_BASE: usize = 2000;
-    const SETTING_INPUT_HEIGHT: i32 = 28;
+    const SETTING_INPUT_HEIGHT: i32 = 32;
+    const WM_SETFONT: u32 = 0x0030;
+    const LVS_EX_DOUBLEBUFFER: u32 = 0x00010000;
+
+    fn create_ui_font(height: i32, weight: i32) -> HFONT {
+        let font_name = wide("Yu Gothic UI");
+        unsafe {
+            CreateFontW(
+                height,
+                0,
+                0,
+                0,
+                weight,
+                0,
+                0,
+                0,
+                FONT_CHARSET(1),
+                FONT_OUTPUT_PRECISION(0),
+                FONT_CLIP_PRECISION(0),
+                FONT_QUALITY(5),
+                0,
+                PCWSTR(font_name.as_ptr()),
+            )
+        }
+    }
+
+    fn set_control_font(hwnd: HWND, font: HFONT) {
+        if hwnd.0 != 0 as _ {
+            send(hwnd, WM_SETFONT, font.0 as usize, 1);
+        }
+    }
     const LICENSE_TEXT: &str = concat!(
         "Karukan is licensed under either of the following licenses, at your option.\r\n\r\n",
         "==================== MIT License ====================\r\n\r\n",
@@ -151,11 +205,18 @@ mod app {
         delete_learning: HWND,
         clear_learning: HWND,
         status: HWND,
+        ui_font: HFONT,
+        title_font: HFONT,
+        bold_font: HFONT,
+        small_font: HFONT,
+        window_brush: HBRUSH,
+        panel_brush: HBRUSH,
+        sidebar_brush: HBRUSH,
     }
 
     fn setting_input_height(kind: &SettingInput) -> i32 {
         match kind {
-            SettingInput::Edit { multiline: true } => 96,
+            SettingInput::Edit { multiline: true } => 104,
             _ => SETTING_INPUT_HEIGHT,
         }
     }
@@ -165,7 +226,7 @@ mod app {
             .chars()
             .map(|character| if character.is_ascii() { 8 } else { 16 })
             .sum::<i32>();
-        (text_width + 28).max(56)
+        (text_width + 36).max(72)
     }
 
     thread_local! {
@@ -837,6 +898,8 @@ mod app {
     fn create_setting_controls(
         hwnd: HWND,
         config: &Value,
+        ui_font: HFONT,
+        bold_font: HFONT,
     ) -> windows::core::Result<Vec<SettingControl>> {
         let mut controls = Vec::new();
         let mut next_id = SETTING_CONTROL_ID_BASE;
@@ -857,6 +920,7 @@ mod app {
                     WS_CHILD | WS_VISIBLE,
                     label_id,
                 )?;
+                set_control_font(label, bold_font);
                 let (input, kind) = if let Some(options) = enum_options(section, &key) {
                     let options: Vec<String> =
                         options.iter().map(|option| (*option).to_string()).collect();
@@ -871,13 +935,15 @@ mod app {
                             } else {
                                 WINDOW_STYLE(0)
                             };
-                        buttons.push(add_control(
+                        let button = add_control(
                             hwnd,
                             w!("BUTTON"),
                             PCWSTR(text.as_ptr()),
                             style,
                             next_id,
-                        )?);
+                        )?;
+                        set_control_font(button, ui_font);
+                        buttons.push(button);
                         next_id += 1;
                     }
                     let input = *buttons
@@ -892,6 +958,7 @@ mod app {
                         WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
                         next_id,
                     )?;
+                    set_control_font(input, ui_font);
                     next_id += 1;
                     (input, SettingInput::Check)
                 } else {
@@ -914,6 +981,7 @@ mod app {
                         )
                     };
                     let input = add_control(hwnd, w!("EDIT"), text, style, next_id)?;
+                    set_control_font(input, ui_font);
                     next_id += 1;
                     (input, SettingInput::Edit { multiline })
                 };
@@ -1654,9 +1722,22 @@ mod app {
     }
 
     fn create_controls(hwnd: HWND) -> windows::core::Result<()> {
-        let category_style =
-            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WINDOW_STYLE(LBS_NOTIFY as u32);
+        let ui_font = create_ui_font(-14, 400);
+        let bold_font = create_ui_font(-14, 600);
+        let title_font = create_ui_font(-20, 600);
+        let small_font = create_ui_font(-12, 400);
+        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+        let panel_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
+        let sidebar_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+
+        let category_style = WS_CHILD
+            | WS_VISIBLE
+            | WINDOW_STYLE(
+                (LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT) as u32,
+            );
         let categories = add_control(hwnd, w!("LISTBOX"), w!(""), category_style, CATEGORY_ID)?;
+        set_control_font(categories, ui_font);
+
         let settings_panel = add_control(
             hwnd,
             SETTINGS_PANEL_CLASS,
@@ -1682,17 +1763,19 @@ mod app {
                 | WINDOW_STYLE(LVS_REPORT | LVS_SHOWSELALWAYS),
             LEARNING_GRID_ID,
         )?;
+        let _ = unsafe { SetWindowTheme(learning_grid, w!("Explorer"), PCWSTR::null()) };
         let _ = send(
             learning_grid,
             LVM_SETEXTENDEDLISTVIEWSTYLE,
-            LVS_EX_FULLROWSELECT as usize,
-            LVS_EX_FULLROWSELECT as isize,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as usize,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
+        set_control_font(learning_grid, ui_font);
         for (index, (title, width)) in [
-            ("読み", 100),
-            ("表記", 160),
-            ("選択回数", 75),
-            ("最終選択", 155),
+            ("読み", 110),
+            ("表記", 180),
+            ("選択回数", 85),
+            ("最終選択", 175),
         ]
         .into_iter()
         .enumerate()
@@ -1709,17 +1792,19 @@ mod app {
                 | WINDOW_STYLE(LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL),
             USER_DICTIONARY_GRID_ID,
         )?;
+        let _ = unsafe { SetWindowTheme(user_dictionary_grid, w!("Explorer"), PCWSTR::null()) };
         let _ = send(
             user_dictionary_grid,
             LVM_SETEXTENDEDLISTVIEWSTYLE,
-            LVS_EX_FULLROWSELECT as usize,
-            LVS_EX_FULLROWSELECT as isize,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as usize,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
+        set_control_font(user_dictionary_grid, ui_font);
         for (index, (title, width)) in [
-            ("読み", 140),
-            ("表記", 200),
-            ("品詞", 130),
-            ("コメント", 300),
+            ("読み", 150),
+            ("表記", 210),
+            ("品詞", 140),
+            ("コメント", 310),
         ]
         .into_iter()
         .enumerate()
@@ -1738,6 +1823,8 @@ mod app {
             WS_CHILD | WS_VISIBLE,
             VALUE_LABEL_ID,
         )?;
+        set_control_font(value_label, title_font);
+
         let user_reading_label = add_control(
             settings_content,
             w!("STATIC"),
@@ -1745,6 +1832,7 @@ mod app {
             WS_CHILD | WS_VISIBLE,
             USER_READING_LABEL_ID,
         )?;
+        set_control_font(user_reading_label, bold_font);
         let user_reading = add_control(
             settings_content,
             w!("EDIT"),
@@ -1752,6 +1840,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
             USER_READING_ID,
         )?;
+        set_control_font(user_reading, ui_font);
         let user_surface_label = add_control(
             settings_content,
             w!("STATIC"),
@@ -1759,6 +1848,7 @@ mod app {
             WS_CHILD | WS_VISIBLE,
             USER_SURFACE_LABEL_ID,
         )?;
+        set_control_font(user_surface_label, bold_font);
         let user_surface = add_control(
             settings_content,
             w!("EDIT"),
@@ -1766,6 +1856,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
             USER_SURFACE_ID,
         )?;
+        set_control_font(user_surface, ui_font);
         let user_pos_label = add_control(
             settings_content,
             w!("STATIC"),
@@ -1773,6 +1864,7 @@ mod app {
             WS_CHILD | WS_VISIBLE,
             USER_POS_LABEL_ID,
         )?;
+        set_control_font(user_pos_label, bold_font);
         let user_part_of_speech = add_control(
             settings_content,
             w!("EDIT"),
@@ -1780,6 +1872,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
             USER_POS_ID,
         )?;
+        set_control_font(user_part_of_speech, ui_font);
         let user_comment_label = add_control(
             settings_content,
             w!("STATIC"),
@@ -1787,6 +1880,7 @@ mod app {
             WS_CHILD | WS_VISIBLE,
             USER_COMMENT_LABEL_ID,
         )?;
+        set_control_font(user_comment_label, bold_font);
         let user_comment = add_control(
             settings_content,
             w!("EDIT"),
@@ -1794,6 +1888,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WS_BORDER | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
             USER_COMMENT_ID,
         )?;
+        set_control_font(user_comment, ui_font);
         let license_text = add_control(
             settings_content,
             w!("EDIT"),
@@ -1806,6 +1901,7 @@ mod app {
                 ),
             LICENSE_TEXT_ID,
         )?;
+        set_control_font(license_text, ui_font);
         for control in [
             user_dictionary_grid,
             user_reading_label,
@@ -1828,6 +1924,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32),
             APPLY_ID,
         )?;
+        set_control_font(apply, bold_font);
         let delete_learning = add_control(
             hwnd,
             w!("BUTTON"),
@@ -1835,6 +1932,7 @@ mod app {
             WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32),
             DELETE_LEARNING_ID,
         )?;
+        set_control_font(delete_learning, ui_font);
         let clear_learning = add_control(
             hwnd,
             w!("BUTTON"),
@@ -1842,21 +1940,25 @@ mod app {
             WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32),
             CLEAR_LEARNING_ID,
         )?;
-        add_control(
+        set_control_font(clear_learning, ui_font);
+        let reload = add_control(
             hwnd,
             w!("BUTTON"),
             w!("再読み込み"),
             WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32),
             RELOAD_ID,
         )?;
-        add_control(
+        set_control_font(reload, ui_font);
+        let save = add_control(
             hwnd,
             w!("BUTTON"),
             w!("保存"),
             WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_PUSHBUTTON as u32),
             SAVE_ID,
         )?;
+        set_control_font(save, bold_font);
         let status = add_control(hwnd, w!("STATIC"), w!(""), WS_CHILD | WS_VISIBLE, STATUS_ID)?;
+        set_control_font(status, small_font);
 
         let config = match load_config() {
             Ok(config) => config,
@@ -1876,7 +1978,7 @@ mod app {
                 ));
             }
         };
-        let setting_controls = create_setting_controls(settings_content, &config)?;
+        let setting_controls = create_setting_controls(settings_content, &config, ui_font, bold_font)?;
         APP_STATE.with(|slot| {
             *slot.borrow_mut() = Some(AppState {
                 config,
@@ -1904,6 +2006,13 @@ mod app {
                 delete_learning,
                 clear_learning,
                 status,
+                ui_font,
+                title_font,
+                bold_font,
+                small_font,
+                window_brush,
+                panel_brush,
+                sidebar_brush,
             });
         });
 
@@ -1924,23 +2033,23 @@ mod app {
     }
 
     fn layout(hwnd: HWND, width: i32, height: i32) {
-        let margin = 12;
-        let footer_height = 92;
+        let margin = CONTENT_MARGIN;
+        let footer_height = 86;
         let bottom = (height - footer_height).max(margin);
         let content_height = (bottom - margin * 2).max(0);
-        let category_width = 145;
-        let gap = 12;
+        let category_width = SIDEBAR_WIDTH;
+        let gap = DIVIDER_GAP;
         let settings_x = margin + category_width + gap;
         let settings_width = (width - settings_x - margin).max(0);
-        let button_y = (height - margin - 30).max(0);
-        let status_y = (bottom + 4).max(0);
-        let button_gap = 8;
+        let button_y = (height - margin - 36).max(0);
+        let status_y = (bottom + 6).max(0);
+        let button_gap = 10;
         let button_widths = [
-            (APPLY_ID, 112),
-            (DELETE_LEARNING_ID, 142),
-            (CLEAR_LEARNING_ID, 100),
-            (RELOAD_ID, 132),
-            (SAVE_ID, 86),
+            (APPLY_ID, 120),
+            (DELETE_LEARNING_ID, 160),
+            (CLEAR_LEARNING_ID, 110),
+            (RELOAD_ID, 138),
+            (SAVE_ID, 100),
         ];
         let buttons_width = button_widths
             .iter()
@@ -1981,7 +2090,7 @@ mod app {
                 windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), id as i32)
             } {
                 if let Err(error) =
-                    unsafe { MoveWindow(button, button_x, button_y, button_width, 30, true) }
+                    unsafe { MoveWindow(button, button_x, button_y, button_width, 36, true) }
                 {
                     eprintln!("MoveWindow failed: {error}");
                 }
@@ -1992,7 +2101,9 @@ mod app {
 
     fn layout_settings_panel(panel: HWND, width: i32, height: i32) {
         APP_STATE.with(|slot| {
-            let slot = slot.borrow();
+            let Ok(slot) = slot.try_borrow() else {
+                return;
+            };
             let Some(state) = slot.as_ref() else {
                 return;
             };
@@ -2011,9 +2122,9 @@ mod app {
             let content_height = if learning || user_dictionary || license {
                 height
             } else {
-                38 + controls
+                46 + controls
                     .iter()
-                    .map(|control| 24 + setting_input_height(&control.kind) + 14)
+                    .map(|control| 24 + setting_input_height(&control.kind) + 16)
                     .sum::<i32>()
             };
             let mut scroll_info = SCROLLINFO {
@@ -2053,7 +2164,7 @@ mod app {
                 eprintln!("MoveWindow failed: {error}");
             }
 
-            if let Err(error) = unsafe { MoveWindow(state.value_label, 0, 0, width, 28, true) } {
+            if let Err(error) = unsafe { MoveWindow(state.value_label, 0, 0, width, 34, true) } {
                 eprintln!("MoveWindow failed: {error}");
             }
             if learning {
@@ -2061,9 +2172,9 @@ mod app {
                     MoveWindow(
                         state.learning_grid,
                         0,
-                        34,
+                        44,
                         width,
-                        (height - 42).max(0),
+                        (height - 52).max(0),
                         true,
                     )
                 } {
@@ -2072,7 +2183,7 @@ mod app {
             } else if user_dictionary {
                 let grid_height = (height - 150).max(80);
                 if let Err(error) = unsafe {
-                    MoveWindow(state.user_dictionary_grid, 0, 34, width, grid_height, true)
+                    MoveWindow(state.user_dictionary_grid, 0, 44, width, grid_height, true)
                 } {
                     eprintln!("MoveWindow failed: {error}");
                 }
@@ -2090,8 +2201,8 @@ mod app {
                         *column_width as isize,
                     );
                 }
-                let label_y = 44 + grid_height;
-                let input_y = label_y + 20;
+                let label_y = 54 + grid_height;
+                let input_y = label_y + 22;
                 let widths = [
                     width * 20 / 100,
                     width * 25 / 100,
@@ -2119,7 +2230,7 @@ mod app {
                         }
                     }
                     if let Err(error) =
-                        unsafe { MoveWindow(input, x, input_y, field_width.max(0), 26, true) }
+                        unsafe { MoveWindow(input, x, input_y, field_width.max(0), 30, true) }
                     {
                         eprintln!("MoveWindow failed: {error}");
                     }
@@ -2127,12 +2238,12 @@ mod app {
                 }
             } else if license {
                 if let Err(error) = unsafe {
-                    MoveWindow(state.license_text, 0, 34, width, (height - 42).max(0), true)
+                    MoveWindow(state.license_text, 0, 44, width, (height - 52).max(0), true)
                 } {
                     eprintln!("MoveWindow failed: {error}");
                 }
             } else {
-                let mut y = 38;
+                let mut y = 46;
                 for control in controls {
                     if let Err(error) = unsafe { MoveWindow(control.label, 0, y, width, 22, true) }
                     {
@@ -2168,7 +2279,7 @@ mod app {
                     } {
                         eprintln!("MoveWindow failed: {error}");
                     }
-                    y += 24 + setting_input_height(&control.kind) + 14;
+                    y += 24 + setting_input_height(&control.kind) + 16;
                 }
             }
         });
@@ -2219,6 +2330,57 @@ mod app {
         LRESULT(brush.0 as isize)
     }
 
+    fn control_background_color(
+        _hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        let hdc = HDC(wparam.0 as *mut c_void);
+        let control_hwnd = HWND(lparam.0 as *mut c_void);
+        APP_STATE.with(|slot| {
+            if let Ok(slot) = slot.try_borrow() {
+                if let Some(state) = slot.as_ref() {
+                    match message {
+                        WM_CTLCOLORSTATIC => {
+                            unsafe {
+                                let _ = SetBkMode(hdc, TRANSPARENT);
+                                if control_hwnd == state.status {
+                                    let _ = SetTextColor(hdc, COLORREF(0x005C5C5C));
+                                    LRESULT(state.window_brush.0 as isize)
+                                } else if control_hwnd == state.value_label {
+                                    let _ = SetTextColor(hdc, COLORREF(0x00111111));
+                                    LRESULT(state.panel_brush.0 as isize)
+                                } else {
+                                    let _ = SetTextColor(hdc, COLORREF(0x00222222));
+                                    LRESULT(state.panel_brush.0 as isize)
+                                }
+                            }
+                        }
+                        WM_CTLCOLORBTN => {
+                            unsafe {
+                                let _ = SetBkMode(hdc, TRANSPARENT);
+                            }
+                            LRESULT(state.panel_brush.0 as isize)
+                        }
+                        WM_CTLCOLORLISTBOX => {
+                            unsafe {
+                                let _ = SetBkMode(hdc, TRANSPARENT);
+                                let _ = SetTextColor(hdc, COLORREF(0x001E1E1E));
+                            }
+                            LRESULT(state.sidebar_brush.0 as isize)
+                        }
+                        _ => white_control_background(),
+                    }
+                } else {
+                    white_control_background()
+                }
+            } else {
+                white_control_background()
+            }
+        })
+    }
+
     unsafe extern "system" fn settings_panel_proc(
         hwnd: HWND,
         message: u32,
@@ -2226,7 +2388,9 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => white_control_background(),
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+                control_background_color(hwnd, message, wparam, lparam)
+            }
             WM_SIZE => {
                 let mut rect = RECT::default();
                 if let Err(error) = unsafe { GetClientRect(hwnd, &mut rect) } {
@@ -2317,7 +2481,9 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => white_control_background(),
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+                control_background_color(hwnd, message, wparam, lparam)
+            }
             WM_NOTIFY | WM_MOUSEWHEEL => {
                 let parent = unsafe { windows::Win32::UI::WindowsAndMessaging::GetParent(hwnd) };
                 match parent {
@@ -2341,7 +2507,130 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => white_control_background(),
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORLISTBOX => {
+                control_background_color(hwnd, message, wparam, lparam)
+            }
+            WM_MEASUREITEM => {
+                if lparam.0 != 0 {
+                    let mis = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
+                    if mis.CtlID == CATEGORY_ID as u32 {
+                        mis.itemHeight = SIDEBAR_ITEM_HEIGHT as u32;
+                        return LRESULT(1);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_DRAWITEM => {
+                if lparam.0 != 0 {
+                    let dis = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+                    if dis.CtlID == CATEGORY_ID as u32 {
+                        let index = dis.itemID as usize;
+                        if index < SECTIONS.len() {
+                            let is_selected = (dis.itemState.0 & ODS_SELECTED_FLAG) != 0;
+                            unsafe {
+                                let bg_brush = if is_selected {
+                                    CreateSolidBrush(COLORREF(0x00FFFFFF))
+                                } else {
+                                    CreateSolidBrush(COLORREF(0x00F3F3F3))
+                                };
+                                let item_rect = if is_selected {
+                                    RECT {
+                                        left: dis.rcItem.left + 4,
+                                        top: dis.rcItem.top + 2,
+                                        right: dis.rcItem.right - 4,
+                                        bottom: dis.rcItem.bottom - 2,
+                                    }
+                                } else {
+                                    dis.rcItem
+                                };
+                                FillRect(dis.hDC, &item_rect, bg_brush);
+                                let _ = DeleteObject(HGDIOBJ(bg_brush.0));
+
+                                if is_selected {
+                                    let bar_rect = RECT {
+                                        left: item_rect.left + 2,
+                                        top: item_rect.top + 7,
+                                        right: item_rect.left + 6,
+                                        bottom: item_rect.bottom - 7,
+                                    };
+                                    let bar_brush = CreateSolidBrush(COLORREF(0x00C06700));
+                                    FillRect(dis.hDC, &bar_rect, bar_brush);
+                                    let _ = DeleteObject(HGDIOBJ(bar_brush.0));
+                                }
+
+                                let _ = SetBkMode(dis.hDC, TRANSPARENT);
+                                let text_color = if is_selected {
+                                    COLORREF(0x000F0F0F)
+                                } else {
+                                    COLORREF(0x00404040)
+                                };
+                                let _ = SetTextColor(dis.hDC, text_color);
+
+                                let old_font = APP_STATE.with(|slot| {
+                                    if let Ok(slot) = slot.try_borrow() {
+                                        if let Some(state) = slot.as_ref() {
+                                            let font = if is_selected {
+                                                state.bold_font
+                                            } else {
+                                                state.ui_font
+                                            };
+                                            Some(SelectObject(dis.hDC, HGDIOBJ(font.0)))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                                let text = SECTIONS[index].1;
+                                let wide_text = wide(text);
+                                let x = dis.rcItem.left + 20;
+                                let y = dis.rcItem.top + 11;
+                                let _ = TextOutW(
+                                    dis.hDC,
+                                    x,
+                                    y,
+                                    &wide_text[..wide_text.len().saturating_sub(1)],
+                                );
+
+                                if let Some(old) = old_font {
+                                    let _ = SelectObject(dis.hDC, old);
+                                }
+                            }
+                            return LRESULT(1);
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
+                if hdc.0 != 0 as _ {
+                    let mut rect = RECT::default();
+                    if unsafe { GetClientRect(hwnd, &mut rect) }.is_ok() {
+                        let divider_x = CONTENT_MARGIN + SIDEBAR_WIDTH + DIVIDER_GAP / 2;
+                        let footer_height = 86;
+                        let bottom = (rect.bottom - footer_height).max(CONTENT_MARGIN);
+                        let divider_rect = RECT {
+                            left: divider_x,
+                            top: CONTENT_MARGIN,
+                            right: divider_x + 1,
+                            bottom,
+                        };
+                        unsafe {
+                            let divider_brush = CreateSolidBrush(COLORREF(0x00E0E0E0));
+                            FillRect(hdc, &divider_rect, divider_brush);
+                            let _ = DeleteObject(HGDIOBJ(divider_brush.0));
+                        }
+                    }
+                    unsafe {
+                        let _ = EndPaint(hwnd, &ps);
+                    }
+                }
+                LRESULT(0)
+            }
             WM_CREATE => {
                 if let Err(error) = create_controls(hwnd) {
                     eprintln!("Could not create settings controls: {error}");
@@ -2476,8 +2765,11 @@ mod app {
                     }
                 });
                 if relayout {
-                    let panel = APP_STATE
-                        .with(|slot| slot.borrow().as_ref().map(|state| state.settings_panel));
+                    let panel = APP_STATE.with(|slot| {
+                        slot.try_borrow()
+                            .ok()
+                            .and_then(|slot| slot.as_ref().map(|state| state.settings_panel))
+                    });
                     if let Some(panel) = panel {
                         send(panel, WM_VSCROLL, SB_TOP.0 as u16 as usize, 0);
                     }
@@ -2504,7 +2796,19 @@ mod app {
                 LRESULT(0)
             }
             WM_DESTROY => {
-                APP_STATE.with(|slot| *slot.borrow_mut() = None);
+                APP_STATE.with(|slot| {
+                    if let Some(state) = slot.borrow_mut().take() {
+                        unsafe {
+                            let _ = DeleteObject(HGDIOBJ(state.ui_font.0));
+                            let _ = DeleteObject(HGDIOBJ(state.title_font.0));
+                            let _ = DeleteObject(HGDIOBJ(state.bold_font.0));
+                            let _ = DeleteObject(HGDIOBJ(state.small_font.0));
+                            let _ = DeleteObject(HGDIOBJ(state.window_brush.0));
+                            let _ = DeleteObject(HGDIOBJ(state.panel_brush.0));
+                            let _ = DeleteObject(HGDIOBJ(state.sidebar_brush.0));
+                        }
+                    }
+                });
                 unsafe { PostQuitMessage(0) };
                 LRESULT(0)
             }
@@ -2521,10 +2825,13 @@ mod app {
             return Err(windows::core::Error::from_thread().into());
         }
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None)? }.0);
+        let panel_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
+        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+
         let panel_class = WNDCLASSW {
             lpfnWndProc: Some(settings_panel_proc),
             hInstance: instance,
-            hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+            hbrBackground: panel_brush,
             lpszClassName: SETTINGS_PANEL_CLASS,
             ..Default::default()
         };
@@ -2534,7 +2841,7 @@ mod app {
         let content_class = WNDCLASSW {
             lpfnWndProc: Some(settings_content_proc),
             hInstance: instance,
-            hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+            hbrBackground: panel_brush,
             lpszClassName: SETTINGS_CONTENT_CLASS,
             ..Default::default()
         };
@@ -2544,7 +2851,7 @@ mod app {
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
-            hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+            hbrBackground: window_brush,
             lpszClassName: CLASS_NAME,
             ..Default::default()
         };
@@ -2560,8 +2867,8 @@ mod app {
                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                920,
-                800,
+                980,
+                780,
                 None,
                 None,
                 Some(instance),
@@ -2569,6 +2876,13 @@ mod app {
             )?
         };
         unsafe {
+            let corner = DWMWCP_ROUND;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &corner as *const _ as *const c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
             let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_SHOW);
             if UpdateWindow(hwnd).0 == 0 {
                 return Err(windows::core::Error::from_thread().into());

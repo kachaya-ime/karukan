@@ -51,11 +51,46 @@ fn main() {
         let res_dir_str = res_dir.to_str().unwrap().replace('\\', "/");
 
         let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+        let manifest_content = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+    version="1.0.0.0"
+    processorArchitecture="*"
+    name="Karukan.KarukanIME"
+    type="win32"
+  />
+  <description>Karukan IME</description>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
+"#;
+        let manifest_path = out_dir.join("app.manifest");
+        let _ = fs::write(&manifest_path, manifest_content);
+        let manifest_path_str = manifest_path.to_str().unwrap().replace('\\', "/");
+
         let rc_content = format!(
             "1 ICON \"{res_dir_str}/karukan.ico\"\n\
              2 ICON \"{res_dir_str}/hiragana.ico\"\n\
              3 ICON \"{res_dir_str}/alpha.ico\"\n\
-             4 ICON \"{res_dir_str}/katakana.ico\"\n"
+             4 ICON \"{res_dir_str}/katakana.ico\"\n\
+             1 24 \"{manifest_path_str}\"\n"
         );
         let rc_path = out_dir.join("karukan.rc");
         let _ = fs::write(&rc_path, rc_content);
