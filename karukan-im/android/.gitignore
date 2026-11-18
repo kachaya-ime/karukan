@@ -49,7 +49,6 @@ Thumbs.db
 
 # Asset files downloaded or generated automatically during build
 app/src/main/assets/*.gguf
-app/src/main/assets/*.json
 app/src/main/assets/*.tgz
 app/src/main/assets/emoji_categories.txt
 app/src/main/assets/legal/
