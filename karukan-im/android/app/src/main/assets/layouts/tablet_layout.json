@@ -1,0 +1,163 @@
+{
+  "name": "Tablet",
+  "rows": [
+    [
+      {
+        "normal": "Esc",
+        "normalType": "ESC",
+        "shiftType": "ESC"
+      },
+      { "normal": "1", "shift": "!" },
+      { "normal": "2", "shift": "@" },
+      { "normal": "3", "shift": "#" },
+      { "normal": "4", "shift": "$" },
+      { "normal": "5", "shift": "%" },
+      { "normal": "6", "shift": "^" },
+      { "normal": "7", "shift": "&" },
+      { "normal": "8", "shift": "*" },
+      { "normal": "9", "shift": "(" },
+      { "normal": "0", "shift": ")" },
+      { "normal": "-", "shift": "_" },
+      { "normal": "=", "shift": "+" },
+      {
+        "normal": "⌫",
+        "normalType": "BACKSPACE",
+        "shiftType": "BACKSPACE",
+        "icon": "outline_backspace_24",
+        "weight": 1.5,
+        "repeatable": true
+      }
+    ],
+    [
+      {
+        "normal": "Tab",
+        "normalType": "TAB",
+        "shiftType": "TAB",
+        "weight": 1.5
+      },
+      { "normal": "q", "shift": "Q" },
+      { "normal": "w", "shift": "W" },
+      { "normal": "e", "shift": "E" },
+      { "normal": "r", "shift": "R" },
+      { "normal": "t", "shift": "T" },
+      { "normal": "y", "shift": "Y" },
+      { "normal": "u", "shift": "U" },
+      { "normal": "i", "shift": "I" },
+      { "normal": "o", "shift": "O" },
+      { "normal": "p", "shift": "P" },
+      { "normal": "[", "shift": "{" },
+      { "normal": "]", "shift": "}" },
+      { "normal": "\\", "shift": "|" }
+    ],
+    [
+      {
+        "normal": "",
+        "normalType": "GAP",
+        "weight": 0.8
+      },
+      { "normal": "`", "shift": "~" },
+      { "normal": "a", "shift": "A" },
+      { "normal": "s", "shift": "S" },
+      { "normal": "d", "shift": "D" },
+      { "normal": "f", "shift": "F" },
+      { "normal": "g", "shift": "G" },
+      { "normal": "h", "shift": "H" },
+      { "normal": "j", "shift": "J" },
+      { "normal": "k", "shift": "K" },
+      { "normal": "l", "shift": "L" },
+      { "normal": ";", "shift": ":" },
+      { "normal": "'", "shift": "\"" },
+      {
+        "normal": "⏎",
+        "normalType": "ENTER",
+        "shiftType": "ENTER",
+        "icon": "outline_keyboard_return_24",
+        "weight": 1.7
+      }
+    ],
+    [
+      {
+        "normal": "⇧",
+        "normalType": "SHIFT",
+        "shiftType": "SHIFT",
+        "weight": 2.3
+      },
+      { "normal": "z", "shift": "Z" },
+      { "normal": "x", "shift": "X" },
+      { "normal": "c", "shift": "C" },
+      { "normal": "v", "shift": "V" },
+      { "normal": "b", "shift": "B" },
+      { "normal": "n", "shift": "N" },
+      { "normal": "m", "shift": "M" },
+      { "normal": ",", "shift": "<" },
+      { "normal": ".", "shift": ">" },
+      { "normal": "/", "shift": "?" },
+      {
+        "normal": "↑",
+        "normalType": "DPAD_UP",
+        "shiftType": "DPAD_UP",
+        "weight": 1.1,
+        "repeatable": true
+      },
+      {
+        "normal": "⇧",
+        "normalType": "SHIFT",
+        "shiftType": "SHIFT",
+        "weight": 1.1
+      }
+    ],
+    [
+      {
+        "normal": "Ctrl",
+        "normalType": "CTRL",
+        "shiftType": "CTRL",
+        "weight": 1.5
+      },
+      {
+        "normal": "あa",
+        "normalType": "LANG",
+        "weight": 1.5
+      },
+      {
+        "normal": "😊",
+        "normalType": "EMOJI",
+        "icon": "outline_emoji_emotions_24",
+        "weight": 1.5
+      },
+      {
+        "normal": "⌴",
+        "normalType": "SPACE",
+        "shiftType": "SPACE",
+        "icon": "outline_space_bar_24",
+        "weight": 5.2
+      },
+      {
+        "normal": "Ctrl",
+        "normalType": "CTRL",
+        "shiftType": "CTRL",
+        "weight": 1.5
+      },
+      {
+        "normal": "←",
+        "normalType": "DPAD_LEFT",
+        "shiftType": "DPAD_LEFT",
+        "weight": 1.1,
+        "repeatable": true
+      },
+      {
+        "normal": "↓",
+        "normalType": "DPAD_DOWN",
+        "shiftType": "DPAD_DOWN",
+        "weight": 1.1,
+        "repeatable": true
+      },
+      {
+        "normal": "→",
+        "normalType": "DPAD_RIGHT",
+        "shiftType": "DPAD_RIGHT",
+        "weight": 1.1,
+        "repeatable": true
+      }
+    ]
+  ]
+}

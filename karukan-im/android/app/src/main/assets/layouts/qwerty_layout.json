@@ -1,0 +1,117 @@
+{
+  "name": "QWERTY",
+  "rows": [
+    [
+      { "normal": "1" },
+      { "normal": "2" },
+      { "normal": "3" },
+      { "normal": "4" },
+      { "normal": "5" },
+      { "normal": "6" },
+      { "normal": "7" },
+      { "normal": "8" },
+      { "normal": "9" },
+      { "normal": "0" }
+    ],
+    [
+      { "normal": "q", "shift": "Q", "symbol": "~" },
+      { "normal": "w", "shift": "W", "symbol": "@" },
+      { "normal": "e", "shift": "E", "symbol": "#" },
+      { "normal": "r", "shift": "R", "symbol": "$" },
+      { "normal": "t", "shift": "T", "symbol": "%" },
+      { "normal": "y", "shift": "Y", "symbol": "^" },
+      { "normal": "u", "shift": "U", "symbol": "&" },
+      { "normal": "i", "shift": "I", "symbol": "*" },
+      { "normal": "o", "shift": "O", "symbol": "(" },
+      { "normal": "p", "shift": "P", "symbol": ")" }
+    ],
+    [
+      { "normal": "a", "shift": "A", "symbol": "+" },
+      { "normal": "s", "shift": "S", "symbol": "=" },
+      { "normal": "d", "shift": "D", "symbol": "/" },
+      { "normal": "f", "shift": "F", "symbol": "\\" },
+      { "normal": "g", "shift": "G", "symbol": "<" },
+      { "normal": "h", "shift": "H", "symbol": ">" },
+      { "normal": "j", "shift": "J", "symbol": "{" },
+      { "normal": "k", "shift": "K", "symbol": "}" },
+      { "normal": "l", "shift": "L", "symbol": "[" },
+      { "normal": "-", "shift": "_", "symbol": "]" }
+    ],
+    [
+      {
+        "normal": "⇧",
+        "shift": "⇧",
+        "symbol": "esc",
+        "normalType": "SHIFT",
+        "shiftType": "SHIFT",
+        "symbolType": "ESC"
+      },
+      { "normal": "z", "shift": "Z", "symbol": "|" },
+      { "normal": "x", "shift": "X", "symbol": "`" },
+      { "normal": "c", "shift": "C", "symbol": "'" },
+      { "normal": "v", "shift": "V", "symbol": "\"" },
+      { "normal": "b", "shift": "B", "symbol": ";" },
+      { "normal": "n", "shift": "N", "symbol": ":" },
+      { "normal": "m", "shift": "M", "symbol": "!" },
+      { "normal": ".", "shift": ",", "symbol": "?" },
+      {
+        "normal": "⌫",
+        "normalType": "BACKSPACE",
+        "icon": "outline_backspace_24",
+        "repeatable": true
+      }
+    ],
+    [
+      {
+        "normal": "ctrl",
+        "normalType": "CTRL"
+      },
+      {
+        "normal": "@!?",
+        "shift": "@!?",
+        "symbol": "abc",
+        "normalType": "SYMBOL",
+        "shiftType": "SYMBOL",
+        "symbolType": "NORMAL"
+      },
+      {
+        "normal": "あa",
+        "shift": "あa",
+        "symbol": "tab",
+        "normalType": "LANG",
+        "shiftType": "LANG",
+        "symbolType": "TAB"
+      },
+      {
+        "normal": "⌴",
+        "shift": "⌴",
+        "symbol": "⌴",
+        "normalType": "SPACE",
+        "shiftType": "SPACE",
+        "symbolType": "SPACE",
+        "icon": "outline_space_bar_24",
+        "weight": 3.0
+      },
+      {
+        "normal": "😊",
+        "normalType": "EMOJI",
+        "icon": "outline_emoji_emotions_24"
+      },
+      {
+        "normal": "←",
+        "normalType": "DPAD_LEFT",
+        "repeatable": true
+      },
+      {
+        "normal": "→",
+        "normalType": "DPAD_RIGHT",
+        "repeatable": true
+      },
+      {
+        "normal": "⏎",
+        "normalType": "ENTER",
+        "icon": "outline_keyboard_return_24"
+      }
+    ]
+  ]
+}
