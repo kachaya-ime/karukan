@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use tracing::debug;
 
 use super::filter::source_for_key;
+use super::transliterate::Transliteration;
 use super::*;
 
 /// Maximum number of learning candidates to show
@@ -158,9 +159,15 @@ impl InputMethodEngine {
     /// conversion window, settled at the configured width.
     fn to_conversion_candidate_list(
         &self,
-        candidates: Vec<AnnotatedCandidate>,
+        mut candidates: Vec<AnnotatedCandidate>,
         reading: &str,
     ) -> CandidateList {
+        // A setting typed by name sits second: the plain conversion stays
+        // first, so writing the word itself is unchanged. Inserted here so a
+        // list rebuilt in place (Ctrl+Backspace) keeps it too.
+        if let Some(command) = self.command_candidate(reading) {
+            candidates.insert(candidates.len().min(1), command);
+        }
         self.settle_candidates(
             candidates
                 .into_iter()
@@ -403,6 +410,12 @@ impl InputMethodEngine {
                     .with_description(description),
             );
         }
+        for (variant, description) in self.version_variants(reading) {
+            builder.push(
+                AnnotatedCandidate::new(variant, CandidateSource::Version)
+                    .with_description(description),
+            );
+        }
         // Rewriters run on the typed reading only; running them on other
         // sources' candidates would emit variants nobody asked for.
         for (variant, description) in self.rewriter_variants(reading) {
@@ -560,6 +573,18 @@ impl InputMethodEngine {
         self.converters.date.rewrite(reading)
     }
 
+    /// `Karukan-0.1.0+g1396bb2` for ばーじょん, so a bug report can name
+    /// the exact build by typing it. None in emoji mode, like the dates.
+    pub(super) fn version_variants(&self, reading: &str) -> Vec<RewriteOutput> {
+        if self.mode.current() == InputMode::Emoji || !VERSION_READINGS.contains(&reading) {
+            return Vec::new();
+        }
+        vec![(
+            format!("Karukan-{}", karukan_engine::VERSION),
+            Some("バージョン".to_string()),
+        )]
+    }
+
     /// Build rule-based rewriter variants for the reading itself (e.g. for
     /// symbol input `「` → `『`, `【`, `（`, ...), date/time candidates first.
     /// Used in the auto-suggest path so users see mozc-style symbol variants
@@ -577,6 +602,11 @@ impl InputMethodEngine {
             .into_iter()
             .map(as_candidate(CandidateSource::Date))
             .chain(
+                self.version_variants(reading)
+                    .into_iter()
+                    .map(as_candidate(CandidateSource::Version)),
+            )
+            .chain(
                 self.rewriter_variants(reading)
                     .into_iter()
                     .map(as_candidate(CandidateSource::Rewriter)),
@@ -589,6 +619,11 @@ impl InputMethodEngine {
         // navigate and Alt+Return must not commit.
         if key.modifiers.alt_key {
             return EngineResult::not_consumed();
+        }
+        if let Some(form) = Transliteration::for_key(key)
+            && self.mode.current() != InputMode::Emoji
+        {
+            return self.transliterate(form);
         }
         match key.keysym {
             Keysym::RETURN => self.commit_conversion(),
@@ -795,6 +830,9 @@ impl InputMethodEngine {
 
     /// Commit the current conversion
     fn commit_conversion(&mut self) -> EngineResult {
+        if let Some(result) = self.run_selected_command() {
+            return result;
+        }
         let Some((text, reading)) = self.selected_conversion_info() else {
             return EngineResult::not_consumed();
         };
@@ -973,3 +1011,6 @@ impl InputMethodEngine {
             .with_action(EngineAction::UpdateAuxText(aux))
     }
 }
+
+/// Readings that convert to the running build's version.
+const VERSION_READINGS: [&str; 3] = ["ばーじょん", "ゔぁーじょん", "う゛ぁーじょん"];
