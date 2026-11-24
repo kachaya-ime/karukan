@@ -25,16 +25,20 @@ use windows::Win32::Graphics::Gdi::{
     HDC, HFONT, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, GetFocus};
 use windows::Win32::UI::TextServices::{ITfComposition, ITfContext};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetForegroundWindow,
-    GetWindowThreadProcessId, IsWindow, IsWindowVisible, KillTimer, LB_ADDSTRING, LB_GETTEXT,
-    LB_RESETCONTENT, LB_SETCURSEL, MA_NOACTIVATE, RegisterClassW, SendMessageW, SetTimer,
-    SetWindowPos, SetWindowTextW, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE,
-    SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_STYLE, WM_ACTIVATEAPP, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_MEASUREITEM, WM_MOUSEACTIVATE, WM_PAINT, WM_TIMER,
-    WNDCLASSW, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetAncestor, GetClientRect,
+    GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsChild,
+    IsWindow, IsWindowVisible, KillTimer, LB_ADDSTRING, LB_GETTEXT, LB_RESETCONTENT, LB_SETCURSEL,
+    MA_NOACTIVATE, RegisterClassW, SendMessageW, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, ShowWindow, GA_ROOT, GWLP_USERDATA, GW_OWNER, HWND_TOPMOST, SW_HIDE,
+    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_STYLE, WM_ACTIVATEAPP,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_MEASUREITEM, WM_MOUSEACTIVATE,
+    WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_POPUP, WS_VISIBLE,
 };
 
 #[link(name = "dwmapi")]
@@ -233,13 +237,47 @@ unsafe extern "system" fn candidate_wnd_proc(
                         let _ = KillTimer(Some(hwnd), TIMER_ID_FOCUS_WATCH);
                     } else {
                         let fg = GetForegroundWindow();
-                        let mut popup_pid = 0u32;
-                        let _ = GetWindowThreadProcessId(hwnd, Some(&mut popup_pid));
-                        let mut fg_pid = 0u32;
-                        if !fg.0.is_null() {
-                            let _ = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+                        let tracked_raw = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+                        let tracked_hwnd = HWND(tracked_raw as *mut std::ffi::c_void);
+                        let owner = GetWindow(hwnd, GW_OWNER).unwrap_or_default();
+
+                        let mut should_hide = false;
+                        if fg.0.is_null() {
+                            should_hide = true;
+                        } else if !tracked_hwnd.0.is_null() {
+                            let fg_root = GetAncestor(fg, GA_ROOT);
+                            let tracked_root = GetAncestor(tracked_hwnd, GA_ROOT);
+                            let same_window = fg == tracked_hwnd
+                                || (!fg_root.0.is_null() && fg_root == tracked_root)
+                                || IsChild(fg, tracked_hwnd).as_bool()
+                                || IsChild(tracked_hwnd, fg).as_bool();
+                            if !same_window {
+                                should_hide = true;
+                            }
+                        } else if !owner.0.is_null() {
+                            let fg_root = GetAncestor(fg, GA_ROOT);
+                            let owner_root = GetAncestor(owner, GA_ROOT);
+                            let same_window = fg == owner
+                                || (!fg_root.0.is_null() && fg_root == owner_root)
+                                || IsChild(fg, owner).as_bool()
+                                || IsChild(owner, fg).as_bool();
+                            if !same_window {
+                                should_hide = true;
+                            }
+                        } else {
+                            let popup_tid = GetCurrentThreadId();
+                            let mut popup_pid = 0u32;
+                            let _ = GetWindowThreadProcessId(hwnd, Some(&mut popup_pid));
+                            let mut fg_pid = 0u32;
+                            let fg_tid = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+                            if (fg_pid != 0 && popup_pid != 0 && fg_pid != popup_pid)
+                                || (fg_tid != 0 && fg_tid != popup_tid)
+                            {
+                                should_hide = true;
+                            }
                         }
-                        if fg_pid != 0 && popup_pid != 0 && fg_pid != popup_pid {
+
+                        if should_hide {
                             let _ = KillTimer(Some(hwnd), TIMER_ID_FOCUS_WATCH);
                             let _ = ShowWindow(hwnd, SW_HIDE);
                         }
@@ -598,11 +636,13 @@ impl CandidatePopup {
             .collect();
 
         let mut rect = RECT::default();
-        let composition = composition.borrow();
-        let active = composition
-            .as_ref()
-            .ok_or_else(|| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-        let range = unsafe { active.GetRange()? };
+        let range = {
+            let composition_guard = composition.borrow();
+            let active = composition_guard
+                .as_ref()
+                .ok_or_else(|| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
+            unsafe { active.GetRange()? }
+        };
         let view = unsafe { context.GetActiveView()? };
         let mut clipped = BOOL(0);
         unsafe {
@@ -655,13 +695,23 @@ impl CandidatePopup {
             }
         }
 
-        let owner_hwnd = if let Ok(view) = unsafe { context.GetActiveView() }
-            && let Ok(hwnd) = unsafe { view.GetWnd() }
+        let owner_hwnd = if let Ok(hwnd) = unsafe { view.GetWnd() }
             && !hwnd.0.is_null()
         {
             Some(hwnd)
         } else {
-            None
+            let focus_hwnd = unsafe { GetFocus() };
+            let active_hwnd = unsafe { GetActiveWindow() };
+            let fg_hwnd = unsafe { GetForegroundWindow() };
+            if !focus_hwnd.0.is_null() {
+                Some(focus_hwnd)
+            } else if !active_hwnd.0.is_null() {
+                Some(active_hwnd)
+            } else if !fg_hwnd.0.is_null() {
+                Some(fg_hwnd)
+            } else {
+                None
+            }
         };
 
         if let Some(existing) = self.window {
@@ -776,6 +826,8 @@ impl CandidatePopup {
                 height,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )?;
+            let tracked = owner_hwnd.unwrap_or_else(|| GetForegroundWindow());
+            let _ = SetWindowLongPtrW(window, GWLP_USERDATA, tracked.0 as isize);
             let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
             let _ = SetTimer(
                 Some(window),

@@ -6,8 +6,8 @@ use windows::Win32::Foundation::E_POINTER;
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfClientId, ITfCompartmentEventSink, ITfKeyEventSink,
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor,
-    ITfTextInputProcessor_Impl, ITfThreadFocusSink, ITfThreadMgr, TF_MOD_ALT,
-    TF_MOD_IGNORE_ALL_MODIFIER, TF_PRESERVEDKEY,
+    ITfTextInputProcessor_Impl, ITfThreadFocusSink, ITfThreadMgr, ITfThreadMgrEventSink,
+    TF_MOD_ALT, TF_MOD_IGNORE_ALL_MODIFIER, TF_PRESERVEDKEY,
 };
 
 use crate::engine_client::EngineClient;
@@ -108,14 +108,23 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         unsafe {
             keystroke_mgr.AdviseKeyEventSink(thread_id, &key_sink, true)?;
         }
-        if let Ok(source) = thread_mgr.cast::<ITfSource>()
-            && let Ok(focus_sink) = key_sink.cast::<ITfThreadFocusSink>()
-            && let Ok(cookie) =
-                unsafe { source.AdviseSink(&ITfThreadFocusSink::IID, &focus_sink) }
-        {
-            self.compartment_sources
-                .borrow_mut()
-                .push((source, cookie));
+        if let Ok(source) = thread_mgr.cast::<ITfSource>() {
+            if let Ok(focus_sink) = key_sink.cast::<ITfThreadFocusSink>()
+                && let Ok(cookie) =
+                    unsafe { source.AdviseSink(&ITfThreadFocusSink::IID, &focus_sink) }
+            {
+                self.compartment_sources
+                    .borrow_mut()
+                    .push((source.clone(), cookie));
+            }
+            if let Ok(mgr_sink) = key_sink.cast::<ITfThreadMgrEventSink>()
+                && let Ok(cookie) =
+                    unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &mgr_sink) }
+            {
+                self.compartment_sources
+                    .borrow_mut()
+                    .push((source, cookie));
+            }
         }
         for (vkey, modifiers) in PRESERVED_TOGGLE_KEYS {
             let prekey = TF_PRESERVEDKEY {

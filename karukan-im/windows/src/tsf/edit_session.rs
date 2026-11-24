@@ -32,15 +32,16 @@ pub(crate) struct EditSession {
 
 impl ITfEditSession_Impl for EditSession_Impl {
     fn DoEditSession(&self, edit_cookie: u32) -> windows::core::Result<()> {
-        if self.end_composition
-            && let Some(active) = self.composition.borrow_mut().take()
-        {
-            unsafe {
-                if let Ok(range) = active.GetRange() {
-                    let _ = range.SetText(edit_cookie, 0, &[]);
-                }
-                let _ = active.EndComposition(edit_cookie);
-            };
+        if self.end_composition {
+            let active = self.composition.try_borrow_mut().ok().and_then(|mut c| c.take());
+            if let Some(active) = active {
+                unsafe {
+                    if let Ok(range) = active.GetRange() {
+                        let _ = range.SetText(edit_cookie, 0, &[]);
+                    }
+                    let _ = active.EndComposition(edit_cookie);
+                };
+            }
         }
         if let Some(engine) = &self.reset_engine {
             engine.reset();
@@ -62,24 +63,34 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     commit_text(&self.context, edit_cookie, self.composition.as_ref(), text)?;
                 }
                 EngineAction::ShowCandidates(candidates) => {
-                    if let Err(error) = self.candidate_popup.borrow_mut().show(
-                        &self.context,
-                        edit_cookie,
-                        &self.composition,
-                        candidates,
-                    ) {
-                        tracing::error!("failed to show Karukan candidate window: {error}");
+                    if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+                        if let Err(error) = popup.show(
+                            &self.context,
+                            edit_cookie,
+                            &self.composition,
+                            candidates,
+                        ) {
+                            tracing::error!("failed to show Karukan candidate window: {error}");
+                        }
                     }
                 }
-                EngineAction::HideCandidates => self.candidate_popup.borrow_mut().hide(),
+                EngineAction::HideCandidates => {
+                    if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+                        popup.hide();
+                    }
+                }
                 EngineAction::UpdateAuxText(text) => {
-                    if let Err(error) = self.candidate_popup.borrow_mut().set_aux(text) {
-                        tracing::error!("failed to update Karukan candidate window: {error}");
+                    if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+                        if let Err(error) = popup.set_aux(text) {
+                            tracing::error!("failed to update Karukan candidate window: {error}");
+                        }
                     }
                 }
                 EngineAction::HideAuxText => {
-                    if let Err(error) = self.candidate_popup.borrow_mut().set_aux("") {
-                        tracing::error!("failed to update Karukan candidate window: {error}");
+                    if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+                        if let Err(error) = popup.set_aux("") {
+                            tracing::error!("failed to update Karukan candidate window: {error}");
+                        }
                     }
                 }
             }
@@ -153,15 +164,21 @@ impl ITfCompositionSink_Impl for CompositionSink_Impl {
         _edit_cookie: u32,
         terminated: Ref<ITfComposition>,
     ) -> windows::core::Result<()> {
-        if let (Some(current), Some(terminated)) =
-            (self.composition.borrow().as_ref(), terminated.as_ref())
-        {
-            if current.as_raw() == terminated.as_raw() {
-                self.composition.borrow_mut().take();
-                self.candidate_popup.borrow_mut().hide();
-                self.engine.reset();
-                self.engine.set_surrounding_context("", "");
+        let matches_current = match (self.composition.try_borrow().ok(), terminated.as_ref()) {
+            (Some(current), Some(terminated)) => current
+                .as_ref()
+                .is_some_and(|c| c.as_raw() == terminated.as_raw()),
+            _ => false,
+        };
+        if matches_current {
+            if let Ok(mut comp) = self.composition.try_borrow_mut() {
+                comp.take();
             }
+            if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+                popup.hide();
+            }
+            self.engine.reset();
+            self.engine.set_surrounding_context("", "");
         }
         Ok(())
     }
@@ -177,14 +194,18 @@ pub(crate) fn update_preedit(
     caret: usize,
 ) -> windows::core::Result<()> {
     if text.is_empty() {
-        if let Some(active) = composition.borrow_mut().take() {
+        let active = composition.try_borrow_mut().ok().and_then(|mut c| c.take());
+        if let Some(active) = active {
             unsafe { active.EndComposition(edit_cookie)? };
         }
-        candidate_popup.borrow_mut().hide();
+        if let Ok(mut popup) = candidate_popup.try_borrow_mut() {
+            popup.hide();
+        }
         return Ok(());
     }
 
-    let active = if let Some(active) = composition.borrow().clone() {
+    let existing = composition.try_borrow().ok().and_then(|c| c.clone());
+    let active = if let Some(active) = existing {
         active
     } else {
         let mut selected = [TF_SELECTION::default()];
@@ -205,7 +226,9 @@ pub(crate) fn update_preedit(
         let context_composition: ITfContextComposition = context.cast()?;
         let composition_result =
             unsafe { context_composition.StartComposition(edit_cookie, &range, &sink)? };
-        *composition.borrow_mut() = Some(composition_result.clone());
+        if let Ok(mut comp) = composition.try_borrow_mut() {
+            *comp = Some(composition_result.clone());
+        }
         composition_result
     };
 
@@ -237,7 +260,8 @@ pub(crate) fn commit_text(
     composition: &RefCell<Option<ITfComposition>>,
     text: &str,
 ) -> windows::core::Result<()> {
-    if let Some(active) = composition.borrow_mut().take() {
+    let active = composition.try_borrow_mut().ok().and_then(|mut c| c.take());
+    if let Some(active) = active {
         let range = unsafe { active.GetRange()? };
         let wide: Vec<u16> = text.encode_utf16().collect();
         unsafe { range.SetText(edit_cookie, 0, &wide)? };

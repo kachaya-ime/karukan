@@ -28,7 +28,7 @@ flowchart TB
         subgraph TIP["karukan_im_windows.dll (In-Process COM)"]
             CF["ClassFactory<br/>(IClassFactory)"]
             TS["TextService<br/>(ITfTextInputProcessor)"]
-            KH["KeyHandler<br/>(ITfKeyEventSink)"]
+            KH["KeyHandler<br/>(ITfKeyEventSink / ITfThreadFocusSink / ITfThreadMgrEventSink)"]
             ES["EditSession / CompositionSink<br/>(ITfEditSession / ITfCompositionSink)"]
             CS["CompartmentSink<br/>(ITfCompartmentEventSink)"]
             LB["LangBarButton<br/>(ITfLangBarItemButton)"]
@@ -129,7 +129,7 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 #### `Activate(thread_mgr, thread_id)`
 1. **モデルキャッシュパスの構成**: 環境変数 (`HF_HUB_CACHE`, `HF_HOME` 等) が未設定の場合、`%LOCALAPPDATA%\huggingface\hub` を `HF_HUB_CACHE` に設定する。
 2. **エンジンクライアント初期化**: `EngineClient::new()` を生成して `Rc<EngineClient>` に格納する。`engine.init()` では単一インスタンスミューテックス (`Local\KarukanImServerMutex-<username>`) の存在を確認し、`karukan-server.exe` が未起動の場合のみ非同期でバックグラウンド起動する（UIスレッドをブロックする同期パイプ接続は行わず、初回キー入力時に遅延接続する）。
-3. **キーイベントシンク登録**: `KeyHandler` および `ITfThreadFocusSink` を登録し、`ITfKeystrokeMgr::AdviseKeyEventSink` でフォアグラウンドシンクとして登録する。
+3. **キーイベント・フォーカスシンク登録**: `KeyHandler` を生成し、`ITfKeystrokeMgr::AdviseKeyEventSink` でフォアグラウンドキーイベントシンクとして登録する。さらに `ITfThreadFocusSink`（スレッドフォーカス監視）および `ITfThreadMgrEventSink`（ドキュメントマネージャーフォーカス監視）を `ITfSource::AdviseSink` で登録する。
 4. **予約キー (`PreservedKey`) の登録**:
    - `VK_KANJI` (`0x19`), `VK_OEM_AUTO` (`0xF3`), `VK_OEM_ENLW` (`0xF4`), `Alt + VK_OEM_3` (`0xC0`) を `GUID_PRESERVEDKEY_TOGGLE` として登録し、IMEの開閉トグルを確実に捕捉する。
 5. **Compartment イベント監視と初期化**:
@@ -140,7 +140,7 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 
 #### `Deactivate()`
 1. 登録した `PreservedKey` の解除 (`UnpreserveKey`) と `KeyEventSink` の解除 (`UnadviseKeyEventSink`)。
-2. `CompartmentSink` および `ITfThreadFocusSink` の `UnadviseSink` と `LangBarButton` の `RemoveItem`。
+2. `CompartmentSink`、`ITfThreadFocusSink`、`ITfThreadMgrEventSink` の `UnadviseSink` と `LangBarButton` の `RemoveItem`。
 3. **`engine.save_learning()` の呼び出し**: セッション中に確定（学習更新）が発生していた場合のみ、サービスへ学習履歴キャッシュのディスク保存を要求する。
 
 ---
@@ -165,7 +165,7 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 ---
 
 ### 4.4 キー入力処理 (`src/tsf/key_handler.rs`)
-`KeyHandler` は `ITfKeyEventSink` および `ITfThreadFocusSink` を実装し、Windows の仮想キー (`VK_*`) とスキャンコードを Karukan コアの `KeyEvent` (`Keysym`, `KeyModifiers`) に変換して `EngineClient` 経由でサービスへディスパッチする。
+`KeyHandler` は `ITfKeyEventSink`、`ITfThreadFocusSink`、および `ITfThreadMgrEventSink` を実装し、Windows の仮想キー (`VK_*`) とスキャンコードを Karukan コアの `KeyEvent` (`Keysym`, `KeyModifiers`) に変換して `EngineClient` 経由でサービスへディスパッチする。
 
 #### 4.4.1 キー入力シーケンス
 
@@ -225,7 +225,7 @@ sequenceDiagram
 | **IMEトグル** | `VK_KANJI` (`0x19`), `VK_OEM_AUTO` (`0xF3`), `VK_OEM_ENLW` (`0xF4`), `Alt + ~` (`0xC0`) | IMEのON/OFFを切り替える。OFF遷移時はアクティブなCompositionを終了しエンジンをリセットする。 |
 | **直接入力 (IME OFF)** | `VK_NONCONVERT` (無変換), `VK_DBE_ALPHANUMERIC` (英数), `VK_IME_OFF` (`0x1A`) | IMEをOFF (`TF_CONVERSIONMODE_ALPHANUMERIC`) に切り替える。 |
 | **日本語入力 (IME ON / ひらがな復帰)** | `VK_CONVERT` (変換), `VK_KANA` (かな), `VK_DBE_HIRAGANA` (`0xF2`), `VK_IME_ON` (`0x16`) | IMEがOFFならONにする。ON時はひらがなモードへ戻し、エンジンの `Keysym::HENKAN` を送出してサブモード復帰を行う。 |
-| **フォーカス喪失時** | `ITfKeyEventSink::OnSetFocus(FALSE)` | 候補ウィンドウと補助テキストを即座に非表示にし、コンポジション（未確定文字列）を終了破棄して、エンジンを初期状態 (`reset()`) へ即時移行する。 |
+| **フォーカス喪失・ドキュメント切替時** | `ITfKeyEventSink::OnSetFocus(FALSE)`, `ITfThreadFocusSink::OnKillThreadFocus`, `ITfThreadMgrEventSink::OnSetFocus` | 候補ウィンドウと補助テキストを即座に非表示にし、アクティブなコンポジション（未確定文字列）が存在する場合のみ終了編集セッションを発行・参照破棄して、エンジンを初期状態 (`reset()`) へ即時移行する。 |
 | **文字種一括変換** | `F6` (`0x75`) 〜 `F10` (`0x79`) | プリエディット中に押下された場合、F6:ひらがな候補、F7:全角カタカナ候補、F8:半角ｶﾀｶﾅ候補を表示し、F9:全角英数、F10:半角英数（連打で小文字/大文字/先頭大文字）に変換する。 |
 | **エンジン制御・特殊コマンド** | `Ctrl + Shift + L`, 「でばっぐもーど」, 「ばーじょん」 | ・`Ctrl + Shift + L`: ライブ変換の有効/無効トグル。<br/>・「でばっぐもーど」変換確定: 候補ウィンドウ下部（推論時間等の詳細情報）の表示/非表示を切り替え（`Ctrl+Shift+V` はアプリへスルー）。<br/>・「ばーじょん」変換: エンジンのビルドバージョンを候補表示・確定。<br/>・`Ctrl + I/K/R/T/J`: エンジン定義の各種変換・ショートカットを実行。 |
 
@@ -243,6 +243,9 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 3. **確定 (`commit_text`)**:
    - コンポジションが存在する場合はその範囲を確定文字列で上書きし、キャレットを末尾に移動してから `EndComposition` を呼ぶ。
    - コンポジションが存在しない直接確定時は `ITfInsertAtSelection::InsertTextAtSelection` で挿入する。
+4. **COM / Win32 同期再入に対する `RefCell` 安全性**:
+   - `EndComposition` や Win32 ウィンドウメッセージ送信（`SendMessageW`, `SetWindowPos`, `ShowWindow`）の呼び出し中に、`CompositionSink::OnCompositionTerminated` やフォーカス喪失シンクが同一スレッド上で同期的に再入する場合がある。
+   - `extern "system"` COM コールバック境界での二重借用パニック（`0xc0000409` `FAST_FAIL_FATAL_APP_EXIT`）を防ぐため、共有状態 (`composition`, `candidate_popup`) の借用は Win32 / TSF API 呼び出し前に解放し、コールバック側では `try_borrow()` / `try_borrow_mut()` を使用する。
 
 ---
 
@@ -271,8 +274,9 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 - `ITfContextView::GetTextExt` でコンポジション範囲のスクリーン矩形 (`rect`) を取得。
 - `MonitorFromPoint(MONITOR_DEFAULTTONEAREST)` と `GetMonitorInfoW` で対象モニターの作業領域 (`rcWork`) を取得。
 - 候補ウィンドウが画面右端を超える場合は左へ寄せ、画面下端 (`rcWork.bottom`) を超える場合はキャレットの上側 (`rect.top - height - 4`) に反転配置（フリップ）する。
-- **オーナーウィンドウ設定**:
-  - `ITfContext::GetActiveView()?.GetWnd()` を `CreateWindowExW` の `hWndParent` (Owner Window) として指定し、入力先アプリと Z 順序・最小化・アクティブ化状態を連動させ、別アプリ切り替え時の不自然な残存を防ぐ。
+- **オーナーウィンドウ解決とフォーカス監視タイマー (`TIMER_ID_FOCUS_WATCH`)**:
+  - `ITfContext::GetActiveView()?.GetWnd()`（取得できない UWP / WinUI 3 / Electron 等の環境では `GetFocus()` / `GetActiveWindow()` / `GetForegroundWindow()` にフォールバック）を `CreateWindowExW` の `hWndParent` (Owner Window) として指定するとともに、`GWLP_USERDATA` に追跡対象ウィンドウハンドルを記録する。
+  - `WM_ACTIVATEAPP` (`wparam == 0`) に加え、候補表示中は `100ms` 周期の監視タイマー (`TIMER_ID_FOCUS_WATCH`) でフォアグラウンドウィンドウ (`GetForegroundWindow()`) のルートウィンドウ (`GetAncestor(..., GA_ROOT)`)・親子関係・スレッドID/プロセスIDを照合し、別ウィンドウや同一プロセス内の別ウィンドウへフォーカスが移動した際にも確実に候補ウィンドウを非表示にする。
 - **Direct2D エラーハンドリング**:
   - `ID2D1DCRenderTarget::EndDraw()` の戻り値を検証し、デバイスロスト等で失敗した場合はレンダリングターゲットキャッシュを自動再生成して描画例外・クラッシュを防止する。
 
@@ -381,7 +385,7 @@ karukan-im/windows/
     ├── tsf/
     │   ├── mod.rs              # DllGetClassObject, ClassFactory, ロガー初期化
     │   ├── text_service.rs     # ITfTextInputProcessor (Activate / Deactivate)
-    │   ├── key_handler.rs      # ITfKeyEventSink & ITfThreadFocusSink (キー変換・モード切替・IPC呼び出し)
+    │   ├── key_handler.rs      # ITfKeyEventSink / ITfThreadFocusSink / ITfThreadMgrEventSink (キー変換・フォーカス監視・IPC呼び出し)
     │   ├── edit_session.rs     # ITfEditSession (Preedit更新・確定・周辺文脈取得)
     │   ├── candidate_window.rs # Direct2D/GDI 候補ポップアップウィンドウ
     │   ├── compartment.rs      # ITfCompartmentEventSink & Compartment 読み書き

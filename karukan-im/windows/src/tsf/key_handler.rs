@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use karukan_im::core::engine::EngineAction;
 use karukan_im::core::keycode::{KeyEvent, KeyModifiers, Keysym};
-use windows::core::{implement, BOOL, GUID, Ref};
+use windows::core::{implement, Interface, BOOL, GUID, Ref};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_CONTROL, VK_CONVERT,
     VK_DBE_ALPHANUMERIC, VK_KANA, VK_LWIN, VK_MENU, VK_NONCONVERT, VK_RWIN, VK_SHIFT,
@@ -11,6 +11,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::TextServices::{
     ITfComposition, ITfContext, ITfDocumentMgr, ITfEditSession, ITfKeyEventSink,
     ITfKeyEventSink_Impl, ITfThreadFocusSink, ITfThreadFocusSink_Impl, ITfThreadMgr,
+    ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
 };
 
 use crate::engine_client::EngineClient;
@@ -233,7 +234,7 @@ fn control_keysym(virtual_key: u16) -> Option<u32> {
     }
 }
 
-#[implement(ITfKeyEventSink, ITfThreadFocusSink)]
+#[implement(ITfKeyEventSink, ITfThreadFocusSink, ITfThreadMgrEventSink)]
 pub(crate) struct KeyHandler {
     pub(crate) engine: Rc<EngineClient>,
     pub(crate) thread_mgr: ITfThreadMgr,
@@ -246,13 +247,19 @@ pub(crate) struct KeyHandler {
 impl KeyHandler_Impl {
     fn handle_focus_loss(&self, prev_doc_mgr: Option<&ITfDocumentMgr>) {
         // 候補ウィンドウおよび補助テキストを即座に非表示
-        self.candidate_popup.borrow_mut().hide();
-        let _ = self.candidate_popup.borrow_mut().set_aux("");
+        if let Ok(mut popup) = self.candidate_popup.try_borrow_mut() {
+            popup.hide();
+            let _ = popup.set_aux("");
+        }
 
         // コンポジションが存在する場合のみ終了セッションを要求
         // (フォーカス喪失後のドキュメントに対して無条件にRequestEditSessionを発行すると
         // アプリ側で非同期コールバック時の不整合やクラッシュを招くため)
-        let has_composition = self.composition.borrow().is_some();
+        let has_composition = self
+            .composition
+            .try_borrow()
+            .map(|c| c.is_some())
+            .unwrap_or(false);
         if has_composition {
             let context_opt = if let Some(doc_mgr) = prev_doc_mgr {
                 unsafe { doc_mgr.GetTop().ok() }
@@ -278,7 +285,9 @@ impl KeyHandler_Impl {
                 }
             }
             // 非同期編集セッションが拒否された場合に備えて参照を確実に破棄
-            self.composition.borrow_mut().take();
+            if let Ok(mut comp) = self.composition.try_borrow_mut() {
+                comp.take();
+            }
         }
 
         // IMEエンジンを初期状態にリセット
@@ -295,6 +304,44 @@ impl ITfThreadFocusSink_Impl for KeyHandler_Impl {
 
     fn OnKillThreadFocus(&self) -> windows::core::Result<()> {
         self.handle_focus_loss(None);
+        Ok(())
+    }
+}
+
+impl ITfThreadMgrEventSink_Impl for KeyHandler_Impl {
+    fn OnInitDocumentMgr(&self, _pdim: Ref<ITfDocumentMgr>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnUninitDocumentMgr(&self, _pdim: Ref<ITfDocumentMgr>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnSetFocus(
+        &self,
+        pdimfocus: Ref<ITfDocumentMgr>,
+        pdimprevfocus: Ref<ITfDocumentMgr>,
+    ) -> windows::core::Result<()> {
+        let prev = pdimprevfocus.as_ref();
+        let next = pdimfocus.as_ref();
+        let changed = match (prev, next) {
+            (Some(p), Some(n)) => p.as_raw() != n.as_raw(),
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if changed || next.is_none() {
+            self.handle_focus_loss(prev);
+        } else {
+            self.engine.set_surrounding_context("", "");
+        }
+        Ok(())
+    }
+
+    fn OnPushContext(&self, _pic: Ref<ITfContext>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnPopContext(&self, _pic: Ref<ITfContext>) -> windows::core::Result<()> {
         Ok(())
     }
 }
