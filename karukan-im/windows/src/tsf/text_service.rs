@@ -228,6 +228,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             }
         }
         self.key_sink.borrow_mut().take();
+        crate::tsf::candidate_window::clear_thread_d2d_resources();
         if let Some(engine) = self.engine.borrow_mut().take() {
             engine.save_learning();
         }

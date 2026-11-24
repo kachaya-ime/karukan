@@ -912,5 +912,12 @@ impl CandidatePopup {
 impl Drop for CandidatePopup {
     fn drop(&mut self) {
         self.reset_handles();
+        clear_thread_d2d_resources();
     }
+}
+
+pub(crate) fn clear_thread_d2d_resources() {
+    D2D_RESOURCES.with(|res| {
+        *res.borrow_mut() = None;
+    });
 }

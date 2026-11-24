@@ -50,7 +50,7 @@ mod app {
         WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_MEASUREITEM,
         WM_MOUSEWHEEL, WM_NOTIFY, WM_PAINT, WM_SIZE, WM_VSCROLL, WNDCLASSW, WS_BORDER, WS_CHILD,
         WS_CLIPCHILDREN, WS_GROUP, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WS_VSCROLL,
-        FindWindowW, SetForegroundWindow, SW_RESTORE,
+        FindWindowW, IsIconic, IsWindowVisible, SetForegroundWindow, SW_RESTORE, SW_SHOW,
     };
     use windows::core::{PCWSTR, PWSTR, w};
 
@@ -3103,19 +3103,35 @@ mod app {
     const SINGLE_INSTANCE_MUTEX: windows::core::PCWSTR = w!("Local\\KarukanSettingsSingleInstance");
 
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        // 多重起動防止: 名前付きミューテックスを生成し、既に存在する場合は既存ウィンドウを最前面化して終了
-        let mutex = unsafe { CreateMutexW(None, true, SINGLE_INSTANCE_MUTEX)? };
+        // 多重起動防止: 既に表示中の設定ウィンドウがある場合は最前面化して終了
+        unsafe {
+            if let Ok(existing_hwnd) = FindWindowW(CLASS_NAME, None)
+                && !existing_hwnd.0.is_null()
+                && IsWindowVisible(existing_hwnd).as_bool()
+            {
+                if IsIconic(existing_hwnd).as_bool() {
+                    let _ = ShowWindow(existing_hwnd, SW_RESTORE);
+                } else {
+                    let _ = ShowWindow(existing_hwnd, SW_SHOW);
+                }
+                let _ = SetForegroundWindow(existing_hwnd);
+                return Ok(());
+            }
+        }
+        let mutex = unsafe { CreateMutexW(None, false, SINGLE_INSTANCE_MUTEX).ok() };
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
             unsafe {
-                if let Ok(existing_hwnd) = FindWindowW(CLASS_NAME, None) {
-                    if existing_hwnd.0 != 0 as _ {
-                        let _ = ShowWindow(existing_hwnd, SW_RESTORE);
-                        let _ = SetForegroundWindow(existing_hwnd);
+                if let Ok(existing_hwnd) = FindWindowW(CLASS_NAME, None)
+                    && !existing_hwnd.0.is_null()
+                {
+                    let _ = ShowWindow(existing_hwnd, SW_RESTORE);
+                    let _ = SetForegroundWindow(existing_hwnd);
+                    if let Some(mutex) = mutex {
+                        let _ = CloseHandle(mutex);
                     }
+                    return Ok(());
                 }
-                let _ = CloseHandle(mutex);
             }
-            return Ok(());
         }
 
         let controls = INITCOMMONCONTROLSEX {
@@ -3210,9 +3226,11 @@ mod app {
             }
         }
         unsafe {
-            let _ = CloseHandle(mutex);
+            if let Some(mutex) = mutex {
+                let _ = CloseHandle(mutex);
+            }
         }
-        Ok(())
+        std::process::exit(0);
     }
 }
 

@@ -141,7 +141,8 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 #### `Deactivate()`
 1. 登録した `PreservedKey` の解除 (`UnpreserveKey`) と `KeyEventSink` の解除 (`UnadviseKeyEventSink`)。
 2. `CompartmentSink`、`ITfThreadFocusSink`、`ITfThreadMgrEventSink` の `UnadviseSink` と `LangBarButton` の `RemoveItem`。
-3. **`engine.save_learning()` の呼び出し**: セッション中に確定（学習更新）が発生していた場合のみ、サービスへ学習履歴キャッシュのディスク保存を要求する。
+3. **スレッドローカル Direct2D リソースの明示的破棄**: `CandidatePopup` の破棄および `clear_thread_d2d_resources()` により、ウィンドウ破棄中や TSF アンロード時にローダーロック下で Direct2D / D3D11 デバイス解放のデッドロックが発生しないよう、非アクティブ化時点でスレッドローカルの `D2D_RESOURCES` を即時解放する。
+4. **`engine.save_learning()` の呼び出し**: セッション中に確定（学習更新）が発生していた場合のみ、サービスへ学習履歴キャッシュのディスク保存を要求する。
 
 ---
 
@@ -277,8 +278,9 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 - **オーナーウィンドウ解決とフォーカス監視タイマー (`TIMER_ID_FOCUS_WATCH`)**:
   - `ITfContext::GetActiveView()?.GetWnd()`（取得できない UWP / WinUI 3 / Electron 等の環境では `GetFocus()` / `GetActiveWindow()` / `GetForegroundWindow()` にフォールバック）を `CreateWindowExW` の `hWndParent` (Owner Window) として指定するとともに、`GWLP_USERDATA` に追跡対象ウィンドウハンドルを記録する。
   - `WM_ACTIVATEAPP` (`wparam == 0`) に加え、候補表示中は `100ms` 周期の監視タイマー (`TIMER_ID_FOCUS_WATCH`) でフォアグラウンドウィンドウ (`GetForegroundWindow()`) のルートウィンドウ (`GetAncestor(..., GA_ROOT)`)・親子関係・スレッドID/プロセスIDを照合し、別ウィンドウや同一プロセス内の別ウィンドウへフォーカスが移動した際にも確実に候補ウィンドウを非表示にする。
-- **Direct2D エラーハンドリング**:
+- **Direct2D エラーハンドリングおよびリソース解放**:
   - `ID2D1DCRenderTarget::EndDraw()` の戻り値を検証し、デバイスロスト等で失敗した場合はレンダリングターゲットキャッシュを自動再生成して描画例外・クラッシュを防止する。
+  - `CandidatePopup::drop` および `TextService::Deactivate` 時にスレッドローカルの `D2D_RESOURCES` を明示的に解放 (`clear_thread_d2d_resources()`) し、COM / DLL アンロード時の Windows ローダーロック下での D3D11 / DXGI デッドロックを防止する。
 
 ---
 
@@ -345,12 +347,12 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 
 `karukan-settings.exe` は外部GUIフレームワークに依存しないネイティブ Win32 API (`windows` クレート) 製のGUIアプリケーションである。
 
-### 6.1 多重起動防止とダークテーマ対応
-- **単一インスタンス制御**: 起動時に名前付きミューテックス (`Local\KarukanSettingsRunningMutex`) を取得。既に起動済みの場合は既存の `KarukanSettingsMainWindow` を `SetForegroundWindow` で最前面化して重複起動を抑止する。
-- **ダークテーマ自動追従**:
-  - `DWMWA_USE_IMMERSIVE_DARK_MODE` (属性 `20`) をウィンドウ枠に適用。
-  - レジストリ (`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`) から OS のテーマ設定を検知し、ライト / ダークの配色（背景、文字色、リストビュー、コントロール）を自動で切り替える。
-  - オーナードローのリストボックス（サイドバー）やエディットボックス・スクロールバー・ボタン類もテーマ配色に連動する。
+### 6.1 多重起動防止とプロセス終了制御
+- **単一インスタンス制御**:
+  - 起動時にまず表示中の `KarukanSettingsWindow` (`FindWindowW` + `IsWindowVisible`) を確認し、存在する場合は `ShowWindow(SW_RESTORE / SW_SHOW)` および `SetForegroundWindow` で最前面化して即終了する。
+  - さらに名前付きミューテックス (`Local\KarukanSettingsSingleInstance`) を確認し、既存の `KarukanSettingsWindow` が存在する場合は最前面化して重複起動を抑止する（万一、終了処理中のプロセスがミューテックスを保持したままウィンドウのみ消えている場合は、新規ウィンドウの起動を妨げないフォールバック構造とする）。
+- **クリーンなプロセス終了**:
+  - メッセージループ終了後はミューテックスハンドルを閉じた上で `std::process::exit(0)` を呼び出し、バックグラウンドスレッド（グラフィックスドライバや TSF 関連スレッド等）の待機によってゾンビプロセスが残らないようにする。
 
 ### 6.2 画面レイアウト
 - **左ペイン（サイドバー）**: オーナードロー `LISTBOX`（幅 `200px`、項目高さ `40px`）。選択項目にアクセントバーとハイライトを描画。
