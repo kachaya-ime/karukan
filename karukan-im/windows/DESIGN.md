@@ -6,13 +6,14 @@
 本書は、日本語IMEエンジン「Karukan」(`karukan-im` / `karukan-engine`) を Windows 11 (x64) 上で利用可能にする **Text Services Framework (TSF) フロントエンド** (`karukan-im-windows`) のアーキテクチャおよび詳細設計を定義する。
 
 ### 1.2 スコープと成果物
-Windowsフロントエンドクレート (`Cargo.toml`) は、以下の3つの主要バイナリで構成される。
+Windowsフロントエンドクレート (`Cargo.toml`) は、以下の4つの主要バイナリで構成される。一般的なWindows IME（Mozc / Google 日本語入力など）と同様に、システム辞書・ユーザー辞書・学習履歴・ニューラル変換モデルへのアクセスは単一のバックグラウンドサービスプロセス (`karukan-server.exe`) に集約し、各アプリケーションにロードされる TSF DLL (`karukan_im_windows.dll`) は名前付きパイプ IPC クライアントとして動作する。
 
 | 成果物 | 種別 | 役割 | 主要エントリポイント |
 | :--- | :--- | :--- | :--- |
-| `karukan_im_windows.dll` | COM In-Proc Server (`cdylib`) | TSF Text Input Processor (TIP) 本体。各ターゲットプロセスにロードされ、キーフック・かな漢字変換・プリエディット操作・候補ウィンドウ表示・言語バー連携を行う。 | `src/lib.rs`, `src/tsf/mod.rs` |
-| `install.exe` | CLI インストーラー (`bin`) | DLLのバージョン付き配置、レジストリ (COM CLSID) 登録、TSF プロファイル/カテゴリ登録、システム辞書・LLMモデル (`tokenizer.json` 含む) の事前取得を行う。 | `src/bin/install.rs` |
-| `karukan-settings.exe` | Win32 GUI アプリ (`bin`) | 設定 (`config.toml`) のGUI編集、学習履歴 (`learning.tsv`) の閲覧・削除、Mozc互換ユーザー辞書 (`karukan-user.tsv`) の管理、ライセンス表示を行う（単一インスタンス起動制御・ダークテーマ自動追従対応）。 | `src/bin/settings.rs` |
+| `karukan_im_windows.dll` | COM In-Proc Server (`cdylib`) | TSF Text Input Processor (TIP) 本体。各ターゲットプロセスにロードされ、キーフック・プリエディット操作・候補ウィンドウ表示・言語バー連携を行い、変換・辞書処理は `karukan-server.exe` へ IPC 委譲する。 | `src/lib.rs`, `src/tsf/mod.rs`, `src/ipc.rs`, `src/engine_client.rs` |
+| `karukan-server.exe` | バックグラウンドエンジンサービス (`bin`) | ユーザーセッション単位で常駐する変換・辞書サービス。名前付きパイプ (`\\.\pipe\karukan-imserver-<username>`) 上で `InputMethodEngine` を直接ホストし、システム辞書・ユーザー辞書・学習履歴キャッシュ・LLMモデルを一元管理する。 | `src/bin/server.rs`, `src/ipc.rs` |
+| `install.exe` | CLI インストーラー (`bin`) | DLL・サービス・設定アプリの配置、レジストリ (COM CLSID) 登録、TSF プロファイル/カテゴリ登録、システム辞書・LLMモデル (`tokenizer.json` 含む) の事前取得およびサービスの起動を行う。 | `src/bin/install.rs` |
+| `karukan-settings.exe` | Win32 GUI アプリ (`bin`) | 設定 (`config.toml`) のGUI編集、学習履歴 (`learning.tsv`) の閲覧・削除、Mozc互換ユーザー辞書 (`karukan-user.tsv`) の管理、ライセンス表示を行い、保存時は実行中の `karukan-server.exe` へ即時リロードを通知する。 | `src/bin/settings.rs` |
 
 ---
 
@@ -32,8 +33,13 @@ flowchart TB
             CS["CompartmentSink<br/>(ITfCompartmentEventSink)"]
             LB["LangBarButton<br/>(ITfLangBarItemButton)"]
             CW["CandidatePopup<br/>(Win32 Topmost Non-Activate Window + Direct2D)"]
+            EC["EngineClient<br/>(Named Pipe Typed IPC Client)"]
         end
-        Core["共有IMEコア<br/>(karukan_im::InputMethodEngine)"]
+    end
+
+    subgraph EngineService["IME エンジンサービスプロセス (karukan-server.exe)"]
+        PIPE["Named Pipe Server<br/>(\\.\pipe\karukan-imserver-&lt;user&gt;)"]
+        IMS["共有IMEコア<br/>(karukan_im::InputMethodEngine)"]
     end
 
     subgraph ExternalTools["管理・補助ツール"]
@@ -46,7 +52,7 @@ flowchart TB
         DICT["dict.bin / user_dicts/*.tsv<br/>(システム・ユーザー辞書)"]
         LEARN["learning.tsv<br/>(学習キャッシュ)"]
         HF["huggingface/hub<br/>(ニューラル変換モデルキャッシュ)"]
-        LOG["windows-tsf.log<br/>(動作ログ)"]
+        LOG["windows-tsf.log / windows-server.log<br/>(動作ログ)"]
     end
 
     TSF <-->|COM Interface| TS
@@ -55,24 +61,28 @@ flowchart TB
     TSF <-->|Compartment Events| CS
     TSF <-->|Systray / LangBar| LB
 
-    KH -->|process_key / set_surrounding_context| Core
+    KH -->|process_key / set_surrounding_context| EC
+    EC <-->|Named Pipe Length-Prefixed IPC| PIPE
+    PIPE <--> IMS
     KH -->|RequestEditSession| ES
     ES -->|Show / Hide / UpdateAux| CW
-    CS -->|Mode Sync| Core
+    CS -->|Mode Sync| EC
     CS -->|OnUpdate| LB
     LB -->|Mode Change / Spawn| SET
 
-    Core <--> CFG
-    Core <--> DICT
-    Core <--> LEARN
-    Core <--> HF
+    IMS <--> CFG
+    IMS <--> DICT
+    IMS <--> LEARN
+    IMS <--> HF
     TIP --> LOG
+    IMS --> LOG
     INST --> DICT
     INST --> HF
     INST --> CFG
     SET <--> CFG
     SET <--> LEARN
     SET <--> DICT
+    SET -->|ReloadSettings / ReloadUserDictionaries / ReloadLearning| PIPE
 ```
 
 ### 2.2 ビルド方針（静的CRTリンク）
@@ -118,8 +128,8 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 
 #### `Activate(thread_mgr, thread_id)`
 1. **モデルキャッシュパスの構成**: 環境変数 (`HF_HUB_CACHE`, `HF_HOME` 等) が未設定の場合、`%LOCALAPPDATA%\huggingface\hub` を `HF_HUB_CACHE` に設定する。
-2. **エンジン初期化**: `Settings::load_or_default()` から設定を読み込み、`InputMethodEngine` を生成・初期化して `Arc<Mutex<InputMethodEngine>>` に格納する。
-3. **キーイベントシンク登録**: `KeyHandler` を生成し、`ITfKeystrokeMgr::AdviseKeyEventSink` でフォアグラウンドシンクとして登録する。
+2. **エンジンクライアント初期化**: `EngineClient::new()` を生成して `Rc<EngineClient>` に格納する。`engine.init()` では単一インスタンスミューテックス (`Local\KarukanImServerMutex-<username>`) の存在を確認し、`karukan-server.exe` が未起動の場合のみ非同期でバックグラウンド起動する（UIスレッドをブロックする同期パイプ接続は行わず、初回キー入力時に遅延接続する）。
+3. **キーイベントシンク登録**: `KeyHandler` および `ITfThreadFocusSink` を登録し、`ITfKeystrokeMgr::AdviseKeyEventSink` でフォアグラウンドシンクとして登録する。
 4. **予約キー (`PreservedKey`) の登録**:
    - `VK_KANJI` (`0x19`), `VK_OEM_AUTO` (`0xF3`), `VK_OEM_ENLW` (`0xF4`), `Alt + VK_OEM_3` (`0xC0`) を `GUID_PRESERVEDKEY_TOGGLE` として登録し、IMEの開閉トグルを確実に捕捉する。
 5. **Compartment イベント監視と初期化**:
@@ -130,66 +140,86 @@ Windows 11 のデスクトップアプリ、UWP / WinUI 3 (Immersive) アプリ�
 
 #### `Deactivate()`
 1. 登録した `PreservedKey` の解除 (`UnpreserveKey`) と `KeyEventSink` の解除 (`UnadviseKeyEventSink`)。
-2. `CompartmentSink` の `UnadviseSink` と `LangBarButton` の `RemoveItem`。
-3. **`engine.save_learning()` の呼び出し**: スレッド終了・非アクティブ化時に学習履歴キャッシュをディスクへ永続化する。
+2. `CompartmentSink` および `ITfThreadFocusSink` の `UnadviseSink` と `LangBarButton` の `RemoveItem`。
+3. **`engine.save_learning()` の呼び出し**: セッション中に確定（学習更新）が発生していた場合のみ、サービスへ学習履歴キャッシュのディスク保存を要求する。
 
 ---
 
-### 4.3 キー入力処理 (`src/tsf/key_handler.rs`)
-`KeyHandler` は `ITfKeyEventSink` を実装し、Windows の仮想キー (`VK_*`) とスキャンコードを Karukan コアの `KeyEvent` (`Keysym`, `KeyModifiers`) に変換してディスパッチする。
+### 4.3 エンジンサービスと名前付きパイプ IPC (`src/bin/server.rs`, `src/ipc.rs`, `src/engine_client.rs`)
 
-#### 4.3.1 キー入力シーケンス
+#### 4.3.1 サービスプロセス (`karukan-server.exe`)
+- **単一インスタンス保証**: `Local\KarukanImServerMutex-<username>` ミューテックスにより、ユーザーセッションごとに1プロセスのみ常駐する。
+- **エンジン一元保持**: 専用ワーカースレッド (`karukan-engine-worker`) 上で `karukan_im::InputMethodEngine` を直接生成・初期化し、システム辞書 (`dict.bin`)、ユーザー辞書 (`user_dicts/*.tsv`)、学習履歴キャッシュ (`learning.tsv`)、および変換モデル (`llama.cpp` GGUF) をプロセス内で一元管理する。
+- **AppContainer / UWP 対応セキュリティ記述子 (DACL)**:
+  - Win32 デスクトップアプリだけでなく、Windows 11 メモ帳などの UWP / WinUI 3 (AppContainer) アプリや低整合性プロセスからもパイプ接続できるよう、`ConvertStringSecurityDescriptorToSecurityDescriptorW` で `D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;AU)(A;;GA;;;AC)S:(ML;;NWNR;;;LW)` を設定して `CreateNamedPipeW` を呼び出す。
+- **先行パイプインスタンス生成**: クライアント接続 (`ConnectNamedPipe`) を受け入れた直後、ハンドラスレッドを起動する前に次の待受パイプインスタンスを生成することで、複数スレッドからの同時接続時にも `ERROR_FILE_NOT_FOUND` を防ぐ。
+
+#### 4.3.2 パイプストリームとプロトコル (`PipeStream`, `IpcRequest`, `IpcResponse`)
+- **単一ハンドル半二重フレーム通信 (`PipeStream`)**:
+  - Windows の非 Overlapped（同期）名前付きパイプで `DuplicateHandle` (`File::try_clone`) を使うとカーネル内で読み書きロック競合が起きるため、単一 `HANDLE` に対して直接 Win32 `WriteFile` / `ReadFile` を呼び出す。
+  - 各メッセージは `u32` (Little-Endian 4バイト長プレフィックス) + UTF-8 JSON ペイロードのフレーム形式で送受信する。
+- **ローカル状態キャッシュとゼロ IPC 最適化 (`EngineClient`)**:
+  - サーバーからの全レスポンス (`IpcResponse::Ack` / `IpcResponse::EngineResult`) に最新の `is_empty` と `preedit_text` を同梱し、クライアント側でキャッシュする。
+  - これにより、`OnTestKeyDown` でのキー消費判定や、未入力状態 (`is_empty == true`) でのステータスバー（言語バー）モード切替、`CompartmentSink::OnChange`、フォーカス移動 (`OnSetFocus`)、`reset()`、`save_learning()` では **IPC 通信を一切発行せず 0ms で即時完了** させる。
+
+---
+
+### 4.4 キー入力処理 (`src/tsf/key_handler.rs`)
+`KeyHandler` は `ITfKeyEventSink` および `ITfThreadFocusSink` を実装し、Windows の仮想キー (`VK_*`) とスキャンコードを Karukan コアの `KeyEvent` (`Keysym`, `KeyModifiers`) に変換して `EngineClient` 経由でサービスへディスパッチする。
+
+#### 4.4.1 キー入力シーケンス
 
 ```mermaid
 sequenceDiagram
     participant App as アプリ / TSF (ITfKeystrokeMgr)
     participant KH as KeyHandler (ITfKeyEventSink)
     participant Comp as Compartment
-    participant Eng as InputMethodEngine
+    participant EC as EngineClient (IPC Client)
+    participant Srv as karukan-server.exe (InputMethodEngine)
     participant ES as EditSession (ITfEditSession)
     participant CW as CandidatePopup
 
     App->>KH: OnTestKeyDown(context, wparam, lparam)
     KH->>Comp: 開閉状態・モード確認
+    KH->>EC: is_empty() (ローカルキャッシュ参照・IPCなし)
     KH-->>App: BOOL(1: IMEが消費 / 0: アプリへスルー)
 
     opt BOOL(1) の場合
         App->>KH: OnKeyDown(context, wparam, lparam)
         alt トグルキー / 開閉キー (半角/全角, 無変換, かな 等)
             KH->>Comp: IME開閉・変換モード更新
-            opt IMEクローズ時
+            opt IMEクローズ時かつプリエディット存在時
                 KH->>ES: RequestEditSession(未確定文字列破棄・候補非表示・Engineリセット)
             end
         else ファンクションキー (F6〜F10: プリエディット存在時)
-            KH->>Eng: convert_function_key (ひらがな/全角カナ/半角ｶﾅ/全角英数/半角英数)
-            opt F6/F7/F8
-                Eng-->>KH: 候補一覧生成 (ひらがな/全角カタカナ/半角カタカナ)
-                KH->>ES: RequestEditSession(Preedit更新 + ShowCandidates)
-            opt F9/F10
-                Eng-->>KH: 文字列トグル (全角英数/半角英数: 小文字/大文字/先頭大文字)
-                KH->>ES: RequestEditSession(Preedit更新)
-            end
+            KH->>EC: preedit_text() 取得 & convert_function_key
+            KH->>EC: reset()
+            KH->>ES: RequestEditSession(Commit + HideCandidates + HideAuxText)
         else 通常キー入力
             opt 新規コンポジション開始前
                 KH->>ES: capture_surrounding_text (カーソル左最大64文字取得)
-                KH->>Eng: set_surrounding_context(left_context, "")
+                KH->>EC: set_surrounding_context(left_context, "")
+                EC->>Srv: IpcRequest::SetSurroundingContext
             end
-            KH->>Eng: process_key(KeyEvent)
-            Eng-->>KH: KeyProcessResult (actions, consumed)
+            KH->>EC: process_key(KeyEvent)
+            EC->>Srv: IpcRequest::ProcessKey
+            Srv-->>EC: IpcResponse::EngineResult (actions, consumed, is_empty, preedit_text)
+            EC-->>KH: EngineResult
             opt actions が空でない場合
                 KH->>ES: context.RequestEditSession(actions)
                 ES->>App: StartComposition / SetText / EndComposition / SetSelection
                 ES->>CW: show() / hide() / set_aux()
             end
             opt Commit アクションが含まれる場合
-                KH->>Eng: save_learning()
+                KH->>EC: save_learning()
+                EC->>Srv: IpcRequest::SaveLearning
             end
         end
         KH-->>App: BOOL(consumed)
     end
 ```
 
-#### 4.3.2 特殊キー・モード制御仕様
+#### 4.4.2 特殊キー・モード制御仕様
 | キー種別 | 対象仮想キー | 動作 |
 | :--- | :--- | :--- |
 | **IMEトグル** | `VK_KANJI` (`0x19`), `VK_OEM_AUTO` (`0xF3`), `VK_OEM_ENLW` (`0xF4`), `Alt + ~` (`0xC0`) | IMEのON/OFFを切り替える。OFF遷移時はアクティブなCompositionを終了しエンジンをリセットする。 |
@@ -277,8 +307,9 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 管理者権限の PowerShell から `install.exe install` / `install.exe uninstall` として実行される。
 
 ### 5.1 インストールフロー (`install`)
-1. **バイナリ配置（ロック回避バージョニング）**:
-   - `%LOCALAPPDATA%\Programs\Karukan` に `karukan-settings.exe` をコピーする。
+1. **既存サービスの停止とバイナリ配置（ロック回避バージョニング）**:
+   - 稼働中の `karukan-server.exe` が存在する場合は `IpcRequest::Shutdown` を送信し、学習履歴を保存してクリーンに終了させる。
+   - `%LOCALAPPDATA%\Programs\Karukan` に `karukan-server.exe` と `karukan-settings.exe` をコピーする。
    - DLL は使用中のプロセスによるファイルロック（上書き失敗）を防ぐため、`karukan_im_windows-<version>-<timestamp>.dll` の形式でユニークなファイル名としてコピーする。
 2. **初期設定ファイル生成**:
    - `%APPDATA%\karukan\karukan-im\config\config.toml` が存在しない場合、デフォルト設定 (`default.toml`) を書き出す（既存ファイルは保持）。
@@ -292,11 +323,13 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
    - `ITfInputProcessorProfileMgr::RegisterProfile` (失敗時は `ITfInputProcessorProfiles` にフォールバック) で日本語 (`0x0411`) のキーボードプロファイルを登録し、ブランドアイコン (`RES_ID_ICON_BRANDING`) を関連付ける。
    - `ITfCategoryMgr::RegisterCategory` でセクション 3.2 の全カテゴリを登録する。
    - `ActivateProfile` および `LoadKeyboardLayoutW` で現在のセッションに有効化する。
-7. **既定の入力方式設定とシェルブロードキャスト通知**:
+7. **サービス事前起動・既定の入力方式設定・シェルブロードキャスト通知**:
+   - `EngineClient::spawn_server_process()` により `karukan-server.exe` をバックグラウンド起動し、辞書とモデルをウォームアップする。
    - PowerShell の `Set-WinDefaultInputMethodOverride` を実行して既定の入力方式に設定する。
    - `SendMessageTimeoutW` および `PostMessageW` で `HWND_BROADCAST` に `WM_SETTINGCHANGE` (lParam: `"intl"`) を発行し、サインアウトせずともタスクバーの言語バー/ステータス表示が即時更新されるようにする。
 
 ### 5.2 アンインストールフロー (`uninstall`)
+- 稼働中の `karukan-server.exe` に `IpcRequest::Shutdown` を送信して停止させる。
 - `UnregisterProfile` と `UnregisterCategory`（過去の旧GUIDクリーンアップ含む）を実行。
 - `HKLM\Software\Classes\CLSID\{CLSID_KARUKAN_TIP}` および `HKLM\...\CTF\TIP\{CLSID_KARUKAN_TIP}`、`HKCU` 側の対応レジストリツリーを削除する。
 - 既定の入力方式オーバーライドをクリアし、シェル通知 (`WM_SETTINGCHANGE`) を発行する。
@@ -342,16 +375,19 @@ karukan-im/windows/
 ├── build-windows.ps1           # 静的CRT (/MT) リリースビルドスクリプト
 ├── package-windows.ps1         # 配布用ZIPパッケージ生成スクリプト
 └── src/
-    ├── lib.rs                  # GUID/定数定義、HuggingFaceキャッシュ初期設定
+    ├── lib.rs                  # GUID/定数定義、パイプ/ミューテックス名解決、HFキャッシュ初期設定
+    ├── ipc.rs                  # 共通IPCプロトコル型 (IpcRequest / IpcResponse) と単一ハンドル PipeStream
+    ├── engine_client.rs        # 名前付きパイプ IPC クライアント (EngineClient / notify_server)
     ├── tsf/
     │   ├── mod.rs              # DllGetClassObject, ClassFactory, ロガー初期化
     │   ├── text_service.rs     # ITfTextInputProcessor (Activate / Deactivate)
-    │   ├── key_handler.rs      # ITfKeyEventSink (キー変換・モード切替・エンジン呼び出し)
+    │   ├── key_handler.rs      # ITfKeyEventSink & ITfThreadFocusSink (キー変換・モード切替・IPC呼び出し)
     │   ├── edit_session.rs     # ITfEditSession (Preedit更新・確定・周辺文脈取得)
     │   ├── candidate_window.rs # Direct2D/GDI 候補ポップアップウィンドウ
     │   ├── compartment.rs      # ITfCompartmentEventSink & Compartment 読み書き
     │   └── lang_bar.rs         # ITfLangBarItemButton (トレイアイコン・右クリックメニュー)
     └── bin/
+        ├── server.rs           # バックグラウンド変換・辞書サービス (karukan-server.exe)
         ├── install.rs          # インストーラー / アンインストーラー (install.exe)
         └── settings.rs         # 設定・学習履歴・ユーザー辞書GUI (karukan-settings.exe)
 ```
@@ -359,10 +395,11 @@ karukan-im/windows/
 ### 7.2 ランタイムデータ配置パス
 | 種別 | パス | 備考 |
 | :--- | :--- | :--- |
-| インストール先バイナリ | `%LOCALAPPDATA%\Programs\Karukan\` | `karukan_im_windows-<ver>-<ts>.dll`, `karukan-settings.exe` |
-| 設定ファイル | `%APPDATA%\karukan\karukan-im\config\config.toml` | TOML形式 |
-| システム辞書 | `%APPDATA%\karukan\karukan-im\data\dict.bin` | `config.toml` の `dict_path` で変更可 |
-| 学習履歴 | `%APPDATA%\karukan\karukan-im\data\learning.tsv` | 変換確定時および `Deactivate` 時に保存 |
-| ユーザー辞書 | `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv` | Mozc互換TSV形式 |
+| インストール先バイナリ | `%LOCALAPPDATA%\Programs\Karukan\` | `karukan_im_windows-<ver>-<ts>.dll`, `karukan-server.exe`, `karukan-settings.exe` |
+| 名前付きパイプ (IPC) | `\\.\pipe\karukan-imserver-<USERNAME>` | 長さプレフィックス付きJSONフレーム (AppContainer接続許可DACL付き) |
+| 設定ファイル | `%APPDATA%\karukan\karukan-im\config\config.toml` | TOML形式（保存時に `IpcRequest::ReloadSettings` で即時反映） |
+| システム辞書 | `%APPDATA%\karukan\karukan-im\data\dict.bin` | `config.toml` の `dict_path` で変更可（`karukan-server.exe` が保持） |
+| 学習履歴 | `%APPDATA%\karukan\karukan-im\data\learning.tsv` | 変換確定時・切断時・終了時に `karukan-server.exe` が保存 |
+| ユーザー辞書 | `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv` | Mozc互換TSV形式（保存時に `IpcRequest::ReloadUserDictionaries` で即時反映） |
 | 変換モデルキャッシュ | `%LOCALAPPDATA%\huggingface\hub\` | `HF_HUB_CACHE` 等が設定されている場合はそちらを優先 |
-| TSF動作ログ | `%LOCALAPPDATA%\karukan\karukan-im\logs\windows-tsf.log` | `RUST_LOG` 環境変数でフィルタ変更可（既定: `info`） |
+| TSF / サービス動作ログ | `%LOCALAPPDATA%\karukan\karukan-im\logs\` | `windows-tsf.log`（TSF DLL）、`windows-server.log`（エンジンサービス） |

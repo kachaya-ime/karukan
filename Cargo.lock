@@ -1794,6 +1794,8 @@ dependencies = [
  "chrono",
  "karukan-engine",
  "karukan-im",
+ "serde",
+ "serde_json",
  "toml",
  "tracing",
  "tracing-subscriber",

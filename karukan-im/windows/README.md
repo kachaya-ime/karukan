@@ -21,8 +21,8 @@ Text Services Framework（TSF）フロントエンドです。
    .\install.exe install
    ```
    - インストーラーはCOMクラスをシステム領域に登録し、IMEの言語プロファイルを現在のユーザーに登録します。
-   - DLLは `%LOCALAPPDATA%\Programs\Karukan` にコピーされます。更新時に旧DLLが使用中でも上書きせず別名配置されるため、そのまま再インストール可能です。古いDLLはサインアウト後に同フォルダーから削除できます。
-   - インストール時に、GitHub Releasesからシステム辞書（`dict.tgz`）をダウンロード・展開して `%APPDATA%\karukan\karukan-im\data\dict.bin` に配置し、変換モデルおよびトークナイザー（`tokenizer.json`）をHugging Faceキャッシュ（`%LOCALAPPDATA%\huggingface\hub`）へ事前取得します（要インターネット接続）。
+   - DLL（`karukan_im_windows.dll`）、バックグラウンド変換・辞書サービス（`karukan-server.exe`）、設定アプリ（`karukan-settings.exe`）は `%LOCALAPPDATA%\Programs\Karukan` にコピーされます。更新時は稼働中のサービスを自動停止した上で置き換え、旧DLLが使用中でも別名配置されるため、そのまま上書き再インストール可能です。古いDLLはサインアウト後に同フォルダーから削除できます。
+   - インストール時に、GitHub Releasesからシステム辞書（`dict.tgz`）をダウンロード・展開して `%APPDATA%\karukan\karukan-im\data\dict.bin` に配置し、変換モデルおよびトークナイザー（`tokenizer.json`）をHugging Faceキャッシュ（`%LOCALAPPDATA%\huggingface\hub`）へ事前取得した上で、バックグラウンドサービス（`karukan-server.exe`）を起動します（要インターネット接続）。
 
 ### 既定のIMEに手動で設定する（Windowsの設定アプリ）
 
@@ -78,11 +78,11 @@ ZIP 内（またはインストール先 `%LOCALAPPDATA%\Programs\Karukan\`）�
 - **ユーザー辞書**: 独自の単語（読み・表記・品詞・コメント）の追加・編集・削除が行えます（保存先: `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv`）。
 - **ライセンス**: 適用されているライセンス（MIT / Apache-2.0）を確認できます。
 
-※ 設定変更をIMEに反映するには、設定アプリで「保存」後に一度サインアウトして再度サインインするか、IMEを使用中のアプリを再起動してください。
+※ 辞書アクセス・学習履歴・変換モデルはバックグラウンドサービス（`karukan-server.exe`）側で一元管理されているため、設定アプリでの設定変更・ユーザー辞書保存・学習履歴削除は、保存時に実行中のサービスへ即座に反映（ホットリロード）されます。
 
 ## 現在の対応状況
 
-共有エンジンへの接続、キー入力、TSFの未確定文字列と確定処理に対応しています。
+バックグラウンドエンジンサービス（`karukan-server.exe`）との名前付きパイプIPC連携、キー入力、TSFの未確定文字列と確定処理に対応しています。
 候補一覧は、入力位置の近くに表示する非アクティブのリストウィンドウに表示し、
 選択中の候補をハイライトします。
 

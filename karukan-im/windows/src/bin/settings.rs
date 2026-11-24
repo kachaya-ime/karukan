@@ -1413,10 +1413,22 @@ mod app {
 
     fn save_user_dictionary(state: &AppState) {
         match save_user_dictionary_entries(&state.user_dictionary_entries) {
-            Ok(()) => set_status(
-                state,
-                "ユーザー辞書を保存しました。変換への反映はIMEの再起動後です。",
-            ),
+            Ok(()) => {
+                let reloaded = karukan_im_windows::engine_client::notify_server(
+                    &karukan_im_windows::ipc::IpcRequest::ReloadUserDictionaries,
+                );
+                if reloaded {
+                    set_status(
+                        state,
+                        "ユーザー辞書を保存し、実行中のIMEサービスに反映しました。",
+                    );
+                } else {
+                    set_status(
+                        state,
+                        "ユーザー辞書を保存しました（次回IME起動時に自動で読み込まれます）。",
+                    );
+                }
+            }
             Err(error) => set_status(state, &format!("ユーザー辞書の保存エラー: {error}")),
         }
     }
@@ -1644,7 +1656,7 @@ mod app {
             return;
         }
         let prompt = wide(&format!(
-            "選択した {} 件の学習履歴を削除しますか？\n各履歴と、同じ候補がより長い読みで学習されている履歴も削除されます。\n実行前にKarukan IMEを終了してください。",
+            "選択した {} 件の学習履歴を削除しますか？\n各履歴と、同じ候補がより長い読みで学習されている履歴も削除されます。",
             selected_records.len()
         ));
         if unsafe {
@@ -1659,6 +1671,11 @@ mod app {
         {
             return;
         }
+
+        // メモリ上の未保存キャッシュも先にファイルへ書き出させる
+        let _ = karukan_im_windows::engine_client::notify_server(
+            &karukan_im_windows::ipc::IpcRequest::SaveLearning,
+        );
 
         let result: Result<usize, String> = (|| {
             let path = learning_path()?;
@@ -1681,8 +1698,11 @@ mod app {
         })();
         match result {
             Ok(removed) => {
+                let _ = karukan_im_windows::engine_client::notify_server(
+                    &karukan_im_windows::ipc::IpcRequest::ReloadLearning,
+                );
                 reload_learning_records(state);
-                set_status(state, &format!("{removed} 件の関連履歴を削除しました。"));
+                set_status(state, &format!("{removed} 件の関連履歴を削除し、IMEサービスに反映しました。"));
             }
             Err(error) => set_status(state, &format!("履歴削除エラー: {error}")),
         }
@@ -1694,7 +1714,7 @@ mod app {
             return;
         }
         let prompt = wide(&format!(
-            "学習履歴 {} 件をすべて削除します。この操作は元に戻せません。\n実行前にKarukan IMEを終了してください。",
+            "学習履歴 {} 件をすべて削除します。この操作は元に戻せません。",
             state.learning_records.len()
         ));
         if unsafe {
@@ -1709,6 +1729,9 @@ mod app {
         {
             return;
         }
+        let _ = karukan_im_windows::engine_client::notify_server(
+            &karukan_im_windows::ipc::IpcRequest::SaveLearning,
+        );
         let result: Result<usize, String> = (|| {
             let path = learning_path()?;
             let records = load_learning_records()?;
@@ -1720,8 +1743,11 @@ mod app {
         })();
         match result {
             Ok(removed) => {
+                let _ = karukan_im_windows::engine_client::notify_server(
+                    &karukan_im_windows::ipc::IpcRequest::ReloadLearning,
+                );
                 reload_learning_records(state);
-                set_status(state, &format!("学習履歴 {removed} 件を削除しました。"));
+                set_status(state, &format!("学習履歴 {removed} 件を削除し、IMEサービスに反映しました。"));
             }
             Err(error) => set_status(state, &format!("履歴削除エラー: {error}")),
         }
@@ -2912,6 +2938,7 @@ mod app {
                                 if !is_learning_category(state)
                                     && !is_user_dictionary_category(state)
                                     && !is_license_category(state)
+                                    && !is_key_bindings_category(state)
                                     && !apply_setting_fields(state)
                                 {
                                     send(state.categories, LB_SETCURSEL, state.category, 0);
@@ -2994,13 +3021,26 @@ mod app {
                             if !is_learning_category(state)
                                 && !is_user_dictionary_category(state)
                                 && !is_license_category(state)
+                                && !is_key_bindings_category(state)
                                 && apply_setting_fields(state) =>
                         {
                             match save_config(&state.config) {
-                                Ok(()) => set_status(
-                                    state,
-                                    "設定を保存しました。IMEの設定は次回起動時に反映されます。",
-                                ),
+                                Ok(()) => {
+                                    let reloaded = karukan_im_windows::engine_client::notify_server(
+                                        &karukan_im_windows::ipc::IpcRequest::ReloadSettings,
+                                    );
+                                    if reloaded {
+                                        set_status(
+                                            state,
+                                            "設定を保存し、実行中のIMEサービスに反映しました。",
+                                        );
+                                    } else {
+                                        set_status(
+                                            state,
+                                            "設定を保存しました。次回IME起動時に反映されます。",
+                                        );
+                                    }
+                                }
                                 Err(error) => set_status(state, &format!("保存エラー: {error}")),
                             }
                         }

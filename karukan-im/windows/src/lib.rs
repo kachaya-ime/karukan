@@ -89,4 +89,28 @@ pub fn configure_model_cache() -> Result<(), String> {
 }
 
 #[cfg(windows)]
+pub fn server_pipe_name() -> String {
+    let user = std::env::var("USERNAME").unwrap_or_else(|_| "default".to_string());
+    let sanitized: String = user
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    format!(r"\\.\pipe\karukan-imserver-{sanitized}")
+}
+
+#[cfg(windows)]
+pub fn server_mutex_name() -> String {
+    let user = std::env::var("USERNAME").unwrap_or_else(|_| "default".to_string());
+    let sanitized: String = user
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    format!(r"Local\KarukanImServerMutex-{sanitized}")
+}
+
+#[cfg(windows)]
+pub mod engine_client;
+#[cfg(windows)]
+pub mod ipc;
+#[cfg(windows)]
 mod tsf;

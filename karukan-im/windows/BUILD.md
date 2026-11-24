@@ -61,8 +61,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\karukan-im\windows\build-windows.ps1 -Release
 ```
 
-ビルド成果物の `karukan_im_windows.dll` と `install.exe` は、`target\x86_64-pc-windows-msvc\release` に生成されます。
-設定アプリの `karukan-settings.exe` も同じフォルダーに生成されます。
+ビルド成果物の `karukan_im_windows.dll`、`karukan-server.exe`、`karukan-settings.exe`、`install.exe` は、`target\x86_64-pc-windows-msvc\release` に生成されます。
 
 ### クリーンビルド
 
@@ -83,7 +82,7 @@ cargo clean
 ## 配布用 ZIP パッケージの作成
 
 リポジトリルートの PowerShell から次を実行すると、リリースビルドを行い、
-`install.exe`、`karukan_im_windows.dll`、`karukan-settings.exe` とインストール手順を含む ZIP を `karukan-im\windows\dist\karukan-windows-x64-v<version>.zip` に作成します。
+`install.exe`、`karukan_im_windows.dll`、`karukan-server.exe`、`karukan-settings.exe` とインストール手順を含む ZIP を `karukan-im\windows\dist\karukan-windows-x64-v<version>.zip` に作成します。
 
 ```powershell
 .\karukan-im\windows\package-windows.ps1
@@ -94,7 +93,8 @@ cargo clean
 ### ZIP パッケージに含まれるファイル
 
 - `install.exe`: TSF 登録・解除、COM クラス登録を行うインストーラー
-- `karukan_im_windows.dll`: Karukan IME の TSF DLL 本体
+- `karukan_im_windows.dll`: Karukan IME の TSF DLL 本体（IPC クライアント）
+- `karukan-server.exe`: 辞書・学習履歴・変換モデルを一元管理するバックグラウンドエンジンサービス
 - `karukan-settings.exe`: 設定 GUI アプリケーション
 - `README.txt`: インストール・アンインストール手順書
 - `LICENSE-MIT` / `LICENSE-APACHE`: ライセンスファイル

@@ -1,18 +1,16 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
-use karukan_im::config::Settings;
-use karukan_im::core::engine::{EngineConfig, InputMethodEngine};
 use windows::core::{implement, Interface, Ref};
 use windows::Win32::Foundation::E_POINTER;
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfClientId, ITfCompartmentEventSink, ITfKeyEventSink,
     ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor,
-    ITfTextInputProcessor_Impl, ITfThreadMgr, TF_MOD_ALT, TF_MOD_IGNORE_ALL_MODIFIER,
-    TF_PRESERVEDKEY,
+    ITfTextInputProcessor_Impl, ITfThreadFocusSink, ITfThreadMgr, TF_MOD_ALT,
+    TF_MOD_IGNORE_ALL_MODIFIER, TF_PRESERVEDKEY,
 };
 
+use crate::engine_client::EngineClient;
 use crate::{
     CLSID_KARUKAN_TIP, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_PRESERVEDKEY_TOGGLE,
     TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_NATIVE, TF_CONVERSIONMODE_ROMAN,
@@ -56,7 +54,7 @@ pub(crate) struct TextService {
     thread_id: RefCell<Option<u32>>,
     keystroke_mgr: RefCell<Option<ITfKeystrokeMgr>>,
     key_sink: RefCell<Option<ITfKeyEventSink>>,
-    engine: RefCell<Option<Arc<Mutex<InputMethodEngine>>>>,
+    engine: RefCell<Option<Rc<EngineClient>>>,
     compartment_sources: RefCell<Vec<(ITfSource, u32)>>,
     lang_bar_item: RefCell<Option<ITfLangBarItemButton>>,
     thread_mgr: RefCell<Option<ITfThreadMgr>>,
@@ -92,15 +90,11 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         let client_ids: ITfClientId = thread_mgr.cast()?;
         let client_id = unsafe { client_ids.GetClientId(&CLSID_KARUKAN_TIP)? };
 
-        let settings = Settings::load_or_default();
-        let mut engine = InputMethodEngine::with_config(EngineConfig::from_settings(&settings));
-        if let Err(error) = engine.init_from_settings(&settings) {
-            tracing::error!("failed to initialize Karukan engine: {error:#}");
-        }
+        let engine = Rc::new(EngineClient::new());
+        engine.init();
 
         let composition = Rc::new(RefCell::new(None));
         let candidate_popup = Rc::new(RefCell::new(CandidatePopup::default()));
-        let engine = Arc::new(Mutex::new(engine));
         let key_sink: ITfKeyEventSink = KeyHandler {
             engine: engine.clone(),
             thread_mgr: thread_mgr.clone(),
@@ -113,6 +107,15 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
 
         unsafe {
             keystroke_mgr.AdviseKeyEventSink(thread_id, &key_sink, true)?;
+        }
+        if let Ok(source) = thread_mgr.cast::<ITfSource>()
+            && let Ok(focus_sink) = key_sink.cast::<ITfThreadFocusSink>()
+            && let Ok(cookie) =
+                unsafe { source.AdviseSink(&ITfThreadFocusSink::IID, &focus_sink) }
+        {
+            self.compartment_sources
+                .borrow_mut()
+                .push((source, cookie));
         }
         for (vkey, modifiers) in PRESERVED_TOGGLE_KEYS {
             let prekey = TF_PRESERVEDKEY {
@@ -217,10 +220,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         }
         self.key_sink.borrow_mut().take();
         if let Some(engine) = self.engine.borrow_mut().take() {
-            match engine.lock() {
-                Ok(mut engine) => engine.save_learning(),
-                Err(error) => tracing::error!("failed to save learning cache: {error}"),
-            }
+            engine.save_learning();
         }
         Ok(())
     }

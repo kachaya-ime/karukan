@@ -114,7 +114,7 @@ TSF のグローバルコンパートメント (`GUID_COMPARTMENT_KEYBOARD_OPENC
 ### 5.1 ウィンドウ全体仕様
 - **ウィンドウタイトル**: `Karukan 設定`
 - **レイアウト**: 左サイドバー（幅 `200px`、項目高さ `40px`）＋ 右メインコンテンツ領域（マージン `20px`、縦スクロール対応）＋ 下部固定フッター（ステータス表示ラベル＋操作ボタン）。
-- **設定の反映タイミング**: 設定ファイルやユーザー辞書を保存した後、Windows から一度サインアウトして再サインイン（またはIME使用中アプリを再起動）することで反映される。
+- **設定の反映タイミング**: 辞書アクセス・学習履歴・変換エンジンはバックグラウンドサービス (`karukan-server.exe`) 側で一元管理されており、設定ファイル・ユーザー辞書・学習履歴の保存・削除操作を行うと名前付きパイプ IPC 経由で実行中のサービスへ即時反映（ホットリロード）される。
 
 ### 5.2 カテゴリ一覧と編集項目仕様
 
@@ -141,7 +141,7 @@ TSF のグローバルコンパートメント (`GUID_COMPARTMENT_KEYBOARD_OPENC
 - **削除機能**:
   - **「選択した履歴を削除」**: 選択した行（読み $R$、表記 $S$）を削除する。さらに、**より長い読み $R'$ ($R'$ が $R$ で始まる) の記録のうち、表記 $S'$ に $S$ が含まれる連動エントリも一括削除**し、長文変換時に同じ誤学習が再浮上するのを防ぐ。
   - **「すべて削除」**: 全学習履歴を消去する。
-  - いずれの削除操作も、実行前に確認ダイアログ（IME使用中アプリを閉じる旨の案内付き）を表示し、承認後に `learning.tsv` へアトミック保存する。
+  - いずれの削除操作も、実行前に確認ダイアログを表示し、承認後にまず稼働中のサービスへ未保存履歴のフラッシュ (`IpcRequest::SaveLearning`) を要求した上で `learning.tsv` をアトミック更新し、最後にサービスへ再読み込み (`IpcRequest::ReloadLearning`) を通知して即時反映する。
 
 #### (3) ユーザー辞書カテゴリ (`user_dictionary`)
 - **一覧表示**: `読み` | `表記` | `品詞` | `コメント` の4列リストビュー。
@@ -149,7 +149,7 @@ TSF のグローバルコンパートメント (`GUID_COMPARTMENT_KEYBOARD_OPENC
   - 入力欄: `読み`（必須）、`表記`（必須）、`品詞`（省略時は `名詞`）、`コメント`（任意）。
   - 行を選択すると入力欄へ値が読み込まれ、編集して追加・更新・削除が可能。
 - **保存仕様**:
-  - 「辞書を保存」ボタンで `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv` へ Mozc / Google 日本語入力互換の4カラム TSV 形式で保存する。
+  - 「辞書を保存」ボタンで `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv` へ Mozc / Google 日本語入力互換の4カラム TSV 形式で保存し、`IpcRequest::ReloadUserDictionaries` により実行中のサービスへ即時反映する。
   - `user_dicts` ディレクトリ内の他ファイル（ユーザーが手動配置した別辞書など）は変更しない。
 
 #### (4) ライセンスカテゴリ (`license`)
@@ -164,14 +164,15 @@ TSF のグローバルコンパートメント (`GUID_COMPARTMENT_KEYBOARD_OPENC
 
 | コマンド | 実行内容 |
 | :--- | :--- |
-| `install.exe install` | 1. `install.exe` と同じフォルダにある `karukan_im_windows.dll` と `karukan-settings.exe` を検証。<br/>2. `%LOCALAPPDATA%\Programs\Karukan\` を作成し、ロックされていない旧 `karukan_im_windows-*.dll` を清掃した上で、`karukan_im_windows-<PID>-<UnixNanoTimestamp>.dll` と `karukan-settings.exe` を配置。<br/>3. `%APPDATA%\karukan\karukan-im\config\config.toml` が未存在なら既定設定を生成。<br/>4. システム辞書 `dict.bin` が未存在なら `curl.exe` と `tar.exe` で GitHub Releases (`dict.tgz`) から取得・展開し、一時ファイル経由のアトミックリネームで配置。<br/>5. 設定の `strategy` に応じ、必要なすべての変換モデル (`.gguf`) と `tokenizer.json` を Hugging Face Hub から事前取得。<br/>6. `HKLM\Software\Classes\CLSID\{7d7a2c6e-4d65-4ab8-8f30-4a1f2c83f81b}` に COM InprocServer32 (`ThreadingModel = Apartment`) を登録。<br/>7. TSF プロファイル (`0x0411`) と8つのサポートカテゴリを登録・有効化（失敗時は COM・TSF 登録を自動ロールバック）。<br/>8. `Set-WinDefaultInputMethodOverride` により Karukan を既定の日本語入力方式に設定。 |
-| `install.exe uninstall` | 1. `Set-WinDefaultInputMethodOverride -InputTip ''` で既定入力方式のオーバーライドを解除。<br/>2. TSF 言語プロファイルの無効化・削除、全カテゴリの登録解除、input processor の登録解除。<br/>3. `HKCU\Software\Microsoft\CTF\TIP\{CLSID}` および `HKLM` / `HKCU` の `Software\Classes\CLSID\{CLSID}` レジストリツリーを削除。<br/>4. `%LOCALAPPDATA%\Programs\Karukan\` 内の DLL は実行中プロセス保護のため残置し、サインアウト後の削除を案内する。 |
+| `install.exe install` | 1. `install.exe` と同じフォルダにある `karukan_im_windows.dll`、`karukan-server.exe`、`karukan-settings.exe` を検証。<br/>2. `%LOCALAPPDATA%\Programs\Karukan\` を作成し、稼働中の旧 `karukan-server.exe` があれば `IpcRequest::Shutdown` で終了させ、ロックされていない旧 `karukan_im_windows-*.dll` を清掃した上で、`karukan_im_windows-<PID>-<UnixNanoTimestamp>.dll`、`karukan-server.exe`、`karukan-settings.exe` を配置。<br/>3. `%APPDATA%\karukan\karukan-im\config\config.toml` が未存在なら既定設定を生成。<br/>4. システム辞書 `dict.bin` が未存在なら `curl.exe` と `tar.exe` で GitHub Releases (`dict.tgz`) から取得・展開し、一時ファイル経由のアトミックリネームで配置。<br/>5. 設定の `strategy` に応じ、必要なすべての変換モデル (`.gguf`) と `tokenizer.json` を Hugging Face Hub から事前取得。<br/>6. `HKLM\Software\Classes\CLSID\{7d7a2c6e-4d65-4ab8-8f30-4a1f2c83f81b}` に COM InprocServer32 (`ThreadingModel = Apartment`) を登録。<br/>7. TSF プロファイル (`0x0411`) と8つのサポートカテゴリを登録・有効化（失敗時は COM・TSF 登録を自動ロールバック）。<br/>8. `karukan-server.exe` をバックグラウンド起動し、`Set-WinDefaultInputMethodOverride` により Karukan を既定の日本語入力方式に設定。 |
+| `install.exe uninstall` | 1. 稼働中の `karukan-server.exe` に `IpcRequest::Shutdown` を送信して停止。<br/>2. `Set-WinDefaultInputMethodOverride -InputTip ''` で既定入力方式のオーバーライドを解除。<br/>3. TSF 言語プロファイルの無効化・削除、全カテゴリの登録解除、input processor の登録解除。<br/>4. `HKCU\Software\Microsoft\CTF\TIP\{CLSID}` および `HKLM` / `HKCU` の `Software\Classes\CLSID\{CLSID}` レジストリツリーを削除。<br/>5. `%LOCALAPPDATA%\Programs\Karukan\` 内の DLL は実行中プロセス保護のため残置し、サインアウト後の削除を案内する。 |
 
 ### 6.2 配布パッケージ仕様 (`package-windows.ps1`)
 - 生成パス: `karukan-im\windows\dist\karukan-windows-x64-v<version>.zip`
 - 同梱ファイル:
   - `install.exe`
   - `karukan_im_windows.dll`
+  - `karukan-server.exe`
   - `karukan-settings.exe`
   - `README.txt`（インストール・アンインストール手順書）
   - `LICENSE-MIT`
@@ -187,4 +188,4 @@ TSF のグローバルコンパートメント (`GUID_COMPARTMENT_KEYBOARD_OPENC
 | **システム辞書** | `%APPDATA%\karukan\karukan-im\data\dict.bin` | Karukan バイナリトライ辞書形式 (`KRKN`)。 |
 | **学習履歴** | `%APPDATA%\karukan\karukan-im\data\learning.tsv` | UTF-8 TSV。<br/>ヘッダー・コメント行 (`#`) を除き、各行は `読み<TAB>表記<TAB>選択回数(u32)<TAB>最終アクセスUNIX秒(u64)`（または3カラム互換形式）。 |
 | **ユーザー辞書** | `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv` | UTF-8 TSV（Mozc互換）。<br/>各行は `読み<TAB>表記<TAB>品詞<TAB>コメント`。制御文字（改行・タブ・CR・NUL）を含む入力はバリデーションで拒否する。 |
-| **動作ログ** | `%LOCALAPPDATA%\karukan\karukan-im\logs\windows-tsf.log` | UTF-8 テキスト（ANSIエスケープなし、追記モード）。<br/>環境変数 `RUST_LOG` でログレベル制御可能（デフォルト: `info`）。 |
+| **動作ログ** | `%LOCALAPPDATA%\karukan\karukan-im\logs\windows-tsf.log`<br/>`%LOCALAPPDATA%\karukan\karukan-im\logs\windows-server.log` | UTF-8 テキスト（ANSIエスケープなし、追記モード）。<br/>環境変数 `RUST_LOG` でログレベル制御可能（デフォルト: `info`）。 |

@@ -28,12 +28,13 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT};
 use windows::Win32::UI::TextServices::{ITfComposition, ITfContext};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, LB_ADDSTRING, LB_GETTEXT,
-    LB_RESETCONTENT, LB_SETCURSEL, MA_NOACTIVATE, RegisterClassW, SendMessageW, SetWindowPos,
-    SetWindowTextW, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, WINDOW_STYLE, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM,
-    WM_MEASUREITEM, WM_MOUSEACTIVATE, WM_PAINT, WNDCLASSW, WS_CHILD, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetForegroundWindow,
+    GetWindowThreadProcessId, IsWindow, IsWindowVisible, KillTimer, LB_ADDSTRING, LB_GETTEXT,
+    LB_RESETCONTENT, LB_SETCURSEL, MA_NOACTIVATE, RegisterClassW, SendMessageW, SetTimer,
+    SetWindowPos, SetWindowTextW, ShowWindow, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_STYLE, WM_ACTIVATEAPP, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_MEASUREITEM, WM_MOUSEACTIVATE, WM_PAINT, WM_TIMER,
+    WNDCLASSW, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 
 #[link(name = "dwmapi")]
@@ -52,6 +53,8 @@ const CANDIDATE_WINDOW_CLASS: PCWSTR = w!("KarukanCandidatePopup");
 static REGISTER_POPUP_CLASS: Once = Once::new();
 
 const WM_SETFONT: u32 = 0x0030;
+const TIMER_ID_FOCUS_WATCH: usize = 1;
+const FOCUS_WATCH_INTERVAL_MS: u32 = 100;
 const ITEM_HEIGHT: i32 = 30;
 const AUX_HEIGHT: i32 = 38;
 const POPUP_WIDTH: i32 = 420;
@@ -214,6 +217,38 @@ unsafe extern "system" fn candidate_wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_ACTIVATEAPP => {
+            if wparam.0 == 0 {
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), TIMER_ID_FOCUS_WATCH);
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            if wparam.0 == TIMER_ID_FOCUS_WATCH {
+                unsafe {
+                    if !IsWindowVisible(hwnd).as_bool() {
+                        let _ = KillTimer(Some(hwnd), TIMER_ID_FOCUS_WATCH);
+                    } else {
+                        let fg = GetForegroundWindow();
+                        let mut popup_pid = 0u32;
+                        let _ = GetWindowThreadProcessId(hwnd, Some(&mut popup_pid));
+                        let mut fg_pid = 0u32;
+                        if !fg.0.is_null() {
+                            let _ = GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+                        }
+                        if fg_pid != 0 && popup_pid != 0 && fg_pid != popup_pid {
+                            let _ = KillTimer(Some(hwnd), TIMER_ID_FOCUS_WATCH);
+                            let _ = ShowWindow(hwnd, SW_HIDE);
+                        }
+                    }
+                }
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
         WM_MEASUREITEM => {
             if lparam.0 != 0 {
                 let mis = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
@@ -503,6 +538,7 @@ unsafe extern "system" fn candidate_wnd_proc(
 #[derive(Default)]
 pub(crate) struct CandidatePopup {
     pub(crate) window: Option<HWND>,
+    pub(crate) owner_hwnd: Option<HWND>,
     pub(crate) list: Option<HWND>,
     pub(crate) auxiliary: Option<HWND>,
     pub(crate) candidates: Vec<String>,
@@ -512,6 +548,30 @@ pub(crate) struct CandidatePopup {
 }
 
 impl CandidatePopup {
+    fn reset_handles(&mut self) {
+        if let Some(font) = self.font.take() {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(font.0));
+            }
+        }
+        if let Some(font) = self.small_font.take() {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(font.0));
+            }
+        }
+        if let Some(window) = self.window.take() {
+            unsafe {
+                let _ = KillTimer(Some(window), TIMER_ID_FOCUS_WATCH);
+                if IsWindow(Some(window)).as_bool() {
+                    let _ = DestroyWindow(window);
+                }
+            }
+        }
+        self.owner_hwnd = None;
+        self.list = None;
+        self.auxiliary = None;
+    }
+
     pub(crate) fn show(
         &mut self,
         context: &ITfContext,
@@ -597,12 +657,19 @@ impl CandidatePopup {
 
         let owner_hwnd = if let Ok(view) = unsafe { context.GetActiveView() }
             && let Ok(hwnd) = unsafe { view.GetWnd() }
-            && hwnd.0 != 0 as _
+            && !hwnd.0.is_null()
         {
             Some(hwnd)
         } else {
             None
         };
+
+        if let Some(existing) = self.window {
+            let valid = unsafe { IsWindow(Some(existing)).as_bool() };
+            if !valid || (owner_hwnd.is_some() && self.owner_hwnd != owner_hwnd) {
+                self.reset_handles();
+            }
+        }
 
         let window = match self.window {
             Some(window) => window,
@@ -634,6 +701,7 @@ impl CandidatePopup {
                     );
                 }
                 self.window = Some(window);
+                self.owner_hwnd = owner_hwnd;
                 let list_style = WS_CHILD
                     | WS_VISIBLE
                     | WINDOW_STYLE(
@@ -709,6 +777,12 @@ impl CandidatePopup {
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )?;
             let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
+            let _ = SetTimer(
+                Some(window),
+                TIMER_ID_FOCUS_WATCH,
+                FOCUS_WATCH_INTERVAL_MS,
+                None,
+            );
         }
         Ok(())
     }
@@ -774,7 +848,10 @@ impl CandidatePopup {
     pub(crate) fn hide(&mut self) {
         if let Some(window) = self.window {
             unsafe {
-                let _ = ShowWindow(window, SW_HIDE);
+                let _ = KillTimer(Some(window), TIMER_ID_FOCUS_WATCH);
+                if IsWindow(Some(window)).as_bool() {
+                    let _ = ShowWindow(window, SW_HIDE);
+                }
             }
         }
     }
@@ -782,22 +859,6 @@ impl CandidatePopup {
 
 impl Drop for CandidatePopup {
     fn drop(&mut self) {
-        if let Some(font) = self.font.take() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(font.0));
-            }
-        }
-        if let Some(font) = self.small_font.take() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(font.0));
-            }
-        }
-        if let Some(window) = self.window.take() {
-            unsafe {
-                if let Err(error) = DestroyWindow(window) {
-                    tracing::warn!("failed to destroy Karukan candidate window: {error}");
-                }
-            }
-        }
+        self.reset_handles();
     }
 }

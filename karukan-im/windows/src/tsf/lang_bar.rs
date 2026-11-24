@@ -1,9 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::ptr;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
-use karukan_im::core::engine::InputMethodEngine;
 use karukan_im::core::keycode::KeyEvent;
 use karukan_im::core::keycode::Keysym;
 use windows::core::{implement, w, BSTR, BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, Ref};
@@ -24,6 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL, WS_POPUP,
 };
 
+use crate::engine_client::EngineClient;
 use crate::{
     CLSID_KARUKAN_TIP, RES_ID_ICON_ALPHA, RES_ID_ICON_HIRAGANA,
     TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE,
@@ -39,7 +38,7 @@ use super::text_service::spawn_settings_app;
 
 #[implement(ITfLangBarItem, ITfLangBarItemButton, ITfSource)]
 pub(crate) struct LangBarButton {
-    pub(crate) engine: Arc<Mutex<InputMethodEngine>>,
+    pub(crate) engine: Rc<EngineClient>,
     pub(crate) thread_mgr: ITfThreadMgr,
     pub(crate) client_id: u32,
     pub(crate) sink: Rc<RefCell<Option<ITfLangBarItemSink>>>,
@@ -143,9 +142,9 @@ impl LangBarButton_Impl {
                     self.client_id,
                     TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
                 )?;
-                if let Ok(mut engine) = self.engine.lock() {
+                if !self.engine.is_empty() {
                     let event = KeyEvent::new(Keysym::HENKAN, current_modifiers(), true);
-                    let _ = engine.process_key(&event);
+                    let _ = self.engine.process_key(&event);
                 }
             }
             2 => {
@@ -155,9 +154,7 @@ impl LangBarButton_Impl {
                     self.client_id,
                     TF_CONVERSIONMODE_ALPHANUMERIC,
                 )?;
-                if let Ok(mut engine) = self.engine.lock() {
-                    engine.reset();
-                }
+                self.engine.reset();
             }
             4 | 5 => {
                 spawn_settings_app();

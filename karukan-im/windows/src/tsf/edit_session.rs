@@ -2,10 +2,9 @@ use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::ptr;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
-use karukan_im::core::engine::{EngineAction, InputMethodEngine};
-use windows::core::{implement, Interface, BOOL, HRESULT, Ref};
+use karukan_im::core::engine::EngineAction;
+use windows::core::{implement, Interface, BOOL, Ref};
 use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_I4};
 use windows::Win32::UI::TextServices::{
     GUID_PROP_COMPOSING, INSERT_TEXT_AT_SELECTION_FLAGS, ITfComposition, ITfCompositionSink,
@@ -14,6 +13,7 @@ use windows::Win32::UI::TextServices::{
     TF_ANCHOR_START, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 
+use crate::engine_client::EngineClient;
 use super::candidate_window::CandidatePopup;
 
 pub(crate) const EDIT_SESSION_FLAGS: TF_CONTEXT_EDIT_CONTEXT_FLAGS =
@@ -25,8 +25,9 @@ pub(crate) struct EditSession {
     pub(crate) actions: Vec<EngineAction>,
     pub(crate) composition: Rc<RefCell<Option<ITfComposition>>>,
     pub(crate) candidate_popup: Rc<RefCell<CandidatePopup>>,
+    pub(crate) engine: Rc<EngineClient>,
     pub(crate) end_composition: bool,
-    pub(crate) reset_engine: Option<Arc<Mutex<InputMethodEngine>>>,
+    pub(crate) reset_engine: Option<Rc<EngineClient>>,
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
@@ -34,13 +35,15 @@ impl ITfEditSession_Impl for EditSession_Impl {
         if self.end_composition
             && let Some(active) = self.composition.borrow_mut().take()
         {
-            unsafe { active.EndComposition(edit_cookie)? };
+            unsafe {
+                if let Ok(range) = active.GetRange() {
+                    let _ = range.SetText(edit_cookie, 0, &[]);
+                }
+                let _ = active.EndComposition(edit_cookie);
+            };
         }
         if let Some(engine) = &self.reset_engine {
-            engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?
-                .reset();
+            engine.reset();
         }
         for action in &self.actions {
             match action {
@@ -50,6 +53,7 @@ impl ITfEditSession_Impl for EditSession_Impl {
                         edit_cookie,
                         &self.composition,
                         &self.candidate_popup,
+                        &self.engine,
                         preedit.text(),
                         preedit.caret(),
                     )?;
@@ -140,6 +144,7 @@ pub(crate) fn capture_surrounding_text(context: &ITfContext, thread_id: u32) -> 
 pub(crate) struct CompositionSink {
     pub(crate) composition: Rc<RefCell<Option<ITfComposition>>>,
     pub(crate) candidate_popup: Rc<RefCell<CandidatePopup>>,
+    pub(crate) engine: Rc<EngineClient>,
 }
 
 impl ITfCompositionSink_Impl for CompositionSink_Impl {
@@ -154,6 +159,8 @@ impl ITfCompositionSink_Impl for CompositionSink_Impl {
             if current.as_raw() == terminated.as_raw() {
                 self.composition.borrow_mut().take();
                 self.candidate_popup.borrow_mut().hide();
+                self.engine.reset();
+                self.engine.set_surrounding_context("", "");
             }
         }
         Ok(())
@@ -165,6 +172,7 @@ pub(crate) fn update_preedit(
     edit_cookie: u32,
     composition: &Rc<RefCell<Option<ITfComposition>>>,
     candidate_popup: &Rc<RefCell<CandidatePopup>>,
+    engine: &Rc<EngineClient>,
     text: &str,
     caret: usize,
 ) -> windows::core::Result<()> {
@@ -191,6 +199,7 @@ pub(crate) fn update_preedit(
         let sink: ITfCompositionSink = CompositionSink {
             composition: composition.clone(),
             candidate_popup: candidate_popup.clone(),
+            engine: engine.clone(),
         }
         .into();
         let context_composition: ITfContextComposition = context.cast()?;

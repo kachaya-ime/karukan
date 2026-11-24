@@ -1,19 +1,19 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
-use karukan_im::core::engine::{EngineAction, InputMethodEngine};
+use karukan_im::core::engine::EngineAction;
 use karukan_im::core::keycode::{KeyEvent, KeyModifiers, Keysym};
-use windows::core::{implement, BOOL, GUID, HRESULT, Ref};
+use windows::core::{implement, BOOL, GUID, Ref};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_CONTROL, VK_CONVERT,
     VK_DBE_ALPHANUMERIC, VK_KANA, VK_LWIN, VK_MENU, VK_NONCONVERT, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::TextServices::{
-    ITfComposition, ITfContext, ITfEditSession, ITfKeyEventSink, ITfKeyEventSink_Impl,
-    ITfThreadMgr,
+    ITfComposition, ITfContext, ITfDocumentMgr, ITfEditSession, ITfKeyEventSink,
+    ITfKeyEventSink_Impl, ITfThreadFocusSink, ITfThreadFocusSink_Impl, ITfThreadMgr,
 };
 
+use crate::engine_client::EngineClient;
 use crate::{
     TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_KATAKANA,
     TF_CONVERSIONMODE_NATIVE, TF_CONVERSIONMODE_ROMAN,
@@ -76,7 +76,7 @@ pub(crate) fn close_ime(
     context: Option<&ITfContext>,
     composition: &Rc<RefCell<Option<ITfComposition>>>,
     candidate_popup: &Rc<RefCell<CandidatePopup>>,
-    engine: &Arc<Mutex<InputMethodEngine>>,
+    engine: &Rc<EngineClient>,
 ) -> windows::core::Result<()> {
     if let Some(context) = context {
         let session: ITfEditSession = EditSession {
@@ -84,6 +84,7 @@ pub(crate) fn close_ime(
             actions: vec![EngineAction::HideCandidates, EngineAction::HideAuxText],
             composition: composition.clone(),
             candidate_popup: candidate_popup.clone(),
+            engine: engine.clone(),
             end_composition: true,
             reset_engine: Some(engine.clone()),
         }
@@ -94,9 +95,7 @@ pub(crate) fn close_ime(
     }
     let _ = set_input_mode_conversion(thread_mgr, client_id, TF_CONVERSIONMODE_ALPHANUMERIC);
     set_ime_openclose(thread_mgr, client_id, false)?;
-    if let Ok(mut eng) = engine.lock() {
-        eng.set_surrounding_context("", "");
-    }
+    engine.set_surrounding_context("", "");
     Ok(())
 }
 
@@ -117,7 +116,7 @@ pub(crate) fn toggle_ime(
     context: Option<&ITfContext>,
     composition: &Rc<RefCell<Option<ITfComposition>>>,
     candidate_popup: &Rc<RefCell<CandidatePopup>>,
-    engine: &Arc<Mutex<InputMethodEngine>>,
+    engine: &Rc<EngineClient>,
 ) -> windows::core::Result<()> {
     let is_open = get_ime_openclose(thread_mgr).unwrap_or(true);
     if is_open {
@@ -234,9 +233,9 @@ fn control_keysym(virtual_key: u16) -> Option<u32> {
     }
 }
 
-#[implement(ITfKeyEventSink)]
+#[implement(ITfKeyEventSink, ITfThreadFocusSink)]
 pub(crate) struct KeyHandler {
-    pub(crate) engine: Arc<Mutex<InputMethodEngine>>,
+    pub(crate) engine: Rc<EngineClient>,
     pub(crate) thread_mgr: ITfThreadMgr,
     pub(crate) client_id: u32,
     pub(crate) thread_id: u32,
@@ -244,22 +243,32 @@ pub(crate) struct KeyHandler {
     pub(crate) candidate_popup: Rc<RefCell<CandidatePopup>>,
 }
 
-impl ITfKeyEventSink_Impl for KeyHandler_Impl {
-    fn OnSetFocus(&self, foreground: BOOL) -> windows::core::Result<()> {
-        if !foreground.as_bool() {
-            // アプリ側がフォーカスを失った場合:
-            // 候補ウィンドウおよび補助テキストを即座に非表示
-            self.candidate_popup.borrow_mut().hide();
+impl KeyHandler_Impl {
+    fn handle_focus_loss(&self, prev_doc_mgr: Option<&ITfDocumentMgr>) {
+        // 候補ウィンドウおよび補助テキストを即座に非表示
+        self.candidate_popup.borrow_mut().hide();
+        let _ = self.candidate_popup.borrow_mut().set_aux("");
 
-            // コンポジションを終了（未確定文字列を破棄）
-            if let Ok(doc_mgr) = unsafe { self.thread_mgr.GetFocus() }
-                && let Ok(context) = unsafe { doc_mgr.GetTop() }
-            {
+        // コンポジションが存在する場合のみ終了セッションを要求
+        // (フォーカス喪失後のドキュメントに対して無条件にRequestEditSessionを発行すると
+        // アプリ側で非同期コールバック時の不整合やクラッシュを招くため)
+        let has_composition = self.composition.borrow().is_some();
+        if has_composition {
+            let context_opt = if let Some(doc_mgr) = prev_doc_mgr {
+                unsafe { doc_mgr.GetTop().ok() }
+            } else if let Ok(doc_mgr) = unsafe { self.thread_mgr.GetFocus() } {
+                unsafe { doc_mgr.GetTop().ok() }
+            } else {
+                None
+            };
+
+            if let Some(context) = context_opt {
                 let session: ITfEditSession = EditSession {
                     context: context.clone(),
                     actions: vec![EngineAction::HideCandidates, EngineAction::HideAuxText],
                     composition: self.composition.clone(),
                     candidate_popup: self.candidate_popup.clone(),
+                    engine: self.engine.clone(),
                     end_composition: true,
                     reset_engine: Some(self.engine.clone()),
                 }
@@ -267,18 +276,35 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
                 unsafe {
                     let _ = context.RequestEditSession(self.thread_id, &session, EDIT_SESSION_FLAGS);
                 }
-            } else if let Some(active) = self.composition.borrow_mut().take() {
-                // コンテキストが取得できない場合でも参照を破棄
-                drop(active);
             }
+            // 非同期編集セッションが拒否された場合に備えて参照を確実に破棄
+            self.composition.borrow_mut().take();
+        }
 
-            // IMEエンジンを初期状態にリセット
-            if let Ok(mut engine) = self.engine.lock() {
-                engine.reset();
-                engine.set_surrounding_context("", "");
-            }
-        } else if let Ok(mut engine) = self.engine.lock() {
-            engine.set_surrounding_context("", "");
+        // IMEエンジンを初期状態にリセット
+        self.engine.reset();
+        self.engine.set_surrounding_context("", "");
+    }
+}
+
+impl ITfThreadFocusSink_Impl for KeyHandler_Impl {
+    fn OnSetThreadFocus(&self) -> windows::core::Result<()> {
+        self.engine.set_surrounding_context("", "");
+        Ok(())
+    }
+
+    fn OnKillThreadFocus(&self) -> windows::core::Result<()> {
+        self.handle_focus_loss(None);
+        Ok(())
+    }
+}
+
+impl ITfKeyEventSink_Impl for KeyHandler_Impl {
+    fn OnSetFocus(&self, foreground: BOOL) -> windows::core::Result<()> {
+        if !foreground.as_bool() {
+            self.handle_focus_loss(None);
+        } else {
+            self.engine.set_surrounding_context("", "");
         }
         Ok(())
     }
@@ -319,11 +345,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
 
         // 5. ファンクションキー（F6〜F10: 変換中のみ）
         if (0x75..=0x79).contains(&vk) {
-            let engine = self
-                .engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-            if !engine.state().is_empty() {
+            if !self.engine.is_empty() {
                 return Ok(BOOL(1));
             }
         }
@@ -334,11 +356,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
         if modifiers.alt_key || modifiers.super_key {
             return Ok(BOOL(0));
         }
-        let engine = self
-            .engine
-            .lock()
-            .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-        let active = !engine.state().is_empty();
+        let active = !self.engine.is_empty();
         let control_binding = modifiers.control_key
             && (matches!(
                 keysym.0,
@@ -433,18 +451,15 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
                 self.client_id,
                 TF_CONVERSIONMODE_NATIVE | TF_CONVERSIONMODE_FULLSHAPE | TF_CONVERSIONMODE_ROMAN,
             );
-            let mut engine = self
-                .engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
             let event = KeyEvent::new(Keysym::HENKAN, current_modifiers(), true);
-            let result = engine.process_key(&event);
+            let result = self.engine.process_key(&event);
             if !result.actions.is_empty() {
                 let session: ITfEditSession = EditSession {
                     context: context.clone(),
                     actions: result.actions,
                     composition: self.composition.clone(),
                     candidate_popup: self.candidate_popup.clone(),
+                    engine: self.engine.clone(),
                     end_composition: false,
                     reset_engine: None,
                 }
@@ -458,15 +473,11 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
             return Ok(BOOL(1));
         }
         if (0x75..=0x79).contains(&vk) {
-            let mut engine = self
-                .engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-            if !engine.state().is_empty() {
-                if let Some(preedit) = engine.state().preedit() {
-                    let text = preedit.text().to_string();
+            if !self.engine.is_empty() {
+                let text = self.engine.preedit_text();
+                if !text.is_empty() {
                     let converted = convert_function_key(&text, vk);
-                    engine.reset();
+                    self.engine.reset();
                     let session: ITfEditSession = EditSession {
                         context: context.clone(),
                         actions: vec![
@@ -476,6 +487,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
                         ],
                         composition: self.composition.clone(),
                         candidate_popup: self.candidate_popup.clone(),
+                        engine: self.engine.clone(),
                         end_composition: true,
                         reset_engine: None,
                     }
@@ -494,9 +506,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
         };
         if self.composition.borrow().is_none() && (keysym.is_printable() || keysym.0 < 0xff00) {
             let surrounding = capture_surrounding_text(context, self.thread_id);
-            if let Ok(mut engine) = self.engine.lock() {
-                engine.set_surrounding_context(&surrounding, "");
-            }
+            self.engine.set_surrounding_context(&surrounding, "");
         }
         let modifiers = current_modifiers();
         if keysym == Keysym::HENKAN {
@@ -520,13 +530,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
             );
         }
         let event = KeyEvent::new(keysym, modifiers, true);
-        let mut result = {
-            let mut engine = self
-                .engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-            engine.process_key(&event)
-        };
+        let mut result = self.engine.process_key(&event);
 
         let is_katakana_mode = get_input_mode_conversion(&self.thread_mgr)
             .map(|c| (c & TF_CONVERSIONMODE_KATAKANA) != 0)
@@ -536,41 +540,35 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
             && !(modifiers.control_key
                 && (keysym == Keysym::KEY_K || keysym == Keysym::KEY_K_UPPER))
         {
-            let mut engine = self
-                .engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?;
-            if let Some(preedit) = engine.state().preedit() {
-                if preedit
-                    .text()
-                    .chars()
-                    .any(|c| ('\u{3041}'..='\u{3096}').contains(&c))
-                {
-                    let ctrl_k = KeyEvent {
-                        keysym: Keysym::KEY_K,
-                        modifiers: KeyModifiers {
-                            control_key: true,
-                            shift_key: false,
-                            alt_key: false,
-                            super_key: false,
-                        },
-                        is_press: true,
-                    };
-                    let k_res = engine.process_key(&ctrl_k);
-                    for action in k_res.actions {
-                        if let EngineAction::UpdatePreedit(_) = &action {
-                            if let Some(pos) = result
-                                .actions
-                                .iter()
-                                .position(|a| matches!(a, EngineAction::UpdatePreedit(_)))
-                            {
-                                result.actions[pos] = action;
-                            } else {
-                                result.actions.push(action);
-                            }
+            let text = self.engine.preedit_text();
+            if text
+                .chars()
+                .any(|c| ('\u{3041}'..='\u{3096}').contains(&c))
+            {
+                let ctrl_k = KeyEvent {
+                    keysym: Keysym::KEY_K,
+                    modifiers: KeyModifiers {
+                        control_key: true,
+                        shift_key: false,
+                        alt_key: false,
+                        super_key: false,
+                    },
+                    is_press: true,
+                };
+                let k_res = self.engine.process_key(&ctrl_k);
+                for action in k_res.actions {
+                    if let EngineAction::UpdatePreedit(_) = &action {
+                        if let Some(pos) = result
+                            .actions
+                            .iter()
+                            .position(|a| matches!(a, EngineAction::UpdatePreedit(_)))
+                        {
+                            result.actions[pos] = action;
                         } else {
                             result.actions.push(action);
                         }
+                    } else {
+                        result.actions.push(action);
                     }
                 }
             }
@@ -585,6 +583,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
                 actions: result.actions,
                 composition: self.composition.clone(),
                 candidate_popup: self.candidate_popup.clone(),
+                engine: self.engine.clone(),
                 end_composition: false,
                 reset_engine: None,
             }
@@ -596,10 +595,7 @@ impl ITfKeyEventSink_Impl for KeyHandler_Impl {
             }
         }
         if committed {
-            self.engine
-                .lock()
-                .map_err(|_| windows::core::Error::from_hresult(HRESULT(0x80004005u32 as i32)))?
-                .save_learning();
+            self.engine.save_learning();
         }
         Ok(BOOL(result.consumed as i32))
     }

@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
-use karukan_im::core::engine::InputMethodEngine;
 use karukan_im::core::keycode::{KeyEvent, KeyModifiers, Keysym};
 use windows::core::{implement, GUID};
 use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_I4};
@@ -12,6 +10,7 @@ use windows::Win32::UI::TextServices::{
     ITfLangBarItemSink, ITfThreadMgr,
 };
 
+use crate::engine_client::EngineClient;
 use crate::{
     GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, TF_CONVERSIONMODE_ALPHANUMERIC,
     TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_KATAKANA, TF_CONVERSIONMODE_NATIVE,
@@ -20,7 +19,7 @@ use crate::{
 
 #[implement(ITfCompartmentEventSink)]
 pub(crate) struct CompartmentSink {
-    pub(crate) engine: Arc<Mutex<InputMethodEngine>>,
+    pub(crate) engine: Rc<EngineClient>,
     pub(crate) thread_mgr: ITfThreadMgr,
     pub(crate) lang_bar_sink: Rc<RefCell<Option<ITfLangBarItemSink>>>,
 }
@@ -36,34 +35,28 @@ impl ITfCompartmentEventSink_Impl for CompartmentSink_Impl {
             if let Ok(open) = get_ime_openclose(&self.thread_mgr) {
                 tracing::info!("CompartmentSink: OPENCLOSE changed to {open}");
                 if !open {
-                    if let Ok(mut engine) = self.engine.lock() {
-                        engine.reset();
-                    }
+                    self.engine.reset();
                 }
             }
         } else if guid == GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION {
             if let Ok(conversion) = get_input_mode_conversion(&self.thread_mgr) {
                 tracing::info!("CompartmentSink: INPUTMODE_CONVERSION changed to 0x{conversion:04X}");
-                if (conversion & TF_CONVERSIONMODE_KATAKANA) != 0 {
-                    if let Ok(mut engine) = self.engine.lock() {
-                        if !engine.state().is_empty() {
-                            let ctrl_k = KeyEvent {
-                                keysym: Keysym::KEY_K,
-                                modifiers: KeyModifiers {
-                                    control_key: true,
-                                    shift_key: false,
-                                    alt_key: false,
-                                    super_key: false,
-                                },
-                                is_press: true,
-                            };
-                            let _ = engine.process_key(&ctrl_k);
-                        }
-                    }
-                } else if (conversion & TF_CONVERSIONMODE_NATIVE) != 0 {
-                    if let Ok(mut engine) = self.engine.lock() {
+                if !self.engine.is_empty() {
+                    if (conversion & TF_CONVERSIONMODE_KATAKANA) != 0 {
+                        let ctrl_k = KeyEvent {
+                            keysym: Keysym::KEY_K,
+                            modifiers: KeyModifiers {
+                                control_key: true,
+                                shift_key: false,
+                                alt_key: false,
+                                super_key: false,
+                            },
+                            is_press: true,
+                        };
+                        let _ = self.engine.process_key(&ctrl_k);
+                    } else if (conversion & TF_CONVERSIONMODE_NATIVE) != 0 {
                         let event = KeyEvent::new(Keysym::HENKAN, KeyModifiers::default(), true);
-                        let _ = engine.process_key(&event);
+                        let _ = self.engine.process_key(&event);
                     }
                 }
             }

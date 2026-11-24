@@ -27,6 +27,7 @@ try {
     $requiredFiles = @(
         'install.exe',
         'karukan_im_windows.dll',
+        'karukan-server.exe',
         'karukan-settings.exe'
     )
     foreach ($file in $requiredFiles) {

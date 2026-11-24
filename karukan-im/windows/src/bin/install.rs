@@ -679,10 +679,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .into());
             }
+            let source_server_app = source_dll
+                .parent()
+                .ok_or("installer has no parent directory")?
+                .join("karukan-server.exe");
+            if !source_server_app.is_file() {
+                return Err(format!(
+                    "Engine service not found beside installer: {}",
+                    source_server_app.display()
+                )
+                .into());
+            }
             std::fs::create_dir_all(&install_dir)?;
+            // 既存のエンジンサービスが起動中の場合は学習履歴を保存して終了させ、バイナリ上書きを可能にする
+            let _ = karukan_im_windows::engine_client::notify_server(
+                &karukan_im_windows::ipc::IpcRequest::Shutdown,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
             let installed_dll = copy_dll_to_install_dir(&source_dll, &install_dir)?;
             let installed_settings_app = install_dir.join("karukan-settings.exe");
             let _ = std::fs::copy(&source_settings_app, &installed_settings_app);
+            let installed_server_app = install_dir.join("karukan-server.exe");
+            let _ = std::fs::copy(&source_server_app, &installed_server_app);
             install_default_config()?;
             install_system_dictionary().map_err(|error| {
                 io::Error::new(
@@ -729,6 +748,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "The settings app is installed at {}.",
                 installed_settings_app.display()
             );
+            println!(
+                "The engine service is installed at {}.",
+                installed_server_app.display()
+            );
+            // インストール完了後にバックグラウンドサービスを事前起動して辞書・モデルをウォームアップ
+            karukan_im_windows::engine_client::EngineClient::spawn_server_process();
 
             // Karukan を既定の入力方式に設定
             let tip = format!("0411:{{{}}}{{{}}}", guid_key(&CLSID_KARUKAN_TIP), guid_key(&GUID_KARUKAN_PROFILE));
@@ -758,6 +783,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "uninstall" => {
+            let _ = karukan_im_windows::engine_client::notify_server(
+                &karukan_im_windows::ipc::IpcRequest::Shutdown,
+            );
             let _ = Command::new("powershell.exe")
                 .args(["-NoProfile", "-Command", "Set-WinDefaultInputMethodOverride -InputTip ''"])
                 .status();
