@@ -245,8 +245,39 @@ pub(crate) struct KeyHandler {
 }
 
 impl ITfKeyEventSink_Impl for KeyHandler_Impl {
-    fn OnSetFocus(&self, _foreground: BOOL) -> windows::core::Result<()> {
-        if let Ok(mut engine) = self.engine.lock() {
+    fn OnSetFocus(&self, foreground: BOOL) -> windows::core::Result<()> {
+        if !foreground.as_bool() {
+            // アプリ側がフォーカスを失った場合:
+            // 候補ウィンドウおよび補助テキストを即座に非表示
+            self.candidate_popup.borrow_mut().hide();
+
+            // コンポジションを終了（未確定文字列を破棄）
+            if let Ok(doc_mgr) = unsafe { self.thread_mgr.GetFocus() }
+                && let Ok(context) = unsafe { doc_mgr.GetTop() }
+            {
+                let session: ITfEditSession = EditSession {
+                    context: context.clone(),
+                    actions: vec![EngineAction::HideCandidates, EngineAction::HideAuxText],
+                    composition: self.composition.clone(),
+                    candidate_popup: self.candidate_popup.clone(),
+                    end_composition: true,
+                    reset_engine: Some(self.engine.clone()),
+                }
+                .into();
+                unsafe {
+                    let _ = context.RequestEditSession(self.thread_id, &session, EDIT_SESSION_FLAGS);
+                }
+            } else if let Some(active) = self.composition.borrow_mut().take() {
+                // コンテキストが取得できない場合でも参照を破棄
+                drop(active);
+            }
+
+            // IMEエンジンを初期状態にリセット
+            if let Ok(mut engine) = self.engine.lock() {
+                engine.reset();
+                engine.set_surrounding_context("", "");
+            }
+        } else if let Ok(mut engine) = self.engine.lock() {
             engine.set_surrounding_context("", "");
         }
         Ok(())

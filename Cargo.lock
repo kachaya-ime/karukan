@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "karukan-im-windows"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "karukan-engine",

@@ -12,7 +12,7 @@ Windowsフロントエンドクレート (`Cargo.toml`) は、以下の3つの�
 | :--- | :--- | :--- | :--- |
 | `karukan_im_windows.dll` | COM In-Proc Server (`cdylib`) | TSF Text Input Processor (TIP) 本体。各ターゲットプロセスにロードされ、キーフック・かな漢字変換・プリエディット操作・候補ウィンドウ表示・言語バー連携を行う。 | `src/lib.rs`, `src/tsf/mod.rs` |
 | `install.exe` | CLI インストーラー (`bin`) | DLLのバージョン付き配置、レジストリ (COM CLSID) 登録、TSF プロファイル/カテゴリ登録、システム辞書・LLMモデル (`tokenizer.json` 含む) の事前取得を行う。 | `src/bin/install.rs` |
-| `karukan-settings.exe` | Win32 GUI アプリ (`bin`) | 設定 (`config.toml`) のGUI編集、学習履歴 (`learning.tsv`) の閲覧・削除、Mozc互換ユーザー辞書 (`karukan-user.tsv`) の管理、ライセンス表示を行う。 | `src/bin/settings.rs` |
+| `karukan-settings.exe` | Win32 GUI アプリ (`bin`) | 設定 (`config.toml`) のGUI編集、学習履歴 (`learning.tsv`) の閲覧・削除、Mozc互換ユーザー辞書 (`karukan-user.tsv`) の管理、ライセンス表示を行う（単一インスタンス起動制御・ダークテーマ自動追従対応）。 | `src/bin/settings.rs` |
 
 ---
 
@@ -161,9 +161,14 @@ sequenceDiagram
                 KH->>ES: RequestEditSession(未確定文字列破棄・候補非表示・Engineリセット)
             end
         else ファンクションキー (F6〜F10: プリエディット存在時)
-            KH->>Eng: プリエディット文字列取得 & リセット
-            KH->>KH: convert_function_key (ひらがな/全角カナ/半角ｶﾅ/全角英数/半角英数)
-            KH->>ES: RequestEditSession(Commit + HideCandidates)
+            KH->>Eng: convert_function_key (ひらがな/全角カナ/半角ｶﾅ/全角英数/半角英数)
+            opt F6/F7/F8
+                Eng-->>KH: 候補一覧生成 (ひらがな/全角カタカナ/半角カタカナ)
+                KH->>ES: RequestEditSession(Preedit更新 + ShowCandidates)
+            opt F9/F10
+                Eng-->>KH: 文字列トグル (全角英数/半角英数: 小文字/大文字/先頭大文字)
+                KH->>ES: RequestEditSession(Preedit更新)
+            end
         else 通常キー入力
             opt 新規コンポジション開始前
                 KH->>ES: capture_surrounding_text (カーソル左最大64文字取得)
@@ -171,9 +176,6 @@ sequenceDiagram
             end
             KH->>Eng: process_key(KeyEvent)
             Eng-->>KH: KeyProcessResult (actions, consumed)
-            opt カタカナモード時の自動カナ変換
-                KH->>Eng: process_key(Ctrl+K) 合成
-            end
             opt actions が空でない場合
                 KH->>ES: context.RequestEditSession(actions)
                 ES->>App: StartComposition / SetText / EndComposition / SetSelection
@@ -193,8 +195,9 @@ sequenceDiagram
 | **IMEトグル** | `VK_KANJI` (`0x19`), `VK_OEM_AUTO` (`0xF3`), `VK_OEM_ENLW` (`0xF4`), `Alt + ~` (`0xC0`) | IMEのON/OFFを切り替える。OFF遷移時はアクティブなCompositionを終了しエンジンをリセットする。 |
 | **直接入力 (IME OFF)** | `VK_NONCONVERT` (無変換), `VK_DBE_ALPHANUMERIC` (英数), `VK_IME_OFF` (`0x1A`) | IMEをOFF (`TF_CONVERSIONMODE_ALPHANUMERIC`) に切り替える。 |
 | **日本語入力 (IME ON / ひらがな復帰)** | `VK_CONVERT` (変換), `VK_KANA` (かな), `VK_DBE_HIRAGANA` (`0xF2`), `VK_IME_ON` (`0x16`) | IMEがOFFならONにする。ON時はひらがなモードへ戻し、エンジンの `Keysym::HENKAN` を送出してサブモード復帰を行う。 |
-| **文字種一括変換** | `F6` (`0x75`) 〜 `F10` (`0x79`) | プリエディット中に押下された場合、F6:ひらがな、F7:全角カタカナ、F8:半角ｶﾀｶﾅ、F9:全角英数、F10:半角英数に変換して即座に確定 (`Commit`) する。 |
-| **エンジンショートカット** | `Ctrl + I/K/R/T/J`, `Ctrl + Shift + L/V` | `ToUnicodeEx` が制御文字を返すケースを回避し、ASCII Keysym としてエンジンへ渡し、カタカナ変換や詳細表示切替 (`Ctrl+Shift+V`) 等を実行させる。 |
+| **フォーカス喪失時** | `ITfKeyEventSink::OnSetFocus(FALSE)` | 候補ウィンドウと補助テキストを即座に非表示にし、コンポジション（未確定文字列）を終了破棄して、エンジンを初期状態 (`reset()`) へ即時移行する。 |
+| **文字種一括変換** | `F6` (`0x75`) 〜 `F10` (`0x79`) | プリエディット中に押下された場合、F6:ひらがな候補、F7:全角カタカナ候補、F8:半角ｶﾀｶﾅ候補を表示し、F9:全角英数、F10:半角英数（連打で小文字/大文字/先頭大文字）に変換する。 |
+| **エンジン制御・特殊コマンド** | `Ctrl + Shift + L`, 「でばっぐもーど」, 「ばーじょん」 | ・`Ctrl + Shift + L`: ライブ変換の有効/無効トグル。<br/>・「でばっぐもーど」変換確定: 候補ウィンドウ下部（推論時間等の詳細情報）の表示/非表示を切り替え（`Ctrl+Shift+V` はアプリへスルー）。<br/>・「ばーじょん」変換: エンジンのビルドバージョンを候補表示・確定。<br/>・`Ctrl + I/K/R/T/J`: エンジン定義の各種変換・ショートカットを実行。 |
 
 ---
 
@@ -234,10 +237,14 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
   3. **補足説明・品詞注釈**: `#808080` (候補文字列の右側に動的配置)
 - 選択行には淡いアクセントブルー背景 (`#EBF3FB`) と左端の縦アクセントバー (`#0067C0`) を描画する。
 
-#### 4.5.3 マルチモニター対応座標計算
+#### 4.5.3 マルチモニター対応座標計算とオーナーウィンドウ制御
 - `ITfContextView::GetTextExt` でコンポジション範囲のスクリーン矩形 (`rect`) を取得。
 - `MonitorFromPoint(MONITOR_DEFAULTTONEAREST)` と `GetMonitorInfoW` で対象モニターの作業領域 (`rcWork`) を取得。
 - 候補ウィンドウが画面右端を超える場合は左へ寄せ、画面下端 (`rcWork.bottom`) を超える場合はキャレットの上側 (`rect.top - height - 4`) に反転配置（フリップ）する。
+- **オーナーウィンドウ設定**:
+  - `ITfContext::GetActiveView()?.GetWnd()` を `CreateWindowExW` の `hWndParent` (Owner Window) として指定し、入力先アプリと Z 順序・最小化・アクティブ化状態を連動させ、別アプリ切り替え時の不自然な残存を防ぐ。
+- **Direct2D エラーハンドリング**:
+  - `ID2D1DCRenderTarget::EndDraw()` の戻り値を検証し、デバイスロスト等で失敗した場合はレンダリングターゲットキャッシュを自動再生成して描画例外・クラッシュを防止する。
 
 ---
 
@@ -245,14 +252,13 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 
 #### 4.6.1 Compartment 双方向同期 (`CompartmentSink`)
 - OSや他コンポーネントから `GUID_COMPARTMENT_KEYBOARD_OPENCLOSE` または `GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION` が変更された際、`ITfCompartmentEventSink::OnChange` で検知する。
-- IMEがクローズされた場合は `engine.reset()` を呼び、変換モードがカタカナ/ひらがなに変更された場合はエンジン側へ `Ctrl+K` / `HENKAN` イベントを送出して内部状態を一致させる。
+- IMEがクローズされた場合は `engine.reset()` を呼び出す。
 - 変更後、`ITfLangBarItemSink::OnUpdate` を呼び出してシステムトレイアイコンとテキストを即座に再描画する。
 
 #### 4.6.2 システムトレイアイコン (`LangBarButton`)
 - `ITfLangBarItemButton` および `ITfSource` を実装し、`GUID_LBI_INPUTMODE` (`TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_SHOWNINTRAY`) としてタスクバーに表示する。
 - **アイコン・テキスト表示**:
   - ひらがなモード: アイコン `RES_ID_ICON_HIRAGANA` (`2`) / テキスト `"あ"`
-  - 全角カタカナモード: アイコン `RES_ID_ICON_KATAKANA` (`4`) / テキスト `"カ"`
   - 直接入力（半角英数）モード: アイコン `RES_ID_ICON_ALPHA` (`3`) / テキスト `"A"`
 - **クリック操作**:
   - **左クリック (`TF_LBI_CLK_LEFT`)**: IME の ON / OFF をトグルする。
@@ -260,10 +266,9 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
     - UWP / WinUI 3 アプリ（Windows 11 メモ帳など）がアクティブな場合でもコンテキストメニューが確実にフォーカスを得て閉じられるよう、`AttachThreadInput` でフォアグラウンドスレッドと一時結合した上で `SetForegroundWindow` と `TrackPopupMenu` を実行し、終了後に `WM_NULL` をポストする（KB Q139526 準拠）。
     - メニュー項目:
       1. `ひらがな (Hiragana)`
-      2. `全角カタカナ (Katakana)`
-      3. `直接入力 / 半角英数 (Direct)`
-      4. セパレータ
-      5. `設定 (Settings)...` → `%LOCALAPPDATA%\Programs\Karukan\karukan-settings.exe` を非同期起動 (`spawn_settings_app`)。
+      2. `直接入力 / 半角英数 (Direct)`
+      3. セパレータ
+      4. `設定 (Settings)...` → `%LOCALAPPDATA%\Programs\Karukan\karukan-settings.exe` を非同期起動 (`spawn_settings_app`)。
 
 ---
 
@@ -287,10 +292,14 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
    - `ITfInputProcessorProfileMgr::RegisterProfile` (失敗時は `ITfInputProcessorProfiles` にフォールバック) で日本語 (`0x0411`) のキーボードプロファイルを登録し、ブランドアイコン (`RES_ID_ICON_BRANDING`) を関連付ける。
    - `ITfCategoryMgr::RegisterCategory` でセクション 3.2 の全カテゴリを登録する。
    - `ActivateProfile` および `LoadKeyboardLayoutW` で現在のセッションに有効化する。
+7. **既定の入力方式設定とシェルブロードキャスト通知**:
+   - PowerShell の `Set-WinDefaultInputMethodOverride` を実行して既定の入力方式に設定する。
+   - `SendMessageTimeoutW` および `PostMessageW` で `HWND_BROADCAST` に `WM_SETTINGCHANGE` (lParam: `"intl"`) を発行し、サインアウトせずともタスクバーの言語バー/ステータス表示が即時更新されるようにする。
 
 ### 5.2 アンインストールフロー (`uninstall`)
 - `UnregisterProfile` と `UnregisterCategory`（過去の旧GUIDクリーンアップ含む）を実行。
 - `HKLM\Software\Classes\CLSID\{CLSID_KARUKAN_TIP}` および `HKLM\...\CTF\TIP\{CLSID_KARUKAN_TIP}`、`HKCU` 側の対応レジストリツリーを削除する。
+- 既定の入力方式オーバーライドをクリアし、シェル通知 (`WM_SETTINGCHANGE`) を発行する。
 - ロード中のプロセスを壊さないよう、DLLファイル自体はディスクに残し、サインアウト後の手動削除を案内する。
 
 ---
@@ -299,13 +308,20 @@ TSFではドキュメント (`ITfContext`) の読み書きは必ず `ITfEditSess
 
 `karukan-settings.exe` は外部GUIフレームワークに依存しないネイティブ Win32 API (`windows` クレート) 製のGUIアプリケーションである。
 
-### 6.1 画面レイアウト
+### 6.1 多重起動防止とダークテーマ対応
+- **単一インスタンス制御**: 起動時に名前付きミューテックス (`Local\KarukanSettingsRunningMutex`) を取得。既に起動済みの場合は既存の `KarukanSettingsMainWindow` を `SetForegroundWindow` で最前面化して重複起動を抑止する。
+- **ダークテーマ自動追従**:
+  - `DWMWA_USE_IMMERSIVE_DARK_MODE` (属性 `20`) をウィンドウ枠に適用。
+  - レジストリ (`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`) から OS のテーマ設定を検知し、ライト / ダークの配色（背景、文字色、リストビュー、コントロール）を自動で切り替える。
+  - オーナードローのリストボックス（サイドバー）やエディットボックス・スクロールバー・ボタン類もテーマ配色に連動する。
+
+### 6.2 画面レイアウト
 - **左ペイン（サイドバー）**: オーナードロー `LISTBOX`（幅 `200px`、項目高さ `40px`）。選択項目にアクセントバーとハイライトを描画。
 - **右ペイン（コンテンツ領域）**:
   - 一般設定カテゴリでは縦スクロール可能な設定フォームパネル (`KarukanSettingsContent`) を表示し、チェックボックス、ラジオボタン、テキスト入力欄、複数行TOMLエディタを動的に配置する。
   - 下部には常時固定のステータスバーとアクションボタン（「保存」「再読み込み」等）を配置する。
 
-### 6.2 カテゴリ別機能とデータ保存仕様
+### 6.3 カテゴリ別機能とデータ保存仕様
 
 | カテゴリ | 対象データ / パス | 主要機能・設計仕様 |
 | :--- | :--- | :--- |

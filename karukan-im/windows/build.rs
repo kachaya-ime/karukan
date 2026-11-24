@@ -89,7 +89,6 @@ fn main() {
             "1 ICON \"{res_dir_str}/karukan.ico\"\n\
              2 ICON \"{res_dir_str}/hiragana.ico\"\n\
              3 ICON \"{res_dir_str}/alpha.ico\"\n\
-             4 ICON \"{res_dir_str}/katakana.ico\"\n\
              1 24 \"{manifest_path_str}\"\n"
         );
         let rc_path = out_dir.join("karukan.rc");

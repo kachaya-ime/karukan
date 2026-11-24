@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 
 use karukan_im::core::engine::InputMethodEngine;
 use karukan_im::core::keycode::KeyEvent;
-use karukan_im::core::keycode::KeyModifiers;
 use karukan_im::core::keycode::Keysym;
 use windows::core::{implement, w, BSTR, BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, Ref};
 use windows::Win32::Foundation::{E_INVALIDARG, E_POINTER, HWND, POINT, RECT};
@@ -26,13 +25,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::{
-    CLSID_KARUKAN_TIP, RES_ID_ICON_ALPHA, RES_ID_ICON_HIRAGANA, RES_ID_ICON_KATAKANA,
-    TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE, TF_CONVERSIONMODE_KATAKANA,
+    CLSID_KARUKAN_TIP, RES_ID_ICON_ALPHA, RES_ID_ICON_HIRAGANA,
+    TF_CONVERSIONMODE_ALPHANUMERIC, TF_CONVERSIONMODE_FULLSHAPE,
     TF_CONVERSIONMODE_NATIVE, TF_CONVERSIONMODE_ROMAN,
 };
 
 use super::compartment::{
-    get_ime_openclose, get_input_mode_conversion, set_ime_openclose, set_input_mode_conversion,
+    get_ime_openclose, set_ime_openclose, set_input_mode_conversion,
     toggle_ime_openclose,
 };
 use super::key_handler::current_modifiers;
@@ -150,32 +149,6 @@ impl LangBarButton_Impl {
                 }
             }
             2 => {
-                set_ime_openclose(&self.thread_mgr, self.client_id, true)?;
-                set_input_mode_conversion(
-                    &self.thread_mgr,
-                    self.client_id,
-                    TF_CONVERSIONMODE_NATIVE
-                        | TF_CONVERSIONMODE_KATAKANA
-                        | TF_CONVERSIONMODE_FULLSHAPE
-                        | TF_CONVERSIONMODE_ROMAN,
-                )?;
-                if let Ok(mut engine) = self.engine.lock() {
-                    if !engine.state().is_empty() {
-                        let ctrl_k = KeyEvent {
-                            keysym: Keysym::KEY_K,
-                            modifiers: KeyModifiers {
-                                control_key: true,
-                                shift_key: false,
-                                alt_key: false,
-                                super_key: false,
-                            },
-                            is_press: true,
-                        };
-                        let _ = engine.process_key(&ctrl_k);
-                    }
-                }
-            }
-            3 => {
                 set_ime_openclose(&self.thread_mgr, self.client_id, false)?;
                 set_input_mode_conversion(
                     &self.thread_mgr,
@@ -186,7 +159,7 @@ impl LangBarButton_Impl {
                     engine.reset();
                 }
             }
-            5 => {
+            4 | 5 => {
                 spawn_settings_app();
             }
             _ => {}
@@ -274,22 +247,13 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
 
                 if let Ok(hmenu) = CreatePopupMenu() {
                     let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-                    let is_katakana = if is_open {
-                        get_input_mode_conversion(&self.thread_mgr)
-                            .map(|c| (c & TF_CONVERSIONMODE_KATAKANA) != 0)
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    };
-                    let flag_hiragana = if is_open && !is_katakana { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
-                    let flag_katakana = if is_open && is_katakana { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
+                    let flag_hiragana = if is_open { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
                     let flag_alpha = if !is_open { MF_CHECKED } else { windows::Win32::UI::WindowsAndMessaging::MENU_ITEM_FLAGS(0) };
 
                     let _ = AppendMenuW(hmenu, MF_STRING | flag_hiragana, 1, w!("ひらがな (Hiragana)"));
-                    let _ = AppendMenuW(hmenu, MF_STRING | flag_katakana, 2, w!("全角カタカナ (Katakana)"));
-                    let _ = AppendMenuW(hmenu, MF_STRING | flag_alpha, 3, w!("直接入力 / 半角英数 (Direct)"));
+                    let _ = AppendMenuW(hmenu, MF_STRING | flag_alpha, 2, w!("直接入力 / 半角英数 (Direct)"));
                     let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
-                    let _ = AppendMenuW(hmenu, MF_STRING, 5, w!("設定 (Settings)..."));
+                    let _ = AppendMenuW(hmenu, MF_STRING, 4, w!("設定 (Settings)..."));
 
                     // カーソル位置のフォールバック
                     let mut cur_pt = POINT::default();
@@ -346,19 +310,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
             return Ok(());
         };
         let is_open = get_ime_openclose(&self.thread_mgr).unwrap_or(true);
-        let is_katakana = if is_open {
-            get_input_mode_conversion(&self.thread_mgr)
-                .map(|c| (c & TF_CONVERSIONMODE_KATAKANA) != 0)
-                .unwrap_or(false)
-        } else {
-            false
-        };
-        let flag_hiragana = if is_open && !is_katakana {
-            TF_LBMENUF_RADIOCHECKED
-        } else {
-            0
-        };
-        let flag_katakana = if is_open && is_katakana {
+        let flag_hiragana = if is_open {
             TF_LBMENUF_RADIOCHECKED
         } else {
             0
@@ -370,7 +322,6 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
         };
 
         let hiragana_text: Vec<u16> = "ひらがな (Hiragana)".encode_utf16().collect();
-        let katakana_text: Vec<u16> = "全角カタカナ (Katakana)".encode_utf16().collect();
         let alpha_text: Vec<u16> = "直接入力 / 半角英数 (Direct)".encode_utf16().collect();
         let settings_text: Vec<u16> = "設定 (Settings)...".encode_utf16().collect();
 
@@ -385,14 +336,6 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
             )?;
             pmenu.AddMenuItem(
                 2,
-                flag_katakana,
-                HBITMAP::default(),
-                HBITMAP::default(),
-                &katakana_text,
-                ptr::null_mut(),
-            )?;
-            pmenu.AddMenuItem(
-                3,
                 flag_alpha,
                 HBITMAP::default(),
                 HBITMAP::default(),
@@ -400,7 +343,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
                 ptr::null_mut(),
             )?;
             pmenu.AddMenuItem(
-                4,
+                3,
                 TF_LBMENUF_SEPARATOR,
                 HBITMAP::default(),
                 HBITMAP::default(),
@@ -408,7 +351,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
                 ptr::null_mut(),
             )?;
             pmenu.AddMenuItem(
-                5,
+                4,
                 0,
                 HBITMAP::default(),
                 HBITMAP::default(),
@@ -416,7 +359,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
                 ptr::null_mut(),
             )?;
         }
-        tracing::info!("LangBarButton::InitMenu added 5 menu items");
+        tracing::info!("LangBarButton::InitMenu added 4 menu items");
         Ok(())
     }
 
@@ -430,17 +373,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
         if !is_open {
             return load_resource_icon(RES_ID_ICON_ALPHA);
         }
-        let is_katakana = if let Ok(conversion) = get_input_mode_conversion(&self.thread_mgr) {
-            (conversion & TF_CONVERSIONMODE_KATAKANA) != 0
-        } else {
-            false
-        };
-        let res_id = if is_katakana {
-            RES_ID_ICON_KATAKANA
-        } else {
-            RES_ID_ICON_HIRAGANA
-        };
-        load_resource_icon(res_id)
+        load_resource_icon(RES_ID_ICON_HIRAGANA)
     }
 
     fn GetText(&self) -> windows::core::Result<BSTR> {
@@ -448,13 +381,7 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
         if !is_open {
             return Ok(BSTR::from("A"));
         }
-        let is_katakana = if let Ok(conversion) = get_input_mode_conversion(&self.thread_mgr) {
-            (conversion & TF_CONVERSIONMODE_KATAKANA) != 0
-        } else {
-            false
-        };
-        let text = if is_katakana { "カ" } else { "あ" };
-        Ok(BSTR::from(text))
+        Ok(BSTR::from("あ"))
     }
 }
 

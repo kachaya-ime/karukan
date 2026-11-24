@@ -1,6 +1,6 @@
 [package]
 name = "karukan-im-windows"
-version = "0.1.2"
+version = "0.1.3"
 edition.workspace = true
 rust-version.workspace = true
 description = "Windows TSF frontend for the Karukan Japanese IME"

@@ -49,6 +49,7 @@ impl ITfEditSession_Impl for EditSession_Impl {
                         &self.context,
                         edit_cookie,
                         &self.composition,
+                        &self.candidate_popup,
                         preedit.text(),
                         preedit.caret(),
                     )?;
@@ -138,6 +139,7 @@ pub(crate) fn capture_surrounding_text(context: &ITfContext, thread_id: u32) -> 
 #[implement(ITfCompositionSink)]
 pub(crate) struct CompositionSink {
     pub(crate) composition: Rc<RefCell<Option<ITfComposition>>>,
+    pub(crate) candidate_popup: Rc<RefCell<CandidatePopup>>,
 }
 
 impl ITfCompositionSink_Impl for CompositionSink_Impl {
@@ -151,6 +153,7 @@ impl ITfCompositionSink_Impl for CompositionSink_Impl {
         {
             if current.as_raw() == terminated.as_raw() {
                 self.composition.borrow_mut().take();
+                self.candidate_popup.borrow_mut().hide();
             }
         }
         Ok(())
@@ -161,6 +164,7 @@ pub(crate) fn update_preedit(
     context: &ITfContext,
     edit_cookie: u32,
     composition: &Rc<RefCell<Option<ITfComposition>>>,
+    candidate_popup: &Rc<RefCell<CandidatePopup>>,
     text: &str,
     caret: usize,
 ) -> windows::core::Result<()> {
@@ -168,6 +172,7 @@ pub(crate) fn update_preedit(
         if let Some(active) = composition.borrow_mut().take() {
             unsafe { active.EndComposition(edit_cookie)? };
         }
+        candidate_popup.borrow_mut().hide();
         return Ok(());
     }
 
@@ -185,6 +190,7 @@ pub(crate) fn update_preedit(
         };
         let sink: ITfCompositionSink = CompositionSink {
             composition: composition.clone(),
+            candidate_popup: candidate_popup.clone(),
         }
         .into();
         let context_composition: ITfContextComposition = context.cast()?;

@@ -6,7 +6,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        PostMessageW, SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
         CoUninitialize,
@@ -732,6 +735,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = Command::new("powershell.exe")
                 .args(["-NoProfile", "-Command", &format!("Set-WinDefaultInputMethodOverride -InputTip '{tip}'")])
                 .status();
+
+            // シェルおよび各ウィンドウに入力方式・設定変更を通知し、ステータスバー（言語バー）を即時更新
+            unsafe {
+                let intl = wide(OsStr::new("intl"));
+                let mut result = 0;
+                let _ = SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    WPARAM(0),
+                    LPARAM(intl.as_ptr() as isize),
+                    SMTO_ABORTIFHUNG,
+                    2000,
+                    Some(&mut result),
+                );
+                let _ = PostMessageW(
+                    Some(HWND_BROADCAST),
+                    WM_SETTINGCHANGE,
+                    WPARAM(0),
+                    LPARAM(intl.as_ptr() as isize),
+                );
+            }
         }
         "uninstall" => {
             let _ = Command::new("powershell.exe")

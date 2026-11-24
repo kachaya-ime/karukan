@@ -12,7 +12,10 @@ mod app {
     use chrono::{DateTime, Local};
     use karukan_im::config::Settings;
     use toml::Value;
-    use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::Foundation::{
+        CloseHandle, COLORREF, ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM,
+        LRESULT, RECT, WPARAM,
+    };
     use windows::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect,
         GetSysColorBrush, SelectObject, SetBkMode, SetTextColor, TextOutW, UpdateWindow,
@@ -23,6 +26,7 @@ mod app {
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Threading::CreateMutexW;
     use windows::Win32::UI::Controls::{
         DRAWITEMSTRUCT, MEASUREITEMSTRUCT, SetWindowTheme, ICC_LISTVIEW_CLASSES,
         INITCOMMONCONTROLSEX, InitCommonControlsEx, LVCF_TEXT, LVCF_WIDTH, LVCFMT_LEFT,
@@ -30,7 +34,7 @@ mod app {
         LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETCOLUMNW, LVM_SETCOLUMNWIDTH,
         LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMTEXTW, LVN_COLUMNCLICK, LVN_ITEMCHANGED,
         LVNI_SELECTED, LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, LVS_SINGLESEL,
-        NMLISTVIEW, SetScrollInfo,
+        NMLISTVIEW, SetScrollInfo, LVM_SETBKCOLOR, LVM_SETTEXTBKCOLOR,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_PUSHBUTTON,
@@ -38,14 +42,15 @@ mod app {
         ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, ES_WANTRETURN, GetClientRect, GetMessageW,
         GetScrollInfo, GetWindowTextLengthW, GetWindowTextW, IDYES, LB_ADDSTRING, LB_GETCURSEL,
         LB_SETCURSEL, LBN_SELCHANGE, LBS_HASSTRINGS, LBS_NOINTEGRALHEIGHT, LBS_NOTIFY,
-        LBS_OWNERDRAWFIXED, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO, MSG, MessageBoxW,
+        LBS_OWNERDRAWFIXED, LoadCursorW, IDC_ARROW, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_YESNO, MSG, MessageBoxW,
         MoveWindow, PostQuitMessage, RegisterClassW, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN,
         SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_ALL,
         SIF_PAGE, SIF_POS, SIF_RANGE, SendMessageW, SetWindowTextW, ShowWindow,
         TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN,
-        WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_MEASUREITEM,
+        WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_MEASUREITEM,
         WM_MOUSEWHEEL, WM_NOTIFY, WM_PAINT, WM_SIZE, WM_VSCROLL, WNDCLASSW, WS_BORDER, WS_CHILD,
         WS_CLIPCHILDREN, WS_GROUP, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WS_VSCROLL,
+        FindWindowW, SetForegroundWindow, SW_RESTORE,
     };
     use windows::core::{PCWSTR, PWSTR, w};
 
@@ -77,9 +82,10 @@ mod app {
     const RELOAD_ID: usize = 1008;
     const SAVE_ID: usize = 1009;
     const STATUS_ID: usize = 1010;
-    const DELETE_LEARNING_ID: usize = 1011;
-    const CLEAR_LEARNING_ID: usize = 1012;
-    const LEARNING_GRID_ID: usize = 1013;
+    const VERSION_LABEL_ID: usize = 1011;
+    const DELETE_LEARNING_ID: usize = 1012;
+    const CLEAR_LEARNING_ID: usize = 1013;
+    const LEARNING_GRID_ID: usize = 1014;
     const USER_DICTIONARY_GRID_ID: usize = 1016;
     const USER_READING_ID: usize = 1017;
     const USER_SURFACE_ID: usize = 1018;
@@ -90,6 +96,7 @@ mod app {
     const USER_POS_LABEL_ID: usize = 1023;
     const USER_COMMENT_LABEL_ID: usize = 1024;
     const LICENSE_TEXT_ID: usize = 1025;
+    const KEY_BINDINGS_GRID_ID: usize = 1026;
     const SETTING_CONTROL_ID_BASE: usize = 2000;
     const SETTING_INPUT_HEIGHT: i32 = 32;
     const WM_SETFONT: u32 = 0x0030;
@@ -138,9 +145,60 @@ mod app {
         ("width", "文字幅"),
         ("date", "日付・時刻"),
         ("models", "変換モデル"),
+        ("key_bindings", "キー設定"),
         ("learning_records", "学習履歴"),
         ("user_dictionary", "ユーザー辞書"),
         ("license", "ライセンス"),
+    ];
+
+    #[derive(Clone)]
+    struct KeyBindingItem {
+        category: &'static str,
+        keys: &'static str,
+        action: &'static str,
+        note: &'static str,
+    }
+
+    const KEY_BINDINGS: &[KeyBindingItem] = &[
+        // IME 切り替え
+        KeyBindingItem { category: "IME 切替", keys: "半角/全角 / Alt+`", action: "日本語入力 (ON) / 直接入力 (OFF) を切り替え", note: "" },
+        KeyBindingItem { category: "IME 切替", keys: "無変換 / 英数", action: "直接入力（半角英数）モードに切り替え", note: "IME OFF" },
+        KeyBindingItem { category: "IME 切替", keys: "変換 / かな", action: "日本語（ひらがな）入力モードに切り替え / 復帰", note: "IME ON" },
+
+        // ひらがな入力中
+        KeyBindingItem { category: "ひらがな入力", keys: "Space / ↓", action: "かな漢字変換を開始", note: "学習履歴・予測変換を含む" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Tab", action: "かな漢字変換を開始（学習履歴を使わない）", note: "モデル・辞書変換のみ" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Enter / Ctrl+M", action: "入力中のひらがなをそのまま確定", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Escape", action: "入力をキャンセル", note: "ライブ変換中は1回目で解除、2回目で消去" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Backspace / Ctrl+H", action: "カーソル前の1文字を削除", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Delete", action: "カーソル位置の1文字を削除", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "← / → / Ctrl+B / F", action: "カーソルを左右に移動", note: "Ctrl+B:左 / Ctrl+F:右" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Home / End / Ctrl+A / E", action: "カーソルを先頭 / 末尾に移動", note: "Ctrl+A:先頭 / Ctrl+E:末尾" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Shift+Space", action: "全角スペースを入力", note: "設定に応じた幅の空白を挿入" },
+        KeyBindingItem { category: "ひらがな入力", keys: "F6", action: "入力全体をひらがなに変換", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "F7 / Ctrl+K", action: "入力全体を全角カタカナに変換", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "F8", action: "入力全体を半角カタカナに変換", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "F9", action: "入力全体を全角英数に変換", note: "連打で 小文字→大文字→先頭大文字" },
+        KeyBindingItem { category: "ひらがな入力", keys: "F10", action: "入力全体を半角英数に変換", note: "連打で 小文字→大文字→先頭大文字" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Ctrl+J", action: "カーソル位置までの変換結果を固定 (Chunk固定)", note: "続きを入力しても左側が固定" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Ctrl+I", action: "変換を開始してAI候補ビューを直接開く", note: "" },
+        KeyBindingItem { category: "ひらがな入力", keys: "Ctrl+T / Ctrl+R", action: "変換を開始してソース別絞り込みビューを開く", note: "Ctrl+T:学習 / Ctrl+R:記号" },
+        KeyBindingItem { category: "ひらがな入力", keys: ": (コロン)", action: "絵文字モードを開始", note: ":smile 等で絵文字を検索" },
+
+        // 変換中
+        KeyBindingItem { category: "変換中", keys: "Space / ↓ / Tab / Ctrl+N", action: "次の候補へ移動", note: "Ctrl+N も可" },
+        KeyBindingItem { category: "変換中", keys: "↑ / Shift+Space / Ctrl+P", action: "前の候補へ移動", note: "Shift+Tab も可" },
+        KeyBindingItem { category: "変換中", keys: "PageDown / PageUp", action: "候補ページの移動", note: "" },
+        KeyBindingItem { category: "変換中", keys: "Ctrl+1 〜 9", action: "数字キーで表示中の候補を直接選択・確定", note: "" },
+        KeyBindingItem { category: "変換中", keys: "Enter / Ctrl+M", action: "選択中の候補を確定", note: "" },
+        KeyBindingItem { category: "変換中", keys: "Escape", action: "変換をキャンセルしてひらがなに戻る", note: "" },
+        KeyBindingItem { category: "変換中", keys: "Ctrl+Backspace / Ctrl+Delete", action: "選択中の学習候補を履歴から削除", note: "" },
+        KeyBindingItem { category: "変換中", keys: "Ctrl+T / Ctrl+R", action: "候補をソース別に絞り込み", note: "学習 → 辞書 → AI → 記号" },
+        KeyBindingItem { category: "変換中", keys: "文字キー / 数字", action: "確定せず読みを伸ばして再変換", note: "インクリメンタル更新" },
+
+        // コマンド
+        KeyBindingItem { category: "コマンド", keys: "「でばっぐもーど」と入力して変換", action: "デバッグモードの ON / OFF 切替", note: "候補の【デバッグモード...】を選択" },
+        KeyBindingItem { category: "コマンド", keys: "「ばーじょん」と入力して変換", action: "ビルドバージョンの確認", note: "候補にバージョン文字列を表示" },
     ];
 
     #[derive(Clone)]
@@ -195,6 +253,7 @@ mod app {
         categories: HWND,
         learning_grid: HWND,
         user_dictionary_grid: HWND,
+        key_bindings_grid: HWND,
         user_reading: HWND,
         user_surface: HWND,
         user_part_of_speech: HWND,
@@ -378,6 +437,43 @@ mod app {
                     .to_string()
             })
             .unwrap_or_else(|| "不明".to_string())
+    }
+
+    fn populate_key_bindings_grid(state: &AppState) {
+        let _ = send(state.key_bindings_grid, LVM_DELETEALLITEMS, 0, 0);
+        for (index, item_data) in KEY_BINDINGS.iter().enumerate() {
+            let values = [
+                item_data.category,
+                item_data.keys,
+                item_data.action,
+                item_data.note,
+            ];
+            for (column, value) in values.iter().enumerate() {
+                let text = wide(value);
+                let mut item = LVITEMW {
+                    mask: LVIF_TEXT,
+                    iItem: index as i32,
+                    iSubItem: column as i32,
+                    pszText: PWSTR(text.as_ptr() as *mut u16),
+                    ..Default::default()
+                };
+                if column == 0 {
+                    let _ = send(
+                        state.key_bindings_grid,
+                        LVM_INSERTITEMW,
+                        0,
+                        &mut item as *mut LVITEMW as isize,
+                    );
+                } else {
+                    let _ = send(
+                        state.key_bindings_grid,
+                        LVM_SETITEMTEXTW,
+                        index,
+                        &mut item as *mut LVITEMW as isize,
+                    );
+                }
+            }
+        }
     }
 
     fn populate_learning_grid(state: &AppState) {
@@ -793,6 +889,10 @@ mod app {
         current_section(state) == "user_dictionary"
     }
 
+    fn is_key_bindings_category(state: &AppState) -> bool {
+        current_section(state) == "key_bindings"
+    }
+
     fn is_license_category(state: &AppState) -> bool {
         current_section(state) == "license"
     }
@@ -1063,7 +1163,7 @@ mod app {
             hide_action_controls(state);
             hide_user_dictionary_controls(state);
             set_setting_controls_visible(state, None);
-            for control in [state.learning_grid, state.user_dictionary_grid] {
+            for control in [state.learning_grid, state.user_dictionary_grid, state.key_bindings_grid] {
                 unsafe {
                     let _ = ShowWindow(control, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
                 }
@@ -1083,6 +1183,36 @@ mod app {
         unsafe {
             let _ = ShowWindow(
                 state.license_text,
+                windows::Win32::UI::WindowsAndMessaging::SW_HIDE,
+            );
+        }
+        if is_key_bindings_category(state) {
+            hide_action_controls(state);
+            hide_user_dictionary_controls(state);
+            set_setting_controls_visible(state, None);
+            for control in [state.learning_grid, state.user_dictionary_grid] {
+                unsafe {
+                    let _ = ShowWindow(control, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                }
+            }
+            unsafe {
+                let _ = ShowWindow(
+                    state.key_bindings_grid,
+                    windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
+                );
+            }
+            populate_key_bindings_grid(state);
+            set_control_font(state.value_label, state.title_font);
+            set_text(
+                state.value_label,
+                "キー設定",
+            );
+            return;
+        }
+        set_control_font(state.value_label, state.title_font);
+        unsafe {
+            let _ = ShowWindow(
+                state.key_bindings_grid,
                 windows::Win32::UI::WindowsAndMessaging::SW_HIDE,
             );
         }
@@ -1353,7 +1483,7 @@ mod app {
         }
     }
 
-    fn update_footer(hwnd: HWND, learning: bool, user_dictionary: bool, license: bool) {
+    fn update_footer(hwnd: HWND, learning: bool, user_dictionary: bool, license: bool, key_bindings: bool) {
         let controls = [
             (APPLY_ID, "追加・更新", user_dictionary),
             (
@@ -1383,7 +1513,7 @@ mod app {
                 } else {
                     "再読み込み"
                 },
-                !license,
+                !license && !key_bindings,
             ),
             (
                 SAVE_ID,
@@ -1392,7 +1522,7 @@ mod app {
                 } else {
                     "保存"
                 },
-                !learning && !license,
+                !learning && !license && !key_bindings,
             ),
         ];
         for (id, label, is_visible) in controls {
@@ -1726,9 +1856,9 @@ mod app {
         let bold_font = create_ui_font(-14, 600);
         let title_font = create_ui_font(-20, 600);
         let small_font = create_ui_font(-12, 400);
-        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
         let panel_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
-        let sidebar_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+        let sidebar_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
 
         let category_style = WS_CHILD
             | WS_VISIBLE
@@ -1770,6 +1900,8 @@ mod app {
             (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as usize,
             (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
+        let _ = send(learning_grid, LVM_SETBKCOLOR, 0, 0x00FFFFFF);
+        let _ = send(learning_grid, LVM_SETTEXTBKCOLOR, 0, 0x00FFFFFF);
         set_control_font(learning_grid, ui_font);
         for (index, (title, width)) in [
             ("読み", 110),
@@ -1799,6 +1931,8 @@ mod app {
             (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as usize,
             (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
+        let _ = send(user_dictionary_grid, LVM_SETBKCOLOR, 0, 0x00FFFFFF);
+        let _ = send(user_dictionary_grid, LVM_SETTEXTBKCOLOR, 0, 0x00FFFFFF);
         set_control_font(user_dictionary_grid, ui_font);
         for (index, (title, width)) in [
             ("読み", 150),
@@ -1810,6 +1944,37 @@ mod app {
         .enumerate()
         {
             add_learning_column(user_dictionary_grid, index, title, width)?;
+        }
+        let key_bindings_grid = add_control(
+            settings_content,
+            w!("SysListView32"),
+            w!(""),
+            WS_CHILD
+                | WS_BORDER
+                | WS_VSCROLL
+                | WINDOW_STYLE(LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL),
+            KEY_BINDINGS_GRID_ID,
+        )?;
+        let _ = unsafe { SetWindowTheme(key_bindings_grid, w!("Explorer"), PCWSTR::null()) };
+        let _ = send(
+            key_bindings_grid,
+            LVM_SETEXTENDEDLISTVIEWSTYLE,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as usize,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
+        );
+        let _ = send(key_bindings_grid, LVM_SETBKCOLOR, 0, 0x00FFFFFF);
+        let _ = send(key_bindings_grid, LVM_SETTEXTBKCOLOR, 0, 0x00FFFFFF);
+        set_control_font(key_bindings_grid, ui_font);
+        for (index, (title, width)) in [
+            ("カテゴリ", 120),
+            ("キー操作", 200),
+            ("動作内容", 260),
+            ("備考", 180),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            add_learning_column(key_bindings_grid, index, title, width)?;
         }
         for (_, label) in SECTIONS {
             add_item(categories, LB_ADDSTRING, label);
@@ -1889,10 +2054,15 @@ mod app {
             USER_COMMENT_ID,
         )?;
         set_control_font(user_comment, ui_font);
+        let full_license_text = wide(&format!(
+            "Karukan {}\r\n\r\n{}",
+            karukan_engine::VERSION,
+            LICENSE_TEXT
+        ));
         let license_text = add_control(
             settings_content,
             w!("EDIT"),
-            PCWSTR(wide(LICENSE_TEXT).as_ptr()),
+            PCWSTR(full_license_text.as_ptr()),
             WS_CHILD
                 | WS_BORDER
                 | WS_VSCROLL
@@ -1913,6 +2083,7 @@ mod app {
             user_comment_label,
             user_comment,
             license_text,
+            key_bindings_grid,
         ] {
             let _ =
                 unsafe { ShowWindow(control, windows::Win32::UI::WindowsAndMessaging::SW_HIDE) };
@@ -1957,6 +2128,15 @@ mod app {
             SAVE_ID,
         )?;
         set_control_font(save, bold_font);
+        let version_str = wide(&format!("Karukan {}", karukan_engine::VERSION));
+        let version_label = add_control(
+            hwnd,
+            w!("STATIC"),
+            PCWSTR(version_str.as_ptr()),
+            WS_CHILD | WS_VISIBLE,
+            VERSION_LABEL_ID,
+        )?;
+        set_control_font(version_label, small_font);
         let status = add_control(hwnd, w!("STATIC"), w!(""), WS_CHILD | WS_VISIBLE, STATUS_ID)?;
         set_control_font(status, small_font);
 
@@ -1996,6 +2176,7 @@ mod app {
                 categories,
                 learning_grid,
                 user_dictionary_grid,
+                key_bindings_grid,
                 user_reading,
                 user_surface,
                 user_part_of_speech,
@@ -2020,7 +2201,7 @@ mod app {
             if let Some(state) = slot.borrow_mut().as_mut() {
                 update_learning_sort_headers(state);
                 populate_category(state);
-                update_footer(hwnd, false, false, false);
+                update_footer(hwnd, false, false, false, false);
                 if let Ok(path) = config_path() {
                     set_status(state, &format!("設定ファイル: {}", path.display()));
                 }
@@ -2076,6 +2257,15 @@ mod app {
                 }
             }
         }
+        if let Ok(version_ctl) = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), VERSION_LABEL_ID as i32)
+        } {
+            if let Err(error) =
+                unsafe { MoveWindow(version_ctl, margin, button_y + 8, category_width, 24, true) }
+            {
+                eprintln!("MoveWindow failed: {error}");
+            }
+        }
         if let Ok(status) = unsafe {
             windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), STATUS_ID as i32)
         } {
@@ -2110,7 +2300,8 @@ mod app {
             let learning = is_learning_category(state);
             let user_dictionary = is_user_dictionary_category(state);
             let license = is_license_category(state);
-            let controls: Vec<&SettingControl> = if learning || user_dictionary || license {
+            let key_bindings = is_key_bindings_category(state);
+            let controls: Vec<&SettingControl> = if learning || user_dictionary || license || key_bindings {
                 Vec::new()
             } else {
                 state
@@ -2119,7 +2310,7 @@ mod app {
                     .filter(|control| control.section == current_section(state))
                     .collect()
             };
-            let content_height = if learning || user_dictionary || license {
+            let content_height = if learning || user_dictionary || license || key_bindings {
                 height
             } else {
                 46 + controls
@@ -2139,7 +2330,7 @@ mod app {
                 eprintln!("Could not read settings scroll position: {error}");
                 scroll_info.nPos = 0;
             }
-            let position = if learning || user_dictionary || license {
+            let position = if learning || user_dictionary || license || key_bindings {
                 0
             } else {
                 scroll_info.nPos.clamp(0, (content_height - height).max(0))
@@ -2241,6 +2432,45 @@ mod app {
                     MoveWindow(state.license_text, 0, 44, width, (height - 52).max(0), true)
                 } {
                     eprintln!("MoveWindow failed: {error}");
+                }
+            } else if key_bindings {
+                if let Err(error) = unsafe {
+                    MoveWindow(
+                        state.key_bindings_grid,
+                        0,
+                        44,
+                        width,
+                        (height - 52).max(0),
+                        true,
+                    )
+                } {
+                    eprintln!("MoveWindow failed: {error}");
+                }
+                let min_widths = [100, 160, 240, 180];
+                let min_total: i32 = min_widths.iter().sum();
+                if width > min_total {
+                    let col0 = width * 15 / 100;
+                    let col1 = width * 26 / 100;
+                    let col2 = width * 34 / 100;
+                    let col3 = width - col0 - col1 - col2;
+                    let column_widths = [col0, col1, col2, col3];
+                    for (column, column_width) in column_widths.iter().enumerate() {
+                        let _ = send(
+                            state.key_bindings_grid,
+                            LVM_SETCOLUMNWIDTH,
+                            column,
+                            *column_width as isize,
+                        );
+                    }
+                } else {
+                    for (column, min_w) in min_widths.iter().enumerate() {
+                        let _ = send(
+                            state.key_bindings_grid,
+                            LVM_SETCOLUMNWIDTH,
+                            column,
+                            *min_w as isize,
+                        );
+                    }
                 }
             } else {
                 let mut y = 46;
@@ -2357,6 +2587,13 @@ mod app {
                                 }
                             }
                         }
+                        WM_CTLCOLOREDIT => {
+                            unsafe {
+                                let _ = SetBkMode(hdc, TRANSPARENT);
+                                let _ = SetTextColor(hdc, COLORREF(0x00222222));
+                            }
+                            LRESULT(state.panel_brush.0 as isize)
+                        }
                         WM_CTLCOLORBTN => {
                             unsafe {
                                 let _ = SetBkMode(hdc, TRANSPARENT);
@@ -2388,7 +2625,7 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
                 control_background_color(hwnd, message, wparam, lparam)
             }
             WM_SIZE => {
@@ -2481,7 +2718,7 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
                 control_background_color(hwnd, message, wparam, lparam)
             }
             WM_NOTIFY | WM_MOUSEWHEEL => {
@@ -2507,7 +2744,7 @@ mod app {
         lparam: LPARAM,
     ) -> LRESULT {
         match message {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORLISTBOX => {
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
                 control_background_color(hwnd, message, wparam, lparam)
             }
             WM_MEASUREITEM => {
@@ -2529,9 +2766,9 @@ mod app {
                             let is_selected = (dis.itemState.0 & ODS_SELECTED_FLAG) != 0;
                             unsafe {
                                 let bg_brush = if is_selected {
-                                    CreateSolidBrush(COLORREF(0x00FFFFFF))
+                                    CreateSolidBrush(COLORREF(0x00EBF3FB)) // 選択項目: 淡いアクセントブルー
                                 } else {
-                                    CreateSolidBrush(COLORREF(0x00F3F3F3))
+                                    CreateSolidBrush(COLORREF(0x00FFFFFF)) // 非選択項目: 白
                                 };
                                 let item_rect = if is_selected {
                                     RECT {
@@ -2685,7 +2922,8 @@ mod app {
                                 let learning = is_learning_category(state);
                                 let user_dictionary = is_user_dictionary_category(state);
                                 let license = is_license_category(state);
-                                update_footer(hwnd, learning, user_dictionary, license);
+                                let key_bindings = is_key_bindings_category(state);
+                                update_footer(hwnd, learning, user_dictionary, license, key_bindings);
                                 if learning {
                                     reload_learning_records(state);
                                 } else if user_dictionary {
@@ -2700,6 +2938,12 @@ mod app {
                                     set_status(
                                         state,
                                         "ライセンス本文はこの画面で確認できます。配布ZIPにもライセンスファイルを同梱します。",
+                                    );
+                                } else if key_bindings {
+                                    populate_category(state);
+                                    set_status(
+                                        state,
+                                        "主なキー操作一覧です（※ アプリ側ショートカットが優先され、アプリで使われていないキーのみIMEで処理されます）。",
                                     );
                                 } else {
                                     populate_category(state);
@@ -2816,7 +3060,24 @@ mod app {
         }
     }
 
+    const SINGLE_INSTANCE_MUTEX: windows::core::PCWSTR = w!("Local\\KarukanSettingsSingleInstance");
+
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        // 多重起動防止: 名前付きミューテックスを生成し、既に存在する場合は既存ウィンドウを最前面化して終了
+        let mutex = unsafe { CreateMutexW(None, true, SINGLE_INSTANCE_MUTEX)? };
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe {
+                if let Ok(existing_hwnd) = FindWindowW(CLASS_NAME, None) {
+                    if existing_hwnd.0 != 0 as _ {
+                        let _ = ShowWindow(existing_hwnd, SW_RESTORE);
+                        let _ = SetForegroundWindow(existing_hwnd);
+                    }
+                }
+                let _ = CloseHandle(mutex);
+            }
+            return Ok(());
+        }
+
         let controls = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_LISTVIEW_CLASSES,
@@ -2825,12 +3086,14 @@ mod app {
             return Err(windows::core::Error::from_thread().into());
         }
         let instance = HINSTANCE(unsafe { GetModuleHandleW(None)? }.0);
+        let arrow_cursor = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
         let panel_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
-        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00F3F3F3)) };
+        let window_brush = unsafe { CreateSolidBrush(COLORREF(0x00FFFFFF)) };
 
         let panel_class = WNDCLASSW {
             lpfnWndProc: Some(settings_panel_proc),
             hInstance: instance,
+            hCursor: arrow_cursor,
             hbrBackground: panel_brush,
             lpszClassName: SETTINGS_PANEL_CLASS,
             ..Default::default()
@@ -2841,6 +3104,7 @@ mod app {
         let content_class = WNDCLASSW {
             lpfnWndProc: Some(settings_content_proc),
             hInstance: instance,
+            hCursor: arrow_cursor,
             hbrBackground: panel_brush,
             lpszClassName: SETTINGS_CONTENT_CLASS,
             ..Default::default()
@@ -2851,6 +3115,7 @@ mod app {
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
+            hCursor: arrow_cursor,
             hbrBackground: window_brush,
             lpszClassName: CLASS_NAME,
             ..Default::default()
@@ -2859,11 +3124,12 @@ mod app {
             return Err(windows::core::Error::from_thread().into());
         }
 
+        let window_title = wide(&format!("Karukan IME 設定 ({})", karukan_engine::VERSION));
         let hwnd = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 CLASS_NAME,
-                w!("Karukan IME 設定"),
+                PCWSTR(window_title.as_ptr()),
                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -2902,6 +3168,9 @@ mod app {
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+        }
+        unsafe {
+            let _ = CloseHandle(mutex);
         }
         Ok(())
     }

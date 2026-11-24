@@ -381,8 +381,13 @@ unsafe extern "system" fn candidate_wnd_proc(
                                             }
                                         }
 
-                                        let _ = d2d.dc_render_target.EndDraw(None, None);
-                                        d2d_rendered = true;
+                                        if let Err(error) = d2d.dc_render_target.EndDraw(None, None) {
+                                            tracing::warn!("Direct2D EndDraw failed: {error:?}");
+                                            // エラー時はレンダリングターゲットを破棄し次回再生成
+                                            *res_mut = None;
+                                        } else {
+                                            d2d_rendered = true;
+                                        }
                                     }
                                 }
                             });
@@ -590,6 +595,15 @@ impl CandidatePopup {
             }
         }
 
+        let owner_hwnd = if let Ok(view) = unsafe { context.GetActiveView() }
+            && let Ok(hwnd) = unsafe { view.GetWnd() }
+            && hwnd.0 != 0 as _
+        {
+            Some(hwnd)
+        } else {
+            None
+        };
+
         let window = match self.window {
             Some(window) => window,
             None => {
@@ -604,7 +618,7 @@ impl CandidatePopup {
                         y,
                         width,
                         height,
-                        None,
+                        owner_hwnd,
                         None,
                         None,
                         None,

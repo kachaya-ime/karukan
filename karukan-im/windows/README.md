@@ -3,109 +3,82 @@
 このクレートは、共有Rust IMEエンジンを利用するWindows 11 x64向け
 Text Services Framework（TSF）フロントエンドです。
 
-## ビルド
-
-リポジトリのルートディレクトリから、次のスクリプトを実行します。
-Windows向けのRustおよびC/C++依存ライブラリは静的CRT（`/MT`）でビルドします。
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\karukan-im\windows\build-windows.ps1 -Release
-```
-
-ビルド成果物の`karukan_im_windows.dll`と`install.exe`は、
-`target\x86_64-pc-windows-msvc\release`に生成されます。
-設定アプリの`karukan-settings.exe`も同じフォルダーに生成されます。
-
-## 配布用ZIP
-
-リポジトリルートのPowerShellから次を実行すると、リリースビルドを行い、
-`install.exe`、`karukan_im_windows.dll`、`karukan-settings.exe`とインストール手順を
-含むZIPを`karukan-im\windows\dist\karukan-windows-x64-v<version>.zip`に作成します。
-
-```powershell
-.\karukan-im\windows\package-windows.ps1
-```
-
-インストーラーは実行時にGitHub Releasesの
-`dict.tgz`とHugging Faceのモデルをダウンロードするため、インストール先のWindows PCは
-インストール時にインターネットへ接続できる必要があります。ZIPにはMITおよびApache-2.0の
-ライセンスファイルを含み、設定アプリの「ライセンス」カテゴリでもライセンス本文を確認できます。
-
 ## インストール
 
-インストーラーはCOMクラスをWindowsのシステム領域に登録するため、
-PowerShellを「管理者として実行」してから、次のコマンドを実行してください。
-IMEの言語プロファイルは現在のユーザーに登録されます。
+配布用ZIPパッケージ（`karukan-windows-x64-v<version>.zip`）を展開してインストールします。
+（※ ソースコードからビルドする場合は、**[ビルド手順書 (BUILD.md)](BUILD.md)** を参照してください）
+
+### インストール手順
+
+1. 配布されたZIPファイルを任意のフォルダーに展開（解凍）します。
+2. PowerShellを **「管理者として実行」** します。
+3. `cd` コマンドでZIPを展開したフォルダーへ移動します。
+   ```powershell
+   cd <展開先フォルダーのパス>
+   ```
+4. インストーラーを実行します。
+   ```powershell
+   .\install.exe install
+   ```
+   - インストーラーはCOMクラスをシステム領域に登録し、IMEの言語プロファイルを現在のユーザーに登録します。
+   - DLLは `%LOCALAPPDATA%\Programs\Karukan` にコピーされます。更新時に旧DLLが使用中でも上書きせず別名配置されるため、そのまま再インストール可能です。古いDLLはサインアウト後に同フォルダーから削除できます。
+   - インストール時に、GitHub Releasesからシステム辞書（`dict.tgz`）をダウンロード・展開して `%APPDATA%\karukan\karukan-im\data\dict.bin` に配置し、変換モデルおよびトークナイザー（`tokenizer.json`）をHugging Faceキャッシュ（`%LOCALAPPDATA%\huggingface\hub`）へ事前取得します（要インターネット接続）。
+
+### 既定のIMEに手動で設定する（Windowsの設定アプリ）
+
+`install.exe install` 実行時に自動で既定の入力方式（InputTip）として設定されますが、手動で指定・確認する場合は以下の手順で行えます。
+
+1. **「設定」**（`Win + I`）を開きます。
+2. **「時刻と言語」** > **「入力」** を選択します。
+3. **「キーボードの詳細設定」** をクリックします。
+4. **「既定の入力方式の上書き」** プルダウンを開き、一覧から **「日本語 - Karukan Japanese Input」** を選択します。
+
+> **Note:** 元のWindows標準IMEに戻したい場合は、上記プルダウンを「言語リストを使用します (推奨)」に戻すか、PowerShellで `Set-WinDefaultInputMethodOverride -InputTip ''` を実行します。
+
+### アンインストール
+
+アンインストールする場合も、展開したフォルダーから管理者PowerShellで以下を実行します：
 
 ```powershell
-.\target\x86_64-pc-windows-msvc\release\install.exe install
+.\install.exe uninstall
 ```
 
-続いてWindowsの「設定」から「時刻と言語」>「言語と地域」>「日本語」
->「言語のオプション」>「キーボード」で、**Karukan Japanese Input**を
-追加して選択してください。DLLは`%LOCALAPPDATA%\Programs\Karukan`に
-バージョンごとの別ファイル名でコピーされます。更新時に旧DLLが使用中でも
-上書きしないため、そのまま再インストールできます。古いDLLはサインアウト後に
-同フォルダーから削除できます。
+TSFプロファイルとCOM登録が解除されます。DLLを完全に削除する場合は、サインアウトまたは再起動後に `%LOCALAPPDATA%\Programs\Karukan` フォルダーを削除してください。
 
-日本語入力と直接入力（英字）の切り替えは、Windows標準の半角/全角キーで行います。
-JISキーボードの「変換」キーはfcitx5版と同様に、カタカナ／英数字モードから
-ひらがなモードへ戻す操作に使えます。
+## 使い方
 
-インストール時に、GitHub Releasesの`dict.tgz`を一時領域へダウンロード・展開し、
-含まれる`dict.bin`を配置します。通常の配置先は
-`%APPDATA%\karukan\karukan-im\data\dict.bin`です。設定の
-`[conversion] dict_path`が指定されていればそのパスを使います。
-インストーラーは実際の保存先を表示し、辞書を配置できない場合はエラーで終了します。
-既に辞書がある場合は保持します。設定中の変換モデル
-（メインモデルと、adaptive設定時の軽量モデル）および各モデルの`tokenizer.json`も
-Hugging Faceキャッシュへ事前取得し、それぞれの保存先を表示します。モデルまたは
-トークナイザーを取得できない場合もエラーで終了します。ダウンロードには
-ネットワーク接続が必要です。キャッシュの既定場所は
-`%LOCALAPPDATA%\huggingface\hub`です（`HF_HUB_CACHE`、`HF_HOME`などを
-設定している場合はその設定が優先されます）。
+- **入力モードの切り替え**: 
+  - Windows標準の `半角/全角` キーで行えます。
+  - JISキーボードの **`無変換`** キーで直接入力（半角英数 / IME OFF）へ、**`変換`** キーで日本語入力（ひらがな / IME ON）へワンタッチで切り替えられます。
+- **文字種変換（F6〜F10キー）**:
+  - `F6`: ひらがな
+  - `F7`: 全角カタカナ
+  - `F8`: 半角カタカナ
+  - `F9`: 全角英数（連打で大文字・小文字・先頭大文字を切り替え）
+  - `F10`: 半角英数（連打で大文字・小文字・先頭大文字を切り替え）
+- **「ん」の入力**: 末尾の単独の `n` は Enter で「ん」として確定され、ライブ変換中も先行して「ん」として変換されます。
+- **ショートカットキーの挙動について**:
+  - 各種アプリケーション（ブラウザ、エディタ、ターミナル等）が持つ独自のショートカットとの衝突を防ぐため、`Ctrl` キーを含む操作は**まずアプリケーション側に優先権が渡されます**。
+  - アプリ側でショートカットとして定義されていないなど、アプリで消費されずに IME までキーが届いた場合には、`Ctrl + K`（カタカナ変換）、`Ctrl + J`（Chunk固定）、`Ctrl + I`（AI候補ビュー）、`Ctrl + T / R`（ソース絞り込み）などの Karukan 固有ショートカットとして動作します。
+  - アプリ側のキーバインドと競合することなく確実に操作したい場合は、文字種変換には `F6〜F10`、候補移動には `Space` / `↓` / `↑` / `Tab`、カーソル移動には `←` / `→` / `Home` / `End`、確定には `Enter` をご使用ください。
+- **デバッグモード切替**: 入力中に「でばっぐもーど」と入力して変換し、候補に出る【デバッグモードをオン/オフ】を選択・確定します。
+- **バージョンの確認**: 「ばーじょん」と打って変換すると、埋め込まれたエンジンのビルドバージョンを確認できます。
 
-初回インストール時に、デフォルト設定が
-`%APPDATA%\karukan\karukan-im\config\config.toml`へ作成されます。
-既に設定ファイルがある場合は上書きしません。設定を変更した後は、
-サインアウトして再度サインインすると反映されます。
+## 設定
 
-設定アプリは`karukan-settings.exe`を起動します。「学習履歴」以外のカテゴリでは、
-設定項目とチェックボックス、ラジオボタン、入力欄を同じ画面に並べて編集できます。
-設定項目の領域は縦スクロールに対応し、画面下の状態表示と操作ボタンは固定されます。
-日付・時刻やモデルなど配列・テーブル形式の値はTOML形式で編集できます。
-カテゴリを切り替えると入力内容を保持し、「保存」で設定ファイルへ反映します。
-保存時に設定の構文と型を検証してから置き換えます。初期設定ファイルはインストーラーが作成します。
-IMEに反映するにはサインアウトして再度サインインしてください。インストール時に
-`%LOCALAPPDATA%\Programs\Karukan\karukan-settings.exe`にも配置されます。
+初回インストール時に、デフォルト設定が `%APPDATA%\karukan\karukan-im\config\config.toml` に作成されます。
 
-設定アプリの「学習履歴」では、読み・表記・選択回数・最終選択日時を列ごとの一覧で確認できます。
-列見出しをクリックするとその列で並べ替え、同じ見出しを再度クリックすると昇順・降順が切り替わります。
-CtrlキーまたはShiftキーを押しながら行を選択すると複数選択でき、選択した履歴をまとめて削除できます。
-選択した履歴の削除は同じ候補がより長い読みで再表示される分も削除します。
-「すべて削除」は学習履歴全体を消去し、どちらも確認ダイアログの後に保存します。
-学習履歴の保存先は`%APPDATA%\karukan\karukan-im\data\learning.tsv`です。
-変換候補を確定すると学習内容を保存し、初回の学習後にこのファイルが作成されます。
-メンテナンス時は、確認ダイアログの案内に従ってIMEを使用中のアプリを閉じてください。
+### 設定アプリ（GUI）
 
-「ユーザー辞書」カテゴリでは、読み・表記・品詞・コメントを一覧から追加・更新・削除できます。
-「辞書を保存」で`%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv`へ保存します。
-このファイルはMozc/Google IME互換のTSV形式です。既存のユーザー辞書ファイルは変更しません。
-保存した単語を変換に反映するにはIMEを再起動してください。
+ZIP 内（またはインストール先 `%LOCALAPPDATA%\Programs\Karukan\`）の `karukan-settings.exe` を起動して設定を編集できます。
 
-「ライセンス」カテゴリではKarukanのMIT LicenseおよびApache License 2.0の本文を確認できます。
-Karukanは`MIT OR Apache-2.0`のデュアルライセンスです。
+- **全般設定**: ライブ変換の有効化、変換モデルの選択、推論スレッド数などを設定できます。
+- **キー設定**: 主要なキー操作一覧を確認できます。
+- **学習履歴**: 読み・表記・選択回数・最終選択日時の一覧確認、並べ替え、個別削除、一括クリアが行えます（保存先: `%APPDATA%\karukan\karukan-im\data\learning.tsv`）。
+- **ユーザー辞書**: 独自の単語（読み・表記・品詞・コメント）の追加・編集・削除が行えます（保存先: `%APPDATA%\karukan\karukan-im\data\user_dicts\karukan-user.tsv`）。
+- **ライセンス**: 適用されているライセンス（MIT / Apache-2.0）を確認できます。
 
-TSFプロファイルとCOM登録を解除するには、管理者PowerShellから次を実行します。
-
-```powershell
-.\target\x86_64-pc-windows-msvc\release\install.exe uninstall
-```
-
-DLLを置き換える前に、サインアウトするか、IMEを使用中のアプリを終了してください。
-アンインストーラーは、WindowsでDLLが読み込まれなくなった後に削除できるよう、
-DLLを残します。
+※ 設定変更をIMEに反映するには、設定アプリで「保存」後に一度サインアウトして再度サインインするか、IMEを使用中のアプリを再起動してください。
 
 ## 現在の対応状況
 
