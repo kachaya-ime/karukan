@@ -50,7 +50,7 @@ class KarukanInputView @JvmOverloads constructor(
     }
 
     fun getThemeColors(): ThemeColors {
-        return ThemeColors.from(listener?.isDarkTheme() == true)
+        return ThemeColors.from(context, listener?.isDarkTheme() == true)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -106,7 +106,8 @@ class KarukanInputView @JvmOverloads constructor(
             context = context,
             dpToPx = { dp -> dpToPx(dp) },
             getAnchorView = { if (::composingTextView.isInitialized && composingTextView.isShown) composingTextView else rootView },
-            getInputView = { this }
+            getInputView = { this },
+            isDarkSupplier = { listener?.isDarkTheme() == true }
         )
     }
 

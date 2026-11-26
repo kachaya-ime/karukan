@@ -1,7 +1,6 @@
 package io.github.kachaya.karukan
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.Log
@@ -11,7 +10,6 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
-import com.google.android.material.color.MaterialColors
 
 /**
  * カーソル位置やアンカー直下に
@@ -25,6 +23,7 @@ class FloatingTooltipOverlay(
     private val dpToPx: (Float) -> Int,
     private val getAnchorView: () -> View?,
     private val getInputView: () -> View? = { null },
+    private val isDarkSupplier: () -> Boolean = { false },
     private val defaultAutoDismissDelayMs: Long = 1000L
 ) {
 
@@ -59,22 +58,11 @@ class FloatingTooltipOverlay(
 
     private fun createPopupWindow(): PopupWindow {
         val density = context.resources.displayMetrics.density
+        val colors = ThemeColors.from(context, isDarkSupplier())
 
-        val backgroundColor = MaterialColors.getColor(
-            context,
-            com.google.android.material.R.attr.colorSurface,
-            Color.WHITE
-        )
-        val textColor = MaterialColors.getColor(
-            context,
-            com.google.android.material.R.attr.colorOnSurface,
-            Color.BLACK
-        )
-        val borderColor = MaterialColors.getColor(
-            context,
-            com.google.android.material.R.attr.colorOutline,
-            Color.GRAY
-        )
+        val backgroundColor = colors.candidateBg
+        val textColor = colors.textColor
+        val borderColor = colors.strokeBorderColor
 
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL

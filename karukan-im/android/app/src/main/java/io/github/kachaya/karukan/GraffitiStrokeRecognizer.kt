@@ -623,11 +623,16 @@ object GraffitiStrokeRecognizer {
                 for (j in 0 until rotationsArray.length()) {
                     val rObj = rotationsArray.getJSONObject(j)
                     val angle = rObj.getInt("angle")
-                    val alpha = rObj.optString("a", "none")
-                    val numeric = rObj.optString("n", "none")
-                    val punctuation = rObj.optString("p", "none")
+                    val alpha = rObj.optString("a", rObj.optString("alpha", "none"))
+                    val numeric = rObj.optString("n", rObj.optString("numeric", "none"))
+                    val punctuation = rObj.optString("p", rObj.optString("punctuation", "none"))
                     specs.add(RotationResultSpec(angle, alpha, numeric, punctuation))
                 }
+            } else {
+                val alpha = obj.optString("a", obj.optString("alpha", "none"))
+                val numeric = obj.optString("n", obj.optString("numeric", "none"))
+                val punctuation = obj.optString("p", obj.optString("punctuation", "none"))
+                specs.add(RotationResultSpec(0, alpha, numeric, punctuation))
             }
 
             addRotatedTrainingSamples(name, points, specs)

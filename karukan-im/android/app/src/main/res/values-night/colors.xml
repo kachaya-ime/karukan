@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- IME テーマカラーパレット (Dark Theme) -->
+    <color name="theme_bg">#202124</color>
+    <color name="theme_text_color">#FFFFFF</color>
+    <color name="theme_status_text">#E8EAED</color>
+
+    <!-- 候補バー・ツールバー領域 -->
+    <color name="theme_candidate_bg">#292A2D</color>
+    <color name="theme_candidate_text">#E8EAED</color>
+    <color name="theme_candidate_selected_bg">#808080</color>
+    <color name="theme_candidate_selected_text">#FFFFFF</color>
+    <color name="theme_toolbar_bg">#323336</color>
+
+    <!-- キーボードキー要素 -->
+    <color name="theme_key_bg">#38393C</color>
+    <color name="theme_action_key_bg">#58595C</color>
+    <color name="theme_key_pressed_bg">#58595C</color>
+    <color name="theme_action_key_pressed_bg">#67686B</color>
+    <color name="theme_active_key_bg">#808080</color>
+    <color name="theme_active_key_pressed_bg">#666666</color>
+    <color name="theme_key_text">#FFFFFF</color>
+    <color name="theme_key_sub_text">#9AA0A6</color>
+    <color name="theme_active_key_text">#FFFFFF</color>
+    <color name="theme_disabled_bg">#202124</color>
+
+    <!-- アクセント・ハイライト -->
+    <color name="theme_active_accent_text">#89A890</color>
+
+    <!-- 枠線・区切り線・ボタン -->
+    <color name="theme_stroke_border">#808080</color>
+    <color name="theme_divider">#4A4D51</color>
+    <color name="theme_btn_close_bg">#5F6368</color>
+    <color name="theme_btn_help_bg">#3C4043</color>
+
+    <!-- Graffiti (手書き) -->
+    <color name="theme_graffiti_guide_text">#444950</color>
+    <color name="theme_graffiti_indicator">#F28B82</color>
+
+    <!-- フォーカス枠 -->
+    <color name="theme_emoji_focus_stroke">#808080</color>
+</resources>

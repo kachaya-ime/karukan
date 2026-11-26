@@ -168,15 +168,16 @@ data class KeyboardPalette(
     val activeKeyBg: Int,
     val activeKeyPressedBg: Int,
     val activeKeyText: Int,
-    val disabledBg: Int
+    val disabledBg: Int,
+    val strokeBorderColor: Int
 )
 
 /**
  * キーボードの色（カラーコード）を一元管理するオブジェクト
  */
 object KeyboardColors {
-    fun get(isDark: Boolean): KeyboardPalette {
-        val theme = ThemeColors.from(isDark)
+    fun get(context: Context, isDark: Boolean): KeyboardPalette {
+        val theme = ThemeColors.from(context, isDark)
         return KeyboardPalette(
             keyBg = theme.keyBg,
             actionKeyBg = theme.actionKeyBg,
@@ -186,7 +187,8 @@ object KeyboardColors {
             activeKeyBg = theme.activeKeyBg,
             activeKeyPressedBg = theme.activeKeyPressedBg,
             activeKeyText = theme.activeKeyText,
-            disabledBg = theme.disabledBg
+            disabledBg = theme.disabledBg,
+            strokeBorderColor = theme.strokeBorderColor
         )
     }
 }
@@ -328,7 +330,7 @@ fun createKeyDrawableByType(
     cornerRadiusDp: Float = 4f,
     insetDp: Float = 2f
 ): Drawable {
-    val palette = KeyboardColors.get(isDark)
+    val palette = KeyboardColors.get(context, isDark)
     val (normalColor, pressedColor) = when (type) {
         KeyBackgroundType.NORMAL -> palette.keyBg to palette.keyPressedBg
         KeyBackgroundType.ACTION -> palette.actionKeyBg to palette.actionKeyPressedBg
@@ -340,6 +342,7 @@ fun createKeyDrawableByType(
         normalColor = normalColor,
         pressedColor = pressedColor,
         disabledColor = palette.disabledBg,
+        borderColor = palette.strokeBorderColor,
         cornerRadiusDp = cornerRadiusDp,
         insetDp = insetDp
     )
@@ -350,12 +353,20 @@ fun createKeyButtonDrawable(
     normalColor: Int,
     pressedColor: Int,
     disabledColor: Int,
+    borderColor: Int = 0,
     cornerRadiusDp: Float = 4f,
     insetDp: Float = 2f
 ): Drawable {
     val density = context.resources.displayMetrics.density
     val radiusPx = cornerRadiusDp * density
     val insetPx = (insetDp * density).toInt()
+    val strokeWidthPx = (1 * density).toInt().coerceAtLeast(1)
+
+    fun GradientDrawable.applyStroke() {
+        if (borderColor != 0) {
+            setStroke(strokeWidthPx, borderColor)
+        }
+    }
 
     val stateListDrawable = StateListDrawable().apply {
         addState(
@@ -364,6 +375,7 @@ fun createKeyButtonDrawable(
                 shape = GradientDrawable.RECTANGLE
                 setColor(disabledColor)
                 cornerRadius = radiusPx
+                applyStroke()
             }
         )
         addState(
@@ -372,6 +384,7 @@ fun createKeyButtonDrawable(
                 shape = GradientDrawable.RECTANGLE
                 setColor(pressedColor)
                 cornerRadius = radiusPx
+                applyStroke()
             }
         )
         addState(
@@ -380,6 +393,7 @@ fun createKeyButtonDrawable(
                 shape = GradientDrawable.RECTANGLE
                 setColor(pressedColor)
                 cornerRadius = radiusPx
+                applyStroke()
             }
         )
         addState(
@@ -388,6 +402,7 @@ fun createKeyButtonDrawable(
                 shape = GradientDrawable.RECTANGLE
                 setColor(normalColor)
                 cornerRadius = radiusPx
+                applyStroke()
             }
         )
     }
@@ -403,8 +418,8 @@ fun createKeyButtonDrawable(
 // Region: Spannable Label Builders
 // -------------------------------------------------------------------------------------------------
 
-fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
-    val theme = ThemeColors.from(isDark)
+fun buildInputModeKeyText(context: Context, inputMode: InputMode, isDark: Boolean): CharSequence {
+    val theme = ThemeColors.from(context, isDark)
     val mainColor = theme.keyText
     val subColor = theme.keySubText
 
@@ -422,8 +437,8 @@ fun buildInputModeKeyText(inputMode: InputMode, isDark: Boolean): CharSequence {
     }
 }
 
-fun buildLangKeyText(isEnglishMode: Boolean, isDark: Boolean): CharSequence {
-    val theme = ThemeColors.from(isDark)
+fun buildLangKeyText(context: Context, isEnglishMode: Boolean, isDark: Boolean): CharSequence {
+    val theme = ThemeColors.from(context, isDark)
     val mainColor = theme.keyText
     val subColor = theme.keySubText
 
@@ -521,9 +536,9 @@ class KeyButton(
             isEnabled = false
         } else {
             if (spec.normalType == KeyType.LANG) {
-                text = buildLangKeyText(lastIsEnglishMode, isDark = lastIsDark)
+                text = buildLangKeyText(context, lastIsEnglishMode, isDark = lastIsDark)
             } else if (spec.normalType == KeyType.NIKO_LANG) {
-                text = buildInputModeKeyText(InputMode.HIRAGANA, isDark = lastIsDark)
+                text = buildInputModeKeyText(context, InputMode.HIRAGANA, isDark = lastIsDark)
             } else {
                 setMainAndSubText(spec.normalText, spec.subText, spec.subText2)
             }
@@ -687,11 +702,11 @@ class KeyButton(
         currentInputMode = inputMode
         lastIsDark = isDark
         if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
-            text = buildInputModeKeyText(inputMode, isDark)
+            text = buildInputModeKeyText(context, inputMode, isDark)
         } else if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
             val isEng = inputMode != InputMode.HIRAGANA
             lastIsEnglishMode = isEng
-            text = buildLangKeyText(isEng, isDark)
+            text = buildLangKeyText(context, isEng, isDark)
         } else if (currentType == KeyType.KEY_STAR || spec.normalType == KeyType.KEY_STAR) {
             invalidate()
         }
@@ -701,12 +716,12 @@ class KeyButton(
         lastIsEnglishMode = isEnglishMode
         lastIsDark = isDark
         if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
-            text = buildLangKeyText(isEnglishMode, isDark)
+            text = buildLangKeyText(context, isEnglishMode, isDark)
         } else if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
             val mode = if (isEnglishMode) InputMode.ALPHANUMERIC else InputMode.HIRAGANA
             lastInputMode = mode
             currentInputMode = mode
-            text = buildInputModeKeyText(mode, isDark)
+            text = buildInputModeKeyText(context, mode, isDark)
         }
     }
 
@@ -724,9 +739,9 @@ class KeyButton(
         }
 
         if (currentType == KeyType.NIKO_LANG) {
-            text = buildInputModeKeyText(lastInputMode, isDark)
+            text = buildInputModeKeyText(context, lastInputMode, isDark)
         } else if (currentType == KeyType.LANG) {
-            text = buildLangKeyText(lastIsEnglishMode, isDark)
+            text = buildLangKeyText(context, lastIsEnglishMode, isDark)
         } else {
             val newText = spec.getText(mode)
             if (text != newText) {
@@ -739,7 +754,7 @@ class KeyButton(
             }
         }
 
-        val palette = KeyboardColors.get(isDark)
+        val palette = KeyboardColors.get(context, isDark)
 
         val isActiveState = when (currentType) {
             KeyType.SHIFT -> mode == QwertyMode.SHIFT
@@ -778,9 +793,9 @@ class KeyButton(
         ViewCompat.setBackgroundTintList(this, null)
         background = createKeyDrawableByType(context, isDark, targetBgType)
         if (currentType == KeyType.NIKO_LANG || spec.normalType == KeyType.NIKO_LANG) {
-            text = buildInputModeKeyText(lastInputMode, isDark)
+            text = buildInputModeKeyText(context, lastInputMode, isDark)
         } else if (currentType == KeyType.LANG || spec.normalType == KeyType.LANG) {
-            text = buildLangKeyText(lastIsEnglishMode, isDark)
+            text = buildLangKeyText(context, lastIsEnglishMode, isDark)
         } else {
             setMainAndSubText(spec.normalText, spec.subText, spec.subText2)
         }

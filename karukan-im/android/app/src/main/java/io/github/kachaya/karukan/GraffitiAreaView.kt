@@ -89,12 +89,12 @@ class GraffitiAreaView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val isDark = isDarkSupplier()
-        val colors = ThemeColors.from(isDark)
+        val colors = ThemeColors.from(context, isDark)
         val width = width.toFloat()
         val height = height.toFloat()
         if (width <= 0 || height <= 0) return
 
-        canvas.drawColor(colors.graffitiBg)
+        canvas.drawColor(colors.bg)
 
         val midX = width / 2f
         dividerPaint.color = colors.dividerColor
@@ -122,10 +122,10 @@ class GraffitiAreaView(
         }
 
         if (currentPoints.isNotEmpty()) {
-            strokePaint.color = colors.graffitiStroke
+            strokePaint.color = colors.keyText
             canvas.drawPath(strokePath, strokePaint)
 
-            startPointPaint.color = colors.graffitiStroke
+            startPointPaint.color = colors.keyText
             val first = currentPoints.first()
             canvas.drawCircle(first.x, first.y, 10f, startPointPaint)
         }
@@ -206,11 +206,13 @@ class GraffitiAreaView(
                 } else {
                     isShiftMode = true
                 }
+                invalidate()
             }
 
             is GraffitiStrokeRecognizer.RecognitionResult.Caps -> {
                 isCapsMode = !isCapsMode
                 isShiftMode = false
+                invalidate()
             }
 
             is GraffitiStrokeRecognizer.RecognitionResult.CharResult -> {
@@ -220,6 +222,7 @@ class GraffitiAreaView(
                     char = char.uppercase()
                     isShiftMode = false
                 }
+                invalidate()
                 onStrokeRecognized(GraffitiStrokeRecognizer.RecognitionResult.CharResult(char), isShiftActive)
             }
 

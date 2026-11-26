@@ -11,6 +11,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import androidx.viewpager2.widget.ViewPager2
 
 /**
@@ -27,7 +28,7 @@ object GraffitiHelpDialog {
         val dialog = Dialog(context)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
 
-        val colors = ThemeColors.from(isDark)
+        val colors = ThemeColors.from(context, isDark)
         val bgColor = colors.bg
         val textColor = colors.textColor
         val btnBgColor = colors.btnHelpBg
@@ -81,7 +82,7 @@ object GraffitiHelpDialog {
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    setBackgroundColor(Color.WHITE)
+                    setBackgroundColor(colors.bg)
                     setPadding(8, 8, 8, 8)
                 }
                 return HelpImageViewHolder(iv)
@@ -104,7 +105,15 @@ object GraffitiHelpDialog {
         val closeBtn = Button(context).apply {
             text = "閉じる"
             setTextColor(textColor)
-            setBackgroundColor(btnBgColor)
+            background = createKeyButtonDrawable(
+                context = context,
+                normalColor = btnBgColor,
+                pressedColor = ColorUtils.blendARGB(btnBgColor, Color.BLACK, 0.2f),
+                disabledColor = btnBgColor,
+                borderColor = colors.strokeBorderColor,
+                cornerRadiusDp = 4f,
+                insetDp = 0f
+            )
             setOnClickListener { dialog.dismiss() }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,

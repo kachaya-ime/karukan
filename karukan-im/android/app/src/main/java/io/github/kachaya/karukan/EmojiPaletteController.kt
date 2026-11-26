@@ -43,7 +43,7 @@ class EmojiPaletteController(
     // ---------------------------------------------------------------------------------------------
 
     fun getThemeColors(): ThemeColors {
-        return ThemeColors.from(isDarkThemeSupplier())
+        return ThemeColors.from(context, isDarkThemeSupplier())
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -133,7 +133,8 @@ class EmojiPaletteController(
         }
     }
 
-    private fun handleEmojiSelection(emoji: String) {
+    private fun handleEmojiSelection(index: Int, emoji: String) {
+        focusedEmojiIndex = index
         addRecentEmoji(emoji)
         onEmojiSelected(emoji)
     }
@@ -324,7 +325,7 @@ class EmojiPaletteController(
                 gravity = Gravity.CENTER
                 setPadding(paddingH, paddingV, paddingH, paddingV)
                 background = createCategoryTabDrawable(isSelected, colors)
-                setTextColor(if (isSelected) colors.activeAccentText else colors.candidateText)
+                setTextColor(colors.textColor)
                 typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
                 isClickable = true
                 isFocusable = true
@@ -416,7 +417,7 @@ class EmojiPaletteController(
         if (focusedEmojiIndex in emojis.indices) {
             val emoji = emojis[focusedEmojiIndex]
             onFeedback()
-            handleEmojiSelection(emoji)
+            handleEmojiSelection(focusedEmojiIndex, emoji)
         }
     }
 
@@ -447,7 +448,6 @@ class EmojiPaletteController(
     fun renderContent() {
         if (!::emojiCategoryLayout.isInitialized || !::viewPager.isInitialized) return
         ensureCategoriesLoaded()
-
         val colors = getThemeColors()
 
         if (::container.isInitialized) {
@@ -515,7 +515,7 @@ class EmojiPaletteController(
         for ((idx, btn) in categoryButtons.withIndex()) {
             val isSelected = idx == selectedCategoryIndex
             btn.background = createCategoryTabDrawable(isSelected, colors)
-            btn.setTextColor(if (isSelected) colors.activeAccentText else colors.candidateText)
+            btn.setTextColor(colors.textColor)
             btn.typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
         }
 
@@ -534,7 +534,7 @@ class EmojiPaletteController(
         private val sharedViewPool: RecyclerView.RecycledViewPool,
         private val getThemeColors: () -> ThemeColors,
         private val keyButtonHeightSupplier: () -> Int,
-        private val onEmojiSelected: (String) -> Unit,
+        private val onEmojiSelected: (Int, String) -> Unit,
         private val onFeedback: () -> Unit
     ) : RecyclerView.Adapter<EmojiPageViewHolder>() {
 
@@ -589,14 +589,14 @@ class EmojiPaletteController(
         private val recyclerView: RecyclerView,
         getThemeColors: () -> ThemeColors,
         keyButtonHeightSupplier: () -> Int,
-        onEmojiSelected: (String) -> Unit,
+        onEmojiSelected: (Int, String) -> Unit,
         onFeedback: () -> Unit
     ) : RecyclerView.ViewHolder(recyclerView) {
 
         private val gridAdapter = EmojiGridAdapter(
             getThemeColors = getThemeColors,
             keyButtonHeightSupplier = keyButtonHeightSupplier,
-            onClick = onEmojiSelected,
+            onEmojiSelected = onEmojiSelected,
             onFeedback = onFeedback
         )
 
@@ -618,7 +618,7 @@ class EmojiPaletteController(
         private var emojis: List<String> = emptyList(),
         private val getThemeColors: () -> ThemeColors,
         private val keyButtonHeightSupplier: () -> Int,
-        private val onClick: (String) -> Unit,
+        private val onEmojiSelected: (Int, String) -> Unit,
         private val onFeedback: () -> Unit
     ) : RecyclerView.Adapter<EmojiViewHolder>() {
 
@@ -655,39 +655,43 @@ class EmojiPaletteController(
                     rowHeight
                 )
             }
-            return EmojiViewHolder(textView, onClick, onFeedback)
+            return EmojiViewHolder(textView, onFeedback) { index, emoji ->
+                setFocusedIndex(index)
+                onEmojiSelected(index, emoji)
+            }
         }
 
         override fun onBindViewHolder(holder: EmojiViewHolder, position: Int) {
             val colors = getThemeColors()
             val isFocused = position == focusedIndex
-            holder.bind(emojis[position], colors.textColor, isFocused, colors)
+            holder.bind(emojis[position], position, colors.textColor, isFocused, colors)
         }
     }
 
     private class EmojiViewHolder(
         private val textView: TextView,
-        private val onClick: (String) -> Unit,
-        private val onFeedback: () -> Unit
+        private val onFeedback: () -> Unit,
+        private val onItemClick: (Int, String) -> Unit
     ) : RecyclerView.ViewHolder(textView) {
 
-        fun bind(emoji: String, textColor: Int, isFocused: Boolean, colors: ThemeColors) {
+        fun bind(emoji: String, position: Int, textColor: Int, isFocused: Boolean, colors: ThemeColors) {
             textView.text = emoji
             textView.setTextColor(textColor)
             textView.background = if (isFocused) {
-                val accentColor = colors.activeAccentText
+                val density = textView.resources.displayMetrics.density
                 android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                    setColor(androidx.core.graphics.ColorUtils.setAlphaComponent(accentColor, 35))
-                    setStroke((2 * textView.resources.displayMetrics.density).toInt(), accentColor)
-                    cornerRadius = (8 * textView.resources.displayMetrics.density)
+                    setColor(Color.TRANSPARENT)
+                    setStroke((1 * density).toInt().coerceAtLeast(1), colors.emojiFocusStroke)
+                    cornerRadius = 4 * density
                 }
             } else {
                 android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
             }
             textView.setOnClickListener {
                 onFeedback()
-                onClick(emoji)
+                val pos = bindingAdapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: position
+                onItemClick(pos, emoji)
             }
         }
     }

@@ -1,7 +1,8 @@
 package io.github.kachaya.karukan
 
-import android.graphics.Color
-import androidx.core.graphics.ColorUtils
+import android.content.Context
+import android.content.res.Configuration
+import androidx.core.content.ContextCompat
 
 /**
  * Karukan IME 全体（入力ビュー、候補バー、キーボード、絵文字パレット、手書き領域、ダイアログ等）で
@@ -44,111 +45,59 @@ data class ThemeColors(
     val btnHelpBg: Int,
 
     // 手書き (Graffiti) 専用カラー
-    val graffitiBg: Int,
     val graffitiGuideText: Int,
-    val graffitiStroke: Int,
-    val graffitiIndicator: Int
+    val graffitiIndicator: Int,
+
+    // フォーカス枠カラー
+    val emojiFocusStroke: Int
 ) {
     companion object {
-        private val baseAccentGreenMuted = Color.parseColor("#4E6B55")
-        private val baseAccentGreenDeep = Color.parseColor("#38503E")
-        private val baseDarkBg = Color.parseColor("#202124")
-        private val baseLightBg = Color.parseColor("#F8F9FA")
-        private val baseTextLight = Color.parseColor("#E8EAED")
-        private val baseTextDark = Color.parseColor("#202124")
-
         /**
-         * isDark の判定結果に応じた ThemeColors を取得
+         * isDark の判定結果に応じた Context から ThemeColors を一元取得
          */
-        fun from(isDark: Boolean): ThemeColors {
-            return if (isDark) {
-                createDarkTheme()
-            } else {
-                createLightTheme()
-            }
-        }
-
-        private fun createDarkTheme(): ThemeColors {
-            val bg = baseDarkBg
-            val candidateBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(ColorUtils.blendARGB(bg, Color.WHITE, 0.18f), baseAccentGreenMuted, 0.20f)
-            val toolbarBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.08f)
-
+        fun from(context: Context, isDark: Boolean): ThemeColors {
+            val targetContext = getThemeContext(context, isDark)
             return ThemeColors(
-                isDark = true,
-                bg = bg,
-                textColor = Color.WHITE,
-                statusText = baseTextLight,
-                candidateBg = candidateBg,
-                candidateText = baseTextLight,
-                candidateSelectedBg = candidateSelectedBg,
-                candidateSelectedText = Color.WHITE,
-                toolbarBg = toolbarBg,
+                isDark = isDark,
+                bg = ContextCompat.getColor(targetContext, R.color.theme_bg),
+                textColor = ContextCompat.getColor(targetContext, R.color.theme_text_color),
+                statusText = ContextCompat.getColor(targetContext, R.color.theme_status_text),
 
-                keyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.11f),
-                actionKeyBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
-                keyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.25f),
-                actionKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, Color.WHITE, 0.32f),
-                activeKeyBg = ColorUtils.blendARGB(baseDarkBg, baseAccentGreenDeep, 0.75f),
-                activeKeyPressedBg = ColorUtils.blendARGB(baseDarkBg, baseAccentGreenDeep, 0.90f),
-                keyText = Color.WHITE,
-                keySubText = Color.parseColor("#9AA0A6"),
-                activeKeyText = baseTextDark,
-                disabledBg = baseDarkBg,
+                candidateBg = ContextCompat.getColor(targetContext, R.color.theme_candidate_bg),
+                candidateText = ContextCompat.getColor(targetContext, R.color.theme_candidate_text),
+                candidateSelectedBg = ContextCompat.getColor(targetContext, R.color.theme_candidate_selected_bg),
+                candidateSelectedText = ContextCompat.getColor(targetContext, R.color.theme_candidate_selected_text),
+                toolbarBg = ContextCompat.getColor(targetContext, R.color.theme_toolbar_bg),
 
-                activeAccentText = Color.parseColor("#89A890"),
-                strokeBorderColor = Color.parseColor("#5F6368"),
-                dividerColor = Color.parseColor("#4A4D51"),
-                btnCloseBg = Color.parseColor("#5F6368"),
-                btnHelpBg = Color.parseColor("#3C4043"),
+                keyBg = ContextCompat.getColor(targetContext, R.color.theme_key_bg),
+                actionKeyBg = ContextCompat.getColor(targetContext, R.color.theme_action_key_bg),
+                keyPressedBg = ContextCompat.getColor(targetContext, R.color.theme_key_pressed_bg),
+                actionKeyPressedBg = ContextCompat.getColor(targetContext, R.color.theme_action_key_pressed_bg),
+                activeKeyBg = ContextCompat.getColor(targetContext, R.color.theme_active_key_bg),
+                activeKeyPressedBg = ContextCompat.getColor(targetContext, R.color.theme_active_key_pressed_bg),
+                keyText = ContextCompat.getColor(targetContext, R.color.theme_key_text),
+                keySubText = ContextCompat.getColor(targetContext, R.color.theme_key_sub_text),
+                activeKeyText = ContextCompat.getColor(targetContext, R.color.theme_active_key_text),
+                disabledBg = ContextCompat.getColor(targetContext, R.color.theme_disabled_bg),
 
-                graffitiBg = Color.parseColor("#1F2023"),
-                graffitiGuideText = Color.parseColor("#444950"),
-                graffitiStroke = Color.parseColor("#89A890"),
-                graffitiIndicator = Color.parseColor("#F28B82")
+                activeAccentText = ContextCompat.getColor(targetContext, R.color.theme_active_accent_text),
+                strokeBorderColor = ContextCompat.getColor(targetContext, R.color.theme_stroke_border),
+                dividerColor = ContextCompat.getColor(targetContext, R.color.theme_divider),
+                btnCloseBg = ContextCompat.getColor(targetContext, R.color.theme_btn_close_bg),
+                btnHelpBg = ContextCompat.getColor(targetContext, R.color.theme_btn_help_bg),
+
+                graffitiGuideText = ContextCompat.getColor(targetContext, R.color.theme_graffiti_guide_text),
+                graffitiIndicator = ContextCompat.getColor(targetContext, R.color.theme_graffiti_indicator),
+
+                emojiFocusStroke = ContextCompat.getColor(targetContext, R.color.theme_emoji_focus_stroke)
             )
         }
 
-        private fun createLightTheme(): ThemeColors {
-            val bg = Color.parseColor("#ECEFF1")
-            val candidateBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f)
-            val candidateSelectedBg = ColorUtils.blendARGB(bg, baseAccentGreenMuted, 0.12f)
-            val candidateSelectedText = ColorUtils.blendARGB(baseAccentGreenMuted, Color.BLACK, 0.40f)
-            val toolbarBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f)
-
-            return ThemeColors(
-                isDark = false,
-                bg = bg,
-                textColor = baseTextDark,
-                statusText = baseTextDark,
-                candidateBg = candidateBg,
-                candidateText = baseTextDark,
-                candidateSelectedBg = candidateSelectedBg,
-                candidateSelectedText = candidateSelectedText,
-                toolbarBg = toolbarBg,
-
-                keyBg = Color.WHITE,
-                actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),
-                keyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
-                actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
-                activeKeyBg = baseAccentGreenMuted,
-                activeKeyPressedBg = ColorUtils.blendARGB(baseAccentGreenMuted, Color.BLACK, 0.20f),
-                keyText = baseTextDark,
-                keySubText = Color.parseColor("#70757A"),
-                activeKeyText = Color.WHITE,
-                disabledBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.04f),
-
-                activeAccentText = baseAccentGreenMuted,
-                strokeBorderColor = Color.parseColor("#DADCE0"),
-                dividerColor = Color.parseColor("#E0E0E0"),
-                btnCloseBg = Color.parseColor("#DADCE0"),
-                btnHelpBg = Color.parseColor("#DADCE0"),
-
-                graffitiBg = Color.parseColor("#F1F3F4"),
-                graffitiGuideText = Color.parseColor("#D0D4D9"),
-                graffitiStroke = baseAccentGreenMuted,
-                graffitiIndicator = Color.parseColor("#D93025")
-            )
+        private fun getThemeContext(context: Context, isDark: Boolean): Context {
+            val config = Configuration(context.resources.configuration)
+            val nightMode = if (isDark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            config.uiMode = (config.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightMode
+            return context.createConfigurationContext(config)
         }
     }
 }

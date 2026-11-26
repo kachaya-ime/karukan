@@ -31,7 +31,7 @@ data class KeyboardCreateParams(
         val isDark = isDarkSupplier()
         val isEnglish = isEnglishModeSupplier()
         val inputMode = currentInputModeSupplier()
-        val keyTextColor = KeyboardColors.get(isDark).keyText
+        val keyTextColor = KeyboardColors.get(context, isDark).keyText
 
         return KeyButton(
             context = context,
