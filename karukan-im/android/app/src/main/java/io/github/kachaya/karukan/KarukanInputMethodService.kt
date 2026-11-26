@@ -1566,6 +1566,11 @@ class KarukanInputMethodService : InputMethodService() {
     }
 
     private fun fixChunkPreedit() {
+        if (selectedCandidateIndex in currentCandidates.indices) {
+            val hiragana = currentActiveQuery
+            onCandidateSelected(hiragana, currentCandidates[selectedCandidateIndex])
+            return
+        }
         if (!hasActiveInput && romajiBuffer.isEmpty()) return
         commitCurrentHiragana()
     }
@@ -1768,7 +1773,7 @@ class KarukanInputMethodService : InputMethodService() {
         if (romajiBuffer.isNotEmpty()) {
             val flushed = engine.romajiToHiraganaFlush(romajiBuffer)
             if (flushed.isNotEmpty()) {
-                currentPreedit = flushed
+                currentPreedit += flushed
             }
             romajiBuffer = ""
         }

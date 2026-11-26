@@ -51,7 +51,7 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="削除"
             android:src="@android:drawable/ic_menu_delete"
-            app:tint="#FF5252" />
+            app:tint="?attr/colorError" />
 
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

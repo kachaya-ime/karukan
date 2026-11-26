@@ -11,7 +11,6 @@ import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -170,31 +169,13 @@ class KeyShortcutAdapter(
         holder.tvKeyCombo.text = item.displayKeyCombo
         holder.tvActionLabel.text = KeyShortcutItem.getActionLabel(item.actionId)
 
-        val context = holder.itemView.context
-        val isDark = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        val density = context.resources.displayMetrics.density
-
-        val badgeBg = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-            cornerRadius = 4 * density
-        }
-
         if (item.isReserved) {
             holder.tvStatusBadge.text = "固定"
-            val bgColorRes = if (isDark) R.color.badge_fixed_bg_dark else R.color.badge_fixed_bg
-            val textColorRes = if (isDark) R.color.badge_fixed_text_dark else R.color.badge_fixed_text
-            badgeBg.setColor(ContextCompat.getColor(context, bgColorRes))
-            holder.tvStatusBadge.setTextColor(ContextCompat.getColor(context, textColorRes))
             holder.itemView.alpha = 0.75f
         } else {
             holder.tvStatusBadge.text = "変更可能"
-            val bgColorRes = if (isDark) R.color.badge_mutable_bg_dark else R.color.badge_mutable_bg
-            val textColorRes = if (isDark) R.color.badge_mutable_text_dark else R.color.badge_mutable_text
-            badgeBg.setColor(ContextCompat.getColor(context, bgColorRes))
-            holder.tvStatusBadge.setTextColor(ContextCompat.getColor(context, textColorRes))
             holder.itemView.alpha = 1.0f
         }
-        holder.tvStatusBadge.background = badgeBg
 
         holder.itemView.setOnClickListener {
             onItemClick(item)

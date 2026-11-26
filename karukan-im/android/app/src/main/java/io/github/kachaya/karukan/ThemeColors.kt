@@ -130,7 +130,7 @@ data class ThemeColors(
                 keyBg = Color.WHITE,
                 actionKeyBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.12f),
                 keyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
-                actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.22f),
+                actionKeyPressedBg = ColorUtils.blendARGB(baseLightBg, Color.BLACK, 0.08f),
                 activeKeyBg = baseAccentGreenMuted,
                 activeKeyPressedBg = ColorUtils.blendARGB(baseAccentGreenMuted, Color.BLACK, 0.20f),
                 keyText = baseTextDark,

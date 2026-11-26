@@ -44,7 +44,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="学習履歴をクリア"
-            android:textColor="#FF5252"
+            android:textColor="?attr/colorError"
             android:textSize="13sp" />
     </LinearLayout>
 
