@@ -1,0 +1,35 @@
+{
+  "name": "Builtin",
+  "rows": [
+    [
+      {
+        "normal": "esc",
+        "normalType": "ESC"
+      },
+      { "normal": "~" },
+      { "normal": "$" },
+      { "normal": "%" },
+      { "normal": "&" },
+      { "normal": "^" },
+      { "normal": "=" },
+      { "normal": "|" },
+      { "normal": "\\" },
+      { "normal": "." }
+    ],
+    [
+      {
+        "normal": "tab",
+        "normalType": "TAB"
+      },
+      { "normal": "`" },
+      { "normal": ";" },
+      { "normal": "<" },
+      { "normal": ">" },
+      { "normal": "[" },
+      { "normal": "]" },
+      { "normal": "{" },
+      { "normal": "}" },
+      { "normal": "-" }
+    ]
+  ]
+}

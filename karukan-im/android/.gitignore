@@ -53,3 +53,7 @@ app/src/main/assets/*.tgz
 app/src/main/assets/emoji_categories.txt
 app/src/main/assets/legal/
 app/src/main/assets/user_dicts/
+
+# Unignore layout JSON files
+!app/src/main/assets/layouts/
+!app/src/main/assets/layouts/*.json
