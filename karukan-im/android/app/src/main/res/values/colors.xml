@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="keyboard_bg">#D1D5DB</color>
+    <color name="candidate_bg">#F3F4F6</color>
+
+    <!-- Muted Green Theme Palette (彩度の低いグリーン/セージグリーン系) -->
+    <color name="green_primary">#4E6B55</color>
+    <color name="green_primary_variant">#38503E</color>
+    <color name="green_on_primary">#FFFFFF</color>
+
+    <!-- Secondary Muted Green Palette -->
+    <color name="green_secondary">#6E8B75</color>
+    <color name="green_secondary_variant">#546E5A</color>
+    <color name="green_on_secondary">#FFFFFF</color>
+
+    <!-- Dark Mode Muted Green Palette -->
+    <color name="green_primary_dark">#89A890</color>
+    <color name="green_primary_variant_dark">#4E6B55</color>
+    <color name="green_secondary_dark">#9CBBA3</color>
+
+    <!-- Status & Badge Colors (キーショートカット一覧等のタグ表示用) -->
+    <color name="badge_mutable_bg">#E8F0EA</color>
+    <color name="badge_mutable_text">#2E4534</color>
+    <color name="badge_mutable_bg_dark">#3389A890</color>
+    <color name="badge_mutable_text_dark">#89A890</color>
+    <color name="badge_fixed_bg">#E0E0E0</color>
+    <color name="badge_fixed_text">#5F6368</color>
+    <color name="badge_fixed_bg_dark">#3C4043</color>
+    <color name="badge_fixed_text_dark">#9AA0A6</color>
+</resources>

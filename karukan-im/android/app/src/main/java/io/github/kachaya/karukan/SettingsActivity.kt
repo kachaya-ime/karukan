@@ -1,0 +1,427 @@
+package io.github.kachaya.karukan
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.view.MenuItem
+import android.view.View
+import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.preference.Preference
+import androidx.preference.PreferenceFragmentCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Karukan IME の設定画面アクティビティ
+ */
+class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPreferenceStartFragmentCallback {
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Main Activity & Fragment Container
+    // ---------------------------------------------------------------------------------------------
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+
+        setContentView(R.layout.activity_settings)
+
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setTitle(R.string.settings_title)
+
+        if (savedInstanceState == null) {
+            supportFragmentManager
+                .beginTransaction()
+                .replace(R.id.settingsContainer, SettingsFragment())
+                .commit()
+        }
+
+        val mainView: View = findViewById(R.id.settingsContainer) ?: window.decorView
+        ViewCompat.setOnApplyWindowInsetsListener(mainView) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
+    }
+
+    override fun onPreferenceStartFragment(caller: PreferenceFragmentCompat, pref: Preference): Boolean {
+        val args = pref.extras
+        val fragmentName = pref.fragment ?: return false
+        val fragment = supportFragmentManager.fragmentFactory.instantiate(classLoader, fragmentName).apply {
+            arguments = args
+            @Suppress("DEPRECATION")
+            setTargetFragment(caller, 0)
+        }
+        if (pref.title != null) {
+            supportActionBar?.title = pref.title
+        }
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.settingsContainer, fragment)
+            .addToBackStack(null)
+            .commit()
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) {
+            if (supportFragmentManager.backStackEntryCount > 0) {
+                supportFragmentManager.popBackStack()
+            } else {
+                finish()
+            }
+            return true
+        }
+        return super.onOptionsItemSelected(item)
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Region: Settings Fragment & Preference Handlers
+// -------------------------------------------------------------------------------------------------
+
+class SettingsFragment : PreferenceFragmentCompat() {
+
+    private val backupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+        if (uri != null) {
+            backupLearningDataToUri(uri)
+        }
+    }
+
+    private val restoreLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            restoreLearningDataFromUri(uri)
+        }
+    }
+
+    private val exportSettingsLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri != null) {
+            exportSettingsToUri(uri)
+        }
+    }
+
+    private val importSettingsLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            importSettingsFromUri(uri)
+        }
+    }
+
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_karukan, rootKey)
+
+        try {
+            val pInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
+            findPreference<Preference>("pref_app_version")?.summary = pInfo.versionName
+        } catch (_: Exception) {
+            findPreference<Preference>("pref_app_version")?.summary = "1.1.0"
+        }
+
+        findPreference<Preference>("pref_learning_list")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), LearningListActivity::class.java)
+            startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_export_learning")?.setOnPreferenceClickListener {
+            backupLauncher.launch("karukan_learning_backup.txt")
+            true
+        }
+
+        findPreference<Preference>("pref_import_learning")?.setOnPreferenceClickListener {
+            restoreLauncher.launch(arrayOf("text/plain", "*/*"))
+            true
+        }
+
+        findPreference<Preference>("pref_preset_dict")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), PresetDictActivity::class.java)
+            startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_third_party_licenses")?.setOnPreferenceClickListener {
+            showLegalDialog("サードパーティライセンス", "legal/THIRD_PARTY_LICENSES")
+            true
+        }
+
+        findPreference<Preference>("pref_karukan_license")?.setOnPreferenceClickListener {
+            showLegalDialog("Karukan ライセンス", "legal/LICENSE-MIT")
+            true
+        }
+
+        findPreference<Preference>("pref_persona_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), PersonaListActivity::class.java)
+            startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_date_phrase_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), DatePhraseListActivity::class.java)
+            startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_key_shortcut_management")?.setOnPreferenceClickListener {
+            val intent = Intent(requireContext(), KeyShortcutListActivity::class.java)
+            startActivity(intent)
+            true
+        }
+
+        findPreference<Preference>("pref_export_settings")?.setOnPreferenceClickListener {
+            exportSettingsLauncher.launch("karukan_settings_backup.json")
+            true
+        }
+
+        findPreference<Preference>("pref_import_settings")?.setOnPreferenceClickListener {
+            importSettingsLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+            true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.setTitle(R.string.settings_title)
+        updatePersonaSummary()
+        updateDatePhraseSummary()
+        updateKeyShortcutSummary()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Region: Preference Summaries & Backup/Restore
+    // ---------------------------------------------------------------------------------------------
+
+    private fun updateKeyShortcutSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_key_shortcuts_json", null)
+        val items = KeyShortcutItem.fromJsonString(json)
+        val customCount = items.count { !it.isReserved && it.actionId != "none" }
+        val summary = "アクティブカスタムショートカット: ${customCount}件"
+        findPreference<Preference>("pref_key_shortcut_management")?.summary = summary
+    }
+
+    private fun updateDatePhraseSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_date_config_json", null)
+        val config = DateConfigData.fromJsonString(json)
+        val summary = "登録フレーズ: ${config.phrases.size}件 (共通フォーマット: ${config.formats.size}件)"
+        findPreference<Preference>("pref_date_phrase_management")?.summary = summary
+    }
+
+    private fun updatePersonaSummary() {
+        val context = context ?: return
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val json = prefs.getString("pref_persona_list", null)
+        val itemsList = if (json != null) {
+            PersonaItem.fromJsonString(json)
+        } else {
+            emptyList()
+        }
+        val selectedItem = itemsList.firstOrNull { it.isSelected }
+        val summary = if (itemsList.isEmpty()) {
+            "設定されているペルソナはありません"
+        } else if (selectedItem == null) {
+            "未選択 (登録: ${itemsList.size}件)"
+        } else {
+            "選択中: ${selectedItem.text} (登録: ${itemsList.size}件)"
+        }
+        findPreference<Preference>("pref_persona_management")?.summary = summary
+    }
+
+    private fun backupLearningDataToUri(uri: Uri) {
+        val context = requireContext()
+        val engine = KarukanEngine(context)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    engine.backupLearningToStream(outputStream)
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.export_success, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.export_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun restoreLearningDataFromUri(uri: Uri) {
+        val context = requireContext()
+        val engine = KarukanEngine(context)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val success = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    engine.restoreLearningFromStream(inputStream)
+                } ?: false
+
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        Toast.makeText(context, R.string.import_success, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, R.string.import_failed, Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.import_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun exportSettingsToUri(uri: Uri) {
+        val context = requireContext()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                val allEntries = prefs.all
+                val jsonObject = JSONObject()
+                for ((key, value) in allEntries) {
+                    if (value is Set<*>) {
+                        val jsonArray = JSONArray()
+                        for (item in value) {
+                            jsonArray.put(item)
+                        }
+                        jsonObject.put(key, jsonArray)
+                    } else {
+                        jsonObject.put(key, value)
+                    }
+                }
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(jsonObject.toString(2).toByteArray(Charsets.UTF_8))
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.export_settings_success, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.export_settings_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun importSettingsFromUri(uri: Uri) {
+        val context = requireContext()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } ?: throw IllegalStateException("ファイルを開けませんでした")
+
+                val jsonObject = JSONObject(jsonString)
+                val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                val editor = prefs.edit()
+                editor.clear()
+
+                val keys = jsonObject.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (jsonObject.isNull(key)) continue
+                    val value = jsonObject.get(key)
+                    when (value) {
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Double -> editor.putFloat(key, value.toFloat())
+                        is String -> editor.putString(key, value)
+                        is JSONArray -> {
+                            val set = mutableSetOf<String>()
+                            for (i in 0 until value.length()) {
+                                set.add(value.getString(i))
+                            }
+                            editor.putStringSet(key, set)
+                        }
+                    }
+                }
+                editor.apply()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, R.string.import_settings_success, Toast.LENGTH_SHORT).show()
+                    activity?.recreate()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "${getString(R.string.import_settings_failed)}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun showLegalDialog(title: String, assetPath: String) {
+        val context = requireContext()
+        val content = try {
+            context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            "ライセンス情報の読み込みに失敗しました: ${e.message}"
+        }
+
+        val scrollView = android.widget.ScrollView(context).apply {
+            setPadding(48, 24, 48, 24)
+        }
+        val textView = android.widget.TextView(context).apply {
+            text = content
+            textSize = 12f
+            setMonospaceFont()
+        }
+        scrollView.addView(textView)
+
+        AlertDialog.Builder(context)
+            .setTitle(title)
+            .setView(scrollView)
+            .setPositiveButton("閉じる", null)
+            .show()
+    }
+
+    private fun android.widget.TextView.setMonospaceFont() {
+        typeface = android.graphics.Typeface.MONOSPACE
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Region: Sub-Fragment Definitions (Engine, Soft, Physical)
+// -------------------------------------------------------------------------------------------------
+
+class EngineSettingsFragment : PreferenceFragmentCompat() {
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_karukan_engine, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "karukan-engine 内部動作設定"
+    }
+}
+
+class SoftKeyboardSettingsFragment : PreferenceFragmentCompat() {
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_soft_keyboard, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "画面キーボード設定"
+    }
+}
+
+class PhysicalKeyboardSettingsFragment : PreferenceFragmentCompat() {
+    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
+        setPreferencesFromResource(R.xml.pref_physical_keyboard, rootKey)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (activity as? AppCompatActivity)?.supportActionBar?.title = "物理キーボード設定"
+    }
+}

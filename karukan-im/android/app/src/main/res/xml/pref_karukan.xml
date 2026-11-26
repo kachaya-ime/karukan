@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:iconSpaceReserved="false"
+    >
+
+    <!-- 入力設定 -->
+    <PreferenceCategory
+        android:title="入力設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <ListPreference
+            android:defaultValue="half"
+            android:entries="@array/pref_space_entries"
+            android:entryValues="@array/pref_space_values"
+            android:key="pref_space"
+            android:title="入力スペースの種類"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="kuten_touten"
+            android:entries="@array/pref_punctuation_entries"
+            android:entryValues="@array/pref_punctuation_values"
+            android:key="pref_punctuation"
+            android:title="句読点スタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="corner"
+            android:entries="@array/pref_bracket_entries"
+            android:entryValues="@array/pref_bracket_values"
+            android:key="pref_bracket"
+            android:title="括弧スタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="middle_dot"
+            android:entries="@array/pref_slash_entries"
+            android:entryValues="@array/pref_slash_values"
+            android:key="pref_slash"
+            android:title="スラッシュスタイル"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="half"
+            android:entries="@array/pref_width_digit_entries"
+            android:entryValues="@array/pref_width_digit_values"
+            android:key="pref_width_digit"
+            android:title="数字の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="full"
+            android:entries="@array/pref_width_ascii_entries"
+            android:entryValues="@array/pref_width_ascii_values"
+            android:key="pref_width_ascii"
+            android:title="ASCII記号の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="full"
+            android:entries="@array/pref_width_kana_symbol_entries"
+            android:entryValues="@array/pref_width_kana_symbol_values"
+            android:key="pref_width_kana_symbol"
+            android:title="仮名記号の幅"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_bracket_cursor_inside"
+            android:summary="「」や『』等のペア括弧確定後、自動的にカーソルを括弧内に移動します"
+            android:title="ペア括弧確定時にカーソルを括弧内に移動"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_auto_commit"
+            android:summary="入力中のフォーカス外れ時に未確定文字を自動確定します"
+            android:title="フォーカス移動時の自動確定"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_key_shortcut_management"
+            android:summary="Ctrl/Shift等のショートカットキーへのアクション割り当てを設定します"
+            android:title="キーショートカットの設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 変換設定 -->
+    <PreferenceCategory
+        android:title="変換設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_live_conversion"
+            android:summary="入力中にリアルタイムで最適な変換候補をプレビュー表示します"
+            android:title="ライブ変換を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <ListPreference
+            android:defaultValue="0"
+            android:dependency="pref_live_conversion"
+            android:entries="@array/pref_live_conversion_debounce_entries"
+            android:entryValues="@array/pref_live_conversion_debounce_values"
+            android:key="pref_live_conversion_debounce_ms"
+            android:summary="キー入力後にライブ変換を開始するまでの待ち時間を設定します"
+            android:title="ライブ変換開始の遅延時間"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <ListPreference
+            android:defaultValue="9"
+            android:entries="@array/pref_num_candidates_entries"
+            android:entryValues="@array/pref_num_candidates_values"
+            android:key="pref_num_candidates"
+            android:title="表示候補数"
+            app:iconSpaceReserved="false"
+            app:useSimpleSummaryProvider="true"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_show_candidate_annotations"
+            android:summary="候補に種別アノテーション（📝/👤/🤖/🔄等）を表示します"
+            android:title="候補アノテーションを表示"
+            app:iconSpaceReserved="false"
+            />
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_date_conversion"
+            android:summary="「きょう」「いま」等の入力時に現在日時候補を出力します"
+            android:title="日付・時刻変換を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_date_phrase_management"
+            android:summary="「きょう」「いま」等の変換フレーズやフォーマットの追加・編集・削除"
+            android:title="日付・時刻変換フレーズの管理"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_persona_management"
+            android:summary="複数の変換ペルソナを登録・管理・有効化します"
+            android:title="変換ペルソナの管理"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 画面キーボード設定 -->
+    <PreferenceCategory
+        android:title="画面キーボード設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.SoftKeyboardSettingsFragment"
+            android:key="pref_soft_keyboard_settings"
+            android:summary="キーボード配列、テーマ、高さ、入力ステータスバー、操作フィードバック等"
+            android:title="画面キーボード設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 物理キーボード設定 -->
+    <PreferenceCategory
+        android:title="物理キーボード設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.PhysicalKeyboardSettingsFragment"
+            android:key="pref_physical_keyboard_settings"
+            android:summary="物理キーボード配列、フローティング候補表示、キーショートカット設定等"
+            android:title="物理キーボード設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 辞書・学習設定 -->
+    <PreferenceCategory
+        android:title="辞書・学習設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_learning_enabled"
+            android:summary="選択した変換候補を記憶して次回優先表示します"
+            android:title="変換学習を有効にする"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_learning_list"
+            android:summary="変換学習によって記憶された単語の一覧を表示・管理します"
+            android:title="学習した内容の一覧"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_export_learning"
+            android:summary="学習履歴をTSVファイル（.txt）としてバックアップします"
+            android:title="学習データのバックアップ"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_import_learning"
+            android:summary="バックアップファイル（.txt）から学習履歴を復元します"
+            android:title="学習データの復元"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_preset_dict"
+            android:summary="ユーザー辞書ファイル (.txt, .bin 等) の確認・有効化・追加・単語編集"
+            android:title="ユーザー辞書の管理"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- AI・エンジン詳細設定 -->
+    <PreferenceCategory
+        android:title="AI・エンジン詳細設定"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:fragment="io.github.kachaya.karukan.EngineSettingsFragment"
+            android:key="pref_engine_settings"
+            android:summary="推論スレッド数、文脈利用、チャンク、ビームサーチ、ハルシネーション保護等の詳細設定"
+            android:title="karukan-engine 内部動作設定"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 設定のバックアップと復元 -->
+    <PreferenceCategory
+        android:title="設定のバックアップと復元"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:key="pref_export_settings"
+            android:summary="全設定項目をJSONファイル（.json）としてバックアップします"
+            android:title="設定のバックアップ"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_import_settings"
+            android:summary="バックアップファイル（.json）から設定を復元します"
+            android:title="設定の復元"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+    <!-- 情報・ライセンス -->
+    <PreferenceCategory
+        android:title="情報・ライセンス"
+        app:iconSpaceReserved="false"
+        >
+
+        <Preference
+            android:key="pref_third_party_licenses"
+            android:summary="Mozc、ニコタッチ方式等の著作権・法的表示"
+            android:title="サードパーティライセンス"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_karukan_license"
+            android:summary="MIT / Apache 2.0 ライセンス"
+            android:title="Karukan ライセンス"
+            app:iconSpaceReserved="false"
+            />
+
+        <Preference
+            android:key="pref_app_version"
+            android:title="バージョン"
+            app:iconSpaceReserved="false"
+            />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

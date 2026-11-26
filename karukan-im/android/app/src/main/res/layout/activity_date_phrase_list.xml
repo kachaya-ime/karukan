@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/datePhraseListMainLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 操作ボタンヘッダー -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <Button
+            android:id="@+id/btnAddPhrase"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="+ フレーズ追加" />
+
+        <Button
+            android:id="@+id/btnEditFormats"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:text="共通フォーマット" />
+
+        <ImageButton
+            android:id="@+id/btnResetDefault"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="48dp"
+            android:layout_height="wrap_content"
+            android:contentDescription="デフォルトに戻す"
+            android:src="@android:drawable/ic_menu_revert"
+            app:tint="?android:attr/textColorSecondary" />
+    </LinearLayout>
+
+    <!-- 件数カウント -->
+    <TextView
+        android:id="@+id/tvPhraseCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="8dp"
+        android:text="登録フレーズ: 0件"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 空状態メッセージ -->
+    <TextView
+        android:id="@+id/tvEmptyMessage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="登録されているフレーズはありません。\n「+ フレーズ追加」から追加してください。"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <!-- リスト表示 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvPhraseList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+</LinearLayout>
